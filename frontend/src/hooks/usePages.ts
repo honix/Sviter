@@ -23,7 +23,7 @@ export const usePages = (): UsePagesReturn => {
   const [viewMode, setViewMode] = useState<ViewMode>('view');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { lastMessage } = useWebSocket();
+  const { lastMessage } = useWebSocket('app-main');
 
   // Generate page tree structure
   const pageTree: PageTreeItem[] = pages.map(page => ({

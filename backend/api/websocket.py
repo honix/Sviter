@@ -40,12 +40,17 @@ class WebSocketManager:
         if client_id in self.active_connections:
             try:
                 await self.active_connections[client_id].send_text(json.dumps(message))
+                print(f"✅ Message sent to {client_id}: {message.get('type', 'unknown')}")
             except Exception as e:
                 error_msg = str(e)
-                print(f"Error sending message to {client_id}: {error_msg}")
+                print(f"❌ Error sending message to {client_id}: {error_msg}")
+                print(f"❌ Failed message type: {message.get('type', 'unknown')}")
                 # Don't disconnect on minor Firefox WebSocket close frame errors
                 if "no close frame" not in error_msg.lower():
+                    print(f"🔌 Disconnecting {client_id} due to send error")
                     self.disconnect(client_id)
+        else:
+            print(f"⚠️ Client {client_id} not in active connections, cannot send: {message.get('type', 'unknown')}")
     
     async def handle_message(self, client_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle incoming message from client"""
@@ -84,19 +89,31 @@ class WebSocketManager:
                     print(f"📤 Sending chat_response: {chat_response}")
                     await self.send_message(client_id, chat_response)
 
-                # Send tool calls if any
+                # Send tool calls if any (now with iteration info)
                 page_modified = False
-                for tool_call in response_data["tool_calls"]:
-                    await self.send_message(client_id, {
+                print(f"📊 Tool calls to send: {len(response_data['tool_calls'])}")
+                for i, tool_call in enumerate(response_data["tool_calls"]):
+                    tool_message = {
                         "type": "tool_call",
                         "tool_name": tool_call["tool_name"],
                         "arguments": tool_call["arguments"],
-                        "result": tool_call["result"]
-                    })
+                        "result": tool_call["result"],
+                        "iteration": tool_call.get("iteration", 1)  # Include iteration number
+                    }
+                    print(f"📤 Sending tool_call {i+1}/{len(response_data['tool_calls'])}: {tool_call['tool_name']}")
+                    await self.send_message(client_id, tool_message)
 
                     # Check if a page-modifying tool was executed
                     if tool_call["tool_name"] in ["edit_page"]:
                         page_modified = True
+
+                # Send iteration info if multi-step process
+                if response_data.get("iterations", 1) > 1:
+                    await self.send_message(client_id, {
+                        "type": "process_info",
+                        "message": f"Completed multi-step process in {response_data['iterations']} iterations",
+                        "iterations": response_data["iterations"]
+                    })
 
                 # Send final response if any
                 if response_data["final_response"]:

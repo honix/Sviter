@@ -12,7 +12,7 @@ export interface UseChatReturn {
 
 export const useChat = (): UseChatReturn => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const { connectionStatus, sendChatMessage, connect, onDirectMessage } = useWebSocket();
+  const { connectionStatus, sendChatMessage, connect, onDirectMessage } = useWebSocket('app-main');
 
   // Auto-connect on initialization
   useEffect(() => {

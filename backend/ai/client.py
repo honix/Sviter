@@ -16,9 +16,16 @@ class OpenRouterClient:
         self.model_name = "openai/gpt-oss-20b"  # $0.15/M output tokens | 128K context | good and smart
         
         # System message for wiki context
-        self.system_message = """You are a helpful AI assistant for a wiki system. You can read, edit, and search wiki pages using the provided tools. 
-When users ask questions, you can use these tools to find relevant information and provide helpful responses.
-Keep responses concise and focused on the user's request."""
+        self.system_message = """You are a helpful AI assistant for a wiki system. You can read, edit, and search wiki pages using the provided tools.
+
+When users ask questions, you can use these tools to find relevant information and provide helpful responses. You can perform multiple sequential tool calls to complete complex tasks - the system will continue processing until you stop calling tools.
+
+For example, if asked to "find secret A and secret B", you should:
+1. Use find_pages to search for secret A
+2. Use find_pages to search for secret B
+3. Provide a summary response without tool calls
+
+Keep responses concise and focused on the user's request. Use multiple tool calls when needed to gather all required information."""
     
     def create_completion(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> ChatCompletion:
         """Create chat completion with optional tools"""

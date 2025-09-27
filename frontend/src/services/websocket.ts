@@ -157,9 +157,23 @@ export class WebSocketService {
   }
 }
 
-// Create a singleton instance
+// Singleton instances to prevent multiple connections with same clientId
+const serviceInstances = new Map<string, WebSocketService>();
+
 export const createWebSocketService = (clientId?: string) => {
   const id = clientId || `client_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+
+  // Return existing instance if already created for this clientId
+  if (serviceInstances.has(id)) {
+    console.log(`Reusing existing WebSocket service for: ${id}`);
+    return serviceInstances.get(id)!;
+  }
+
+  // Create new instance
+  console.log(`Creating new WebSocket service for: ${id}`);
   const wsUrl = `ws://localhost:8000/ws`;
-  return new WebSocketService(wsUrl, id);
+  const service = new WebSocketService(wsUrl, id);
+  serviceInstances.set(id, service);
+
+  return service;
 };
