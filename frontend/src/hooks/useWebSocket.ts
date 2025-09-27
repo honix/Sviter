@@ -9,12 +9,14 @@ export interface UseWebSocketReturn {
   lastMessage: WebSocketMessage | null;
   connect: () => void;
   disconnect: () => void;
+  onDirectMessage: (handler: (message: WebSocketMessage) => void) => () => void;
 }
 
 export const useWebSocket = (clientId?: string): UseWebSocketReturn => {
   const wsService = useRef<WebSocketService | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
+  const messageHandlers = useRef<Set<(message: WebSocketMessage) => void>>(new Set());
 
   // Initialize WebSocket service
   useEffect(() => {
@@ -25,7 +27,17 @@ export const useWebSocket = (clientId?: string): UseWebSocketReturn => {
     });
 
     const messageUnsubscribe = wsService.current.onMessage((message) => {
+      console.log('useWebSocket: Received message, updating lastMessage state:', message);
       setLastMessage(message);
+
+      // Also notify direct handlers immediately
+      messageHandlers.current.forEach(handler => {
+        try {
+          handler(message);
+        } catch (error) {
+          console.error('Error in direct message handler:', error);
+        }
+      });
     });
 
     return () => {
@@ -51,13 +63,19 @@ export const useWebSocket = (clientId?: string): UseWebSocketReturn => {
     wsService.current?.sendChatMessage(content);
   }, []);
 
+  const onDirectMessage = useCallback((handler: (message: WebSocketMessage) => void) => {
+    messageHandlers.current.add(handler);
+    return () => messageHandlers.current.delete(handler);
+  }, []);
+
   return {
     connectionStatus,
     sendMessage,
     sendChatMessage,
     lastMessage,
     connect,
-    disconnect
+    disconnect,
+    onDirectMessage
   };
 };
 

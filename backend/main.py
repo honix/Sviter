@@ -1,7 +1,9 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from database.database import create_tables
+from database.database import create_tables, get_db_session
+from database.crud import PageCRUD
 from api.websocket import websocket_endpoint
+from sqlalchemy.orm import Session
 import uvicorn
 
 # Create FastAPI app
@@ -42,6 +44,49 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "ai-wiki-backend"}
 
+# API endpoints for pages
+@app.get("/api/pages")
+async def get_pages(db: Session = Depends(get_db_session)):
+    """Get all pages"""
+    try:
+        pages = PageCRUD.get_all_pages(db)
+        return {"pages": [
+            {
+                "id": page.id,
+                "title": page.title,
+                "content": page.content,
+                "author": page.author,
+                "created_at": page.created_at.isoformat() if page.created_at else None,
+                "updated_at": page.updated_at.isoformat() if page.updated_at else None,
+                "tags": page.tags or []
+            }
+            for page in pages
+        ]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/pages/{page_id}")
+async def get_page(page_id: int, db: Session = Depends(get_db_session)):
+    """Get a specific page by ID"""
+    try:
+        page = PageCRUD.get_page_by_id(db, page_id)
+        if not page:
+            raise HTTPException(status_code=404, detail="Page not found")
+
+        return {
+            "id": page.id,
+            "title": page.title,
+            "content": page.content,
+            "author": page.author,
+            "created_at": page.created_at.isoformat() if page.created_at else None,
+            "updated_at": page.updated_at.isoformat() if page.updated_at else None,
+            "tags": page.tags or []
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Root endpoint with API info
 @app.get("/")
 async def root():
@@ -50,6 +95,10 @@ async def root():
         "message": "AI Wiki Backend API",
         "version": "1.0.0",
         "websocket_endpoint": "/ws/{client_id}",
+        "api_endpoints": {
+            "pages": "/api/pages",
+            "single_page": "/api/pages/{page_id}"
+        },
         "documentation": "/docs"
     }
 

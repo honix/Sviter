@@ -114,71 +114,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     dispatch({ type: 'SET_CONNECTED', payload: connectionStatus === 'connected' });
   }, [connectionStatus]);
 
+  const loadPages = React.useCallback(async () => {
+    dispatch({ type: 'SET_LOADING', payload: true });
+    dispatch({ type: 'SET_ERROR', payload: null });
+
+    try {
+      const response = await fetch('http://localhost:8000/api/pages');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const backendPages: Page[] = data.pages;
+
+      dispatch({ type: 'SET_PAGES', payload: backendPages });
+
+      // Set current page to first page if none selected and pages exist
+      if (!state.currentPage && backendPages.length > 0) {
+        dispatch({ type: 'SET_CURRENT_PAGE', payload: backendPages[0] });
+      }
+    } catch (err) {
+      dispatch({ type: 'SET_ERROR', payload: 'Failed to load pages' });
+      console.error('Error loading pages:', err);
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  }, [state.currentPage]);
+
   // Handle incoming WebSocket messages for page updates
   useEffect(() => {
     if (lastMessage && lastMessage.type === 'page_update') {
-      const { action, data } = lastMessage.data;
-
-      switch (action) {
-        case 'page_created':
-        case 'page_updated':
-          const page: Page = data;
-          const existingPageIndex = state.pages.findIndex(p => p.id === page.id);
-
-          if (existingPageIndex >= 0) {
-            dispatch({ type: 'UPDATE_PAGE', payload: { id: page.id, updates: page } });
-          } else {
-            dispatch({ type: 'ADD_PAGE', payload: page });
-          }
-          break;
-
-        case 'page_deleted':
-          dispatch({ type: 'DELETE_PAGE', payload: data.id });
-          break;
-      }
+      // Reload all pages when AI modifies them to ensure synchronization
+      loadPages();
     }
-  }, [lastMessage, state.pages]);
+  }, [lastMessage, loadPages]);
 
   // Auto-connect on initialization
   useEffect(() => {
     connect();
   }, [connect]);
 
-  // Initialize with sample data
+  // Load pages from backend API on initialization
   useEffect(() => {
-    const samplePages: Page[] = [
-      {
-        id: 1,
-        title: 'Welcome',
-        content: '# Welcome to AI Wiki\n\nThis is a sample page. Click Edit to start editing.',
-        author: 'system',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        tags: ['welcome', 'introduction']
-      },
-      {
-        id: 2,
-        title: 'Getting Started',
-        content: '# Getting Started\n\nHere are some tips to get you started with the AI Wiki.',
-        author: 'system',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        tags: ['guide', 'help']
-      },
-      {
-        id: 3,
-        title: 'Documentation',
-        content: '# Documentation\n\nComplete documentation for the AI Wiki system.',
-        author: 'system',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        tags: ['docs', 'reference']
-      }
-    ];
-
-    dispatch({ type: 'SET_PAGES', payload: samplePages });
-    dispatch({ type: 'SET_CURRENT_PAGE', payload: samplePages[0] });
-  }, []);
+    loadPages();
+  }, [loadPages]);
 
   const actions = {
     setPages: (pages: Page[]) => dispatch({ type: 'SET_PAGES', payload: pages }),

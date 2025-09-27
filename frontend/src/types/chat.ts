@@ -16,7 +16,11 @@ export interface ToolCall {
 }
 
 export interface WebSocketMessage {
-  type: 'chat' | 'page_update' | 'error' | 'status';
-  data: any;
+  type: 'chat' | 'chat_response' | 'tool_call' | 'system' | 'page_update' | 'error' | 'status' | 'success';
+  data?: any;
+  message?: string;
+  tool_name?: string;
+  arguments?: any;
+  result?: string;
   page_id?: number;
 }

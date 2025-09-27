@@ -36,7 +36,8 @@ export class WebSocketService {
 
   disconnect(): void {
     if (this.ws) {
-      this.ws.close();
+      // Firefox: Close with proper code
+      this.ws.close(1000, 'Client disconnect');
       this.ws = null;
     }
     this.reconnectAttempts = 0;
@@ -53,10 +54,7 @@ export class WebSocketService {
   sendChatMessage(content: string): void {
     this.send({
       type: 'chat',
-      data: {
-        content,
-        timestamp: new Date().toISOString()
-      }
+      message: content
     });
   }
 
@@ -82,6 +80,7 @@ export class WebSocketService {
     this.ws.onmessage = (event) => {
       try {
         const message: WebSocketMessage = JSON.parse(event.data);
+        console.log('WebSocket message received:', message);
         this.notifyHandlers(message);
       } catch (error) {
         console.error('Failed to parse WebSocket message:', error);
@@ -89,10 +88,12 @@ export class WebSocketService {
     };
 
     this.ws.onclose = (event) => {
-      console.log('WebSocket disconnected', event.code, event.reason);
+      console.log('WebSocket disconnected', event.code, event.reason, 'wasClean:', event.wasClean);
       this.notifyStatus('disconnected');
 
-      if (!event.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
+      // Firefox-specific: be more aggressive about reconnection
+      // Code 1006 is abnormal closure, common in Firefox
+      if ((!event.wasClean || event.code === 1006) && this.reconnectAttempts < this.maxReconnectAttempts) {
         this.attemptReconnect();
       }
     };
@@ -100,6 +101,11 @@ export class WebSocketService {
     this.ws.onerror = (error) => {
       console.error('WebSocket error:', error);
       this.notifyStatus('error');
+
+      // Firefox: attempt reconnection on error if not already at max attempts
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        setTimeout(() => this.attemptReconnect(), 1000);
+      }
     };
   }
 
@@ -153,7 +159,7 @@ export class WebSocketService {
 
 // Create a singleton instance
 export const createWebSocketService = (clientId?: string) => {
-  const id = clientId || `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const id = clientId || `client_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
   const wsUrl = `ws://localhost:8000/ws`;
   return new WebSocketService(wsUrl, id);
 };

@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Page, PageTreeItem, ViewMode } from '../types/page';
+import { useWebSocket } from './useWebSocket';
 
 export interface UsePagesReturn {
   pages: Page[];
@@ -22,6 +23,7 @@ export const usePages = (): UsePagesReturn => {
   const [viewMode, setViewMode] = useState<ViewMode>('view');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { lastMessage } = useWebSocket();
 
   // Generate page tree structure
   const pageTree: PageTreeItem[] = pages.map(page => ({
@@ -29,41 +31,17 @@ export const usePages = (): UsePagesReturn => {
     title: page.title
   }));
 
-  // Initialize with sample data
+  // Load pages from backend on initialization
   useEffect(() => {
-    const samplePages: Page[] = [
-      {
-        id: 1,
-        title: 'Welcome',
-        content: '# Welcome to AI Wiki\n\nThis is a sample page. Click Edit to start editing.',
-        author: 'system',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        tags: ['welcome', 'introduction']
-      },
-      {
-        id: 2,
-        title: 'Getting Started',
-        content: '# Getting Started\n\nHere are some tips to get you started with the AI Wiki.',
-        author: 'system',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        tags: ['guide', 'help']
-      },
-      {
-        id: 3,
-        title: 'Documentation',
-        content: '# Documentation\n\nComplete documentation for the AI Wiki system.',
-        author: 'system',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        tags: ['docs', 'reference']
-      }
-    ];
+    loadPages();
+  }, [loadPages]);
 
-    setPages(samplePages);
-    setCurrentPage(samplePages[0]);
-  }, []);
+  // Handle WebSocket page update notifications
+  useEffect(() => {
+    if (lastMessage && lastMessage.type === 'page_update') {
+      loadPages(); // Refresh pages when AI modifies them
+    }
+  }, [lastMessage, loadPages]);
 
   const createPage = useCallback(async (title: string, content = '') => {
     setIsLoading(true);
@@ -140,15 +118,27 @@ export const usePages = (): UsePagesReturn => {
     setError(null);
 
     try {
-      // In a real app, this would fetch from the backend
-      console.log('Loading pages from backend...');
+      const response = await fetch('http://localhost:8000/api/pages');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const backendPages: Page[] = data.pages;
+
+      setPages(backendPages);
+
+      // Set current page to first page if none selected and pages exist
+      if (!currentPage && backendPages.length > 0) {
+        setCurrentPage(backendPages[0]);
+      }
     } catch (err) {
       setError('Failed to load pages');
       console.error('Error loading pages:', err);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [currentPage]);
 
   return {
     pages,

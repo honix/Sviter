@@ -41,37 +41,51 @@ class WebSocketManager:
             try:
                 await self.active_connections[client_id].send_text(json.dumps(message))
             except Exception as e:
-                print(f"Error sending message to {client_id}: {e}")
-                self.disconnect(client_id)
+                error_msg = str(e)
+                print(f"Error sending message to {client_id}: {error_msg}")
+                # Don't disconnect on minor Firefox WebSocket close frame errors
+                if "no close frame" not in error_msg.lower():
+                    self.disconnect(client_id)
     
     async def handle_message(self, client_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle incoming message from client"""
-        
+
+        print(f"📨 WebSocket received message from {client_id}: {message_data}")
+
         if client_id not in self.chat_handlers:
+            print(f"❌ Chat handler not found for client {client_id}")
             return {"type": "error", "message": "Chat handler not found"}
-        
+
         message_type = message_data.get("type")
-        
+        print(f"🔍 Processing message type: {message_type}")
+
         if message_type == "chat":
             # Handle chat message
             user_message = message_data.get("message", "")
+            print(f"💬 Chat message content: '{user_message}'")
             if not user_message:
+                print("❌ Empty message received")
                 return {"type": "error", "message": "Empty message"}
-            
+
+            print(f"🤖 Processing chat message with AI...")
             # Process message through chat handler
             result = self.chat_handlers[client_id].process_message(user_message)
-            
+            print(f"🔄 AI processing result: {result.get('success', False)}")
+
             if result["success"]:
                 response_data = result["data"]
-                
+
                 # Send initial response if any
                 if response_data["message"]:
-                    await self.send_message(client_id, {
+                    chat_response = {
                         "type": "chat_response",
                         "message": response_data["message"]
-                    })
-                
+                    }
+                    print(f"📤 Sending chat_response: {chat_response}")
+                    await self.send_message(client_id, chat_response)
+
                 # Send tool calls if any
+                page_modified = False
                 for tool_call in response_data["tool_calls"]:
                     await self.send_message(client_id, {
                         "type": "tool_call",
@@ -79,14 +93,25 @@ class WebSocketManager:
                         "arguments": tool_call["arguments"],
                         "result": tool_call["result"]
                     })
-                
+
+                    # Check if a page-modifying tool was executed
+                    if tool_call["tool_name"] in ["edit_page"]:
+                        page_modified = True
+
                 # Send final response if any
                 if response_data["final_response"]:
                     await self.send_message(client_id, {
                         "type": "chat_response",
                         "message": response_data["final_response"]
                     })
-                
+
+                # If pages were modified, send page update notification
+                if page_modified:
+                    await self.send_message(client_id, {
+                        "type": "page_update",
+                        "action": "refresh"
+                    })
+
                 return {"type": "success"}
             else:
                 return {"type": "error", "message": result["error"]}
