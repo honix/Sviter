@@ -93,7 +93,7 @@ interface AppContextType {
   actions: {
     setPages: (pages: Page[]) => void;
     addPage: (page: Page) => void;
-    updatePage: (id: number, updates: Partial<Page>) => void;
+    updatePage: (id: number, updates: Partial<Page>) => Promise<void>;
     deletePage: (id: number) => void;
     setCurrentPage: (page: Page | null) => void;
     setViewMode: (mode: ViewMode) => void;
@@ -162,7 +162,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const actions = {
     setPages: (pages: Page[]) => dispatch({ type: 'SET_PAGES', payload: pages }),
     addPage: (page: Page) => dispatch({ type: 'ADD_PAGE', payload: page }),
-    updatePage: (id: number, updates: Partial<Page>) => dispatch({ type: 'UPDATE_PAGE', payload: { id, updates } }),
+    updatePage: async (id: number, updates: Partial<Page>) => {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      dispatch({ type: 'SET_ERROR', payload: null });
+
+      try {
+        const response = await fetch(`http://localhost:8000/api/pages/${id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updates),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const updatedPage = await response.json();
+        dispatch({ type: 'UPDATE_PAGE', payload: { id, updates: updatedPage } });
+      } catch (err) {
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to update page' });
+        console.error('Error updating page:', err);
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    },
     deletePage: (id: number) => dispatch({ type: 'DELETE_PAGE', payload: id }),
     setCurrentPage: (page: Page | null) => dispatch({ type: 'SET_CURRENT_PAGE', payload: page }),
     setViewMode: (mode: ViewMode) => dispatch({ type: 'SET_VIEW_MODE', payload: mode }),
@@ -174,16 +199,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatch({ type: 'SET_ERROR', payload: null });
 
       try {
-        const newPage: Page = {
-          id: Date.now(),
-          title,
-          content,
-          author: 'user',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          tags: []
-        };
+        const response = await fetch('http://localhost:8000/api/pages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title,
+            content,
+            author: 'user',
+            tags: []
+          }),
+        });
 
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const newPage = await response.json();
         dispatch({ type: 'ADD_PAGE', payload: newPage });
         dispatch({ type: 'SET_CURRENT_PAGE', payload: newPage });
         dispatch({ type: 'SET_VIEW_MODE', payload: 'edit' });

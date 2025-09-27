@@ -4,7 +4,22 @@ from database.database import create_tables, get_db_session
 from database.crud import PageCRUD
 from api.websocket import websocket_endpoint
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import List, Optional
 import uvicorn
+
+# Pydantic models for request/response
+class PageCreate(BaseModel):
+    title: str
+    content: str = ""
+    author: str = "user"
+    tags: List[str] = []
+
+class PageUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    author: Optional[str] = None
+    tags: Optional[List[str]] = None
 
 # Create FastAPI app
 app = FastAPI(
@@ -82,6 +97,73 @@ async def get_page(page_id: int, db: Session = Depends(get_db_session)):
             "updated_at": page.updated_at.isoformat() if page.updated_at else None,
             "tags": page.tags or []
         }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/pages")
+async def create_page(page_data: PageCreate, db: Session = Depends(get_db_session)):
+    """Create a new page"""
+    try:
+        new_page = PageCRUD.create_page(
+            db=db,
+            title=page_data.title,
+            content=page_data.content,
+            author=page_data.author,
+            tags=page_data.tags
+        )
+        return {
+            "id": new_page.id,
+            "title": new_page.title,
+            "content": new_page.content,
+            "author": new_page.author,
+            "created_at": new_page.created_at.isoformat() if new_page.created_at else None,
+            "updated_at": new_page.updated_at.isoformat() if new_page.updated_at else None,
+            "tags": new_page.tags or []
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/pages/{page_id}")
+async def update_page(page_id: int, page_data: PageUpdate, db: Session = Depends(get_db_session)):
+    """Update an existing page"""
+    try:
+        updated_page = PageCRUD.update_page(
+            db=db,
+            page_id=page_id,
+            title=page_data.title,
+            content=page_data.content,
+            author=page_data.author,
+            tags=page_data.tags
+        )
+
+        if not updated_page:
+            raise HTTPException(status_code=404, detail="Page not found")
+
+        return {
+            "id": updated_page.id,
+            "title": updated_page.title,
+            "content": updated_page.content,
+            "author": updated_page.author,
+            "created_at": updated_page.created_at.isoformat() if updated_page.created_at else None,
+            "updated_at": updated_page.updated_at.isoformat() if updated_page.updated_at else None,
+            "tags": updated_page.tags or []
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/pages/{page_id}")
+async def delete_page(page_id: int, db: Session = Depends(get_db_session)):
+    """Delete a page"""
+    try:
+        success = PageCRUD.delete_page(db=db, page_id=page_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Page not found")
+
+        return {"message": "Page deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:
