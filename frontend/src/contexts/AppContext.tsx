@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useRef, useState, useCallback } from 'react';
 import { Page, ViewMode } from '../types/page';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { createWebSocketService, WebSocketService } from '../services/websocket';
 import { WebSocketMessage } from '../types/chat';
 
 interface AppState {
@@ -10,6 +10,7 @@ interface AppState {
   isLoading: boolean;
   error: string | null;
   isConnected: boolean;
+  connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
 }
 
 type AppAction =
@@ -21,7 +22,8 @@ type AppAction =
   | { type: 'SET_VIEW_MODE'; payload: ViewMode }
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
-  | { type: 'SET_CONNECTED'; payload: boolean };
+  | { type: 'SET_CONNECTED'; payload: boolean }
+  | { type: 'SET_CONNECTION_STATUS'; payload: 'connecting' | 'connected' | 'disconnected' | 'error' };
 
 const initialState: AppState = {
   pages: [],
@@ -29,7 +31,8 @@ const initialState: AppState = {
   viewMode: 'view',
   isLoading: false,
   error: null,
-  isConnected: false
+  isConnected: false,
+  connectionStatus: 'disconnected'
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -83,6 +86,15 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_CONNECTED':
       return { ...state, isConnected: action.payload };
 
+    case 'SET_CONNECTION_STATUS': {
+      const isConnected = action.payload === 'connected';
+      return {
+        ...state,
+        connectionStatus: action.payload,
+        isConnected
+      };
+    }
+
     default:
       return state;
   }
@@ -101,18 +113,52 @@ interface AppContextType {
     setError: (error: string | null) => void;
     createPage: (title: string, content?: string) => Promise<void>;
   };
+  websocket: {
+    sendMessage: (message: any) => void;
+    sendChatMessage: (content: string) => void;
+    onMessage: (handler: (message: WebSocketMessage) => void) => () => void;
+    lastMessage: WebSocketMessage | null;
+  };
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, dispatch] = useReducer(appReducer, initialState);
-  const { connectionStatus, lastMessage, connect } = useWebSocket('app-main');
+  const wsService = useRef<WebSocketService | null>(null);
+  const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
+  const messageHandlers = useRef<Set<(message: WebSocketMessage) => void>>(new Set());
 
-  // Handle connection status changes
+  // Initialize WebSocket service
   useEffect(() => {
-    dispatch({ type: 'SET_CONNECTED', payload: connectionStatus === 'connected' });
-  }, [connectionStatus]);
+    wsService.current = createWebSocketService('app-main');
+
+    const statusUnsubscribe = wsService.current.onStatusChange((status) => {
+      dispatch({ type: 'SET_CONNECTION_STATUS', payload: status });
+    });
+
+    const messageUnsubscribe = wsService.current.onMessage((message) => {
+      setLastMessage(message);
+
+      // Notify all registered handlers
+      messageHandlers.current.forEach(handler => {
+        try {
+          handler(message);
+        } catch (error) {
+          console.error('Error in message handler:', error);
+        }
+      });
+    });
+
+    // Auto-connect
+    wsService.current.connect();
+
+    return () => {
+      statusUnsubscribe();
+      messageUnsubscribe();
+      wsService.current?.disconnect();
+    };
+  }, []);
 
   const loadPages = React.useCallback(async () => {
     dispatch({ type: 'SET_LOADING', payload: true });
@@ -149,15 +195,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [lastMessage, loadPages]);
 
-  // Auto-connect on initialization
-  useEffect(() => {
-    connect();
-  }, [connect]);
 
   // Load pages from backend API on initialization
   useEffect(() => {
     loadPages();
   }, [loadPages]);
+
+  // WebSocket functions
+  const sendMessage = useCallback((message: any) => {
+    wsService.current?.send(message);
+  }, []);
+
+  const sendChatMessage = useCallback((content: string) => {
+    wsService.current?.sendChatMessage(content);
+  }, []);
+
+  const onMessage = useCallback((handler: (message: WebSocketMessage) => void) => {
+    messageHandlers.current.add(handler);
+    return () => messageHandlers.current.delete(handler);
+  }, []);
 
   const actions = {
     setPages: (pages: Page[]) => dispatch({ type: 'SET_PAGES', payload: pages }),
@@ -230,7 +286,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   return (
-    <AppContext.Provider value={{ state, actions }}>
+    <AppContext.Provider value={{
+      state,
+      actions,
+      websocket: {
+        sendMessage,
+        sendChatMessage,
+        onMessage,
+        lastMessage
+      }
+    }}>
       {children}
     </AppContext.Provider>
   );

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { ChatMessage, WebSocketMessage } from '../types/chat';
-import { useWebSocket } from './useWebSocket';
+import { useAppContext } from '../contexts/AppContext';
 
 export interface UseChatReturn {
   messages: ChatMessage[];
@@ -12,16 +12,11 @@ export interface UseChatReturn {
 
 export const useChat = (): UseChatReturn => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const { connectionStatus, sendChatMessage, connect, onDirectMessage } = useWebSocket('app-main');
-
-  // Auto-connect on initialization
-  useEffect(() => {
-    connect();
-  }, [connect]);
+  const { state, websocket } = useAppContext();
 
   // Handle incoming WebSocket messages directly
   useEffect(() => {
-    const unsubscribe = onDirectMessage((message) => {
+    const unsubscribe = websocket.onMessage((message) => {
       console.log('useChat: Direct message handler triggered with message:', message);
       console.log('useChat: Processing message type:', message.type);
 
@@ -65,10 +60,14 @@ export const useChat = (): UseChatReturn => {
     });
 
     return unsubscribe;
-  }, [onDirectMessage]);
+  }, [websocket]);
 
   const sendMessage = useCallback((content: string) => {
-    if (!content.trim()) return;
+    console.log('🎯 useChat.sendMessage called with:', content);
+    if (!content.trim()) {
+      console.log('❌ Empty content, not sending');
+      return;
+    }
 
     // Add user message to local state immediately
     const userMessage: ChatMessage = {
@@ -78,11 +77,14 @@ export const useChat = (): UseChatReturn => {
       timestamp: new Date().toISOString()
     };
 
+    console.log('➕ Adding user message to state:', userMessage);
     setMessages(prev => [...prev, userMessage]);
 
     // Send via WebSocket
-    sendChatMessage(content);
-  }, [sendChatMessage]);
+    console.log('📡 Calling websocket.sendChatMessage with:', content);
+    websocket.sendChatMessage(content);
+    console.log('✅ websocket.sendChatMessage called');
+  }, [websocket]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
@@ -90,8 +92,8 @@ export const useChat = (): UseChatReturn => {
 
   return {
     messages,
-    isConnected: connectionStatus === 'connected',
-    connectionStatus,
+    isConnected: state.isConnected,
+    connectionStatus: state.connectionStatus,
     sendMessage,
     clearMessages
   };

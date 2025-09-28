@@ -44,10 +44,16 @@ export class WebSocketService {
   }
 
   send(message: any): void {
+    console.log('🚀 WebSocket.send() called with message:', message);
+    console.log('🔌 WebSocket state:', this.ws?.readyState, 'OPEN=', WebSocket.OPEN);
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
+      const jsonMessage = JSON.stringify(message);
+      console.log('📤 Sending JSON message:', jsonMessage);
+      this.ws.send(jsonMessage);
+      console.log('✅ Message sent successfully');
     } else {
-      console.warn('WebSocket is not connected. Message not sent:', message);
+      console.warn('❌ WebSocket is not connected. Message not sent:', message);
+      console.log('🔌 Current WebSocket state:', this.ws?.readyState);
     }
   }
 

@@ -15,12 +15,17 @@ class WebSocketManager:
     
     async def connect(self, websocket: WebSocket, client_id: str):
         """Accept WebSocket connection and initialize chat handler"""
+        print(f"🔌 WebSocketManager.connect() called for client: {client_id}")
         await websocket.accept()
+        print(f"✅ WebSocket accepted for client: {client_id}")
+
         self.active_connections[client_id] = websocket
-        
+        print(f"📝 Added {client_id} to active_connections. Total connections: {len(self.active_connections)}")
+
         # Initialize chat handler
         self.chat_handlers[client_id] = ChatHandler()
-        
+        print(f"🤖 Created chat handler for {client_id}. Total handlers: {len(self.chat_handlers)}")
+
         # Send welcome message
         await self.send_message(client_id, {
             "type": "system",
@@ -29,11 +34,18 @@ class WebSocketManager:
     
     def disconnect(self, client_id: str):
         """Clean up connection and resources"""
+        print(f"🔌❌ WebSocketManager.disconnect() called for client: {client_id}")
         if client_id in self.active_connections:
             del self.active_connections[client_id]
-        
+            print(f"🗑️ Removed {client_id} from active_connections. Remaining: {len(self.active_connections)}")
+        else:
+            print(f"⚠️ Client {client_id} was not in active_connections during disconnect")
+
         if client_id in self.chat_handlers:
             del self.chat_handlers[client_id]
+            print(f"🗑️ Removed chat handler for {client_id}. Remaining handlers: {len(self.chat_handlers)}")
+        else:
+            print(f"⚠️ Client {client_id} had no chat handler during disconnect")
     
     async def send_message(self, client_id: str, message: Dict[str, Any]):
         """Send message to specific client"""
@@ -45,10 +57,12 @@ class WebSocketManager:
                 error_msg = str(e)
                 print(f"❌ Error sending message to {client_id}: {error_msg}")
                 print(f"❌ Failed message type: {message.get('type', 'unknown')}")
-                # Don't disconnect on minor Firefox WebSocket close frame errors
-                if "no close frame" not in error_msg.lower():
-                    print(f"🔌 Disconnecting {client_id} due to send error")
+                # Only disconnect if it's a serious error, not just Firefox close frame issues
+                if "no close frame" not in error_msg.lower() and "connection closed" in error_msg.lower():
+                    print(f"🔌 Disconnecting {client_id} due to serious send error")
                     self.disconnect(client_id)
+                else:
+                    print(f"⚠️ Ignoring minor WebSocket error for {client_id}")
         else:
             print(f"⚠️ Client {client_id} not in active connections, cannot send: {message.get('type', 'unknown')}")
     
@@ -56,9 +70,12 @@ class WebSocketManager:
         """Handle incoming message from client"""
 
         print(f"📨 WebSocket received message from {client_id}: {message_data}")
+        print(f"🔍 Current active_connections: {list(self.active_connections.keys())}")
+        print(f"🔍 Current chat_handlers: {list(self.chat_handlers.keys())}")
 
         if client_id not in self.chat_handlers:
             print(f"❌ Chat handler not found for client {client_id}")
+            print(f"❌ Available handlers: {list(self.chat_handlers.keys())}")
             return {"type": "error", "message": "Chat handler not found"}
 
         message_type = message_data.get("type")
@@ -80,14 +97,19 @@ class WebSocketManager:
             if result["success"]:
                 response_data = result["data"]
 
-                # Send initial response if any
-                if response_data["message"]:
+                # Track if we've sent the initial response
+                initial_response_sent = False
+
+                # Only send initial response if it's not a multi-step process
+                # For multi-step processes, we'll send the final_response instead
+                if response_data["message"] and response_data.get("iterations", 1) == 1:
                     chat_response = {
                         "type": "chat_response",
                         "message": response_data["message"]
                     }
                     print(f"📤 Sending chat_response: {chat_response}")
                     await self.send_message(client_id, chat_response)
+                    initial_response_sent = True
 
                 # Send tool calls if any (now with iteration info)
                 page_modified = False
@@ -115,11 +137,12 @@ class WebSocketManager:
                         "iterations": response_data["iterations"]
                     })
 
-                # Send final response if any
-                if response_data["final_response"]:
+                # Send final response for multi-step processes, or if no initial response was sent
+                if not initial_response_sent and (response_data["final_response"] or response_data["message"]):
+                    final_message = response_data["final_response"] or response_data["message"]
                     await self.send_message(client_id, {
                         "type": "chat_response",
-                        "message": response_data["final_response"]
+                        "message": final_message
                     })
 
                 # If pages were modified, send page update notification
@@ -156,26 +179,34 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = "default"):
     try:
         while True:
             # Receive message from client
+            print(f"🔄 Waiting for message from {client_id}...")
             data = await websocket.receive_text()
-            
+            print(f"📨 Raw message received from {client_id}: {data}")
+
             try:
                 message_data = json.loads(data)
-            except json.JSONDecodeError:
+                print(f"✅ Parsed message data: {message_data}")
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON decode error: {e}")
                 await websocket_manager.send_message(client_id, {
-                    "type": "error", 
+                    "type": "error",
                     "message": "Invalid JSON format"
                 })
                 continue
-            
+
             # Handle the message
+            print(f"🔧 About to handle message: {message_data}")
             response = await websocket_manager.handle_message(client_id, message_data)
+            print(f"📤 Handler response: {response}")
             
             # Send response if it's an error or immediate response
             if response.get("type") in ["error", "success"]:
                 await websocket_manager.send_message(client_id, response)
                 
     except WebSocketDisconnect:
+        print(f"🔌💔 WebSocketDisconnect for {client_id}")
         websocket_manager.disconnect(client_id)
     except Exception as e:
-        print(f"WebSocket error for client {client_id}: {e}")
+        print(f"🔌⚠️ WebSocket error for client {client_id}: {e}")
+        print(f"🔌⚠️ Exception type: {type(e).__name__}")
         websocket_manager.disconnect(client_id)

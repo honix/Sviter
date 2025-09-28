@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Page, PageTreeItem, ViewMode } from '../types/page';
-import { useWebSocket } from './useWebSocket';
+import { useAppContext } from '../contexts/AppContext';
 
 export interface UsePagesReturn {
   pages: Page[];
@@ -23,7 +23,7 @@ export const usePages = (): UsePagesReturn => {
   const [viewMode, setViewMode] = useState<ViewMode>('view');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { lastMessage } = useWebSocket('app-main');
+  const { websocket } = useAppContext();
 
   // Generate page tree structure
   const pageTree: PageTreeItem[] = pages.map(page => ({
@@ -38,10 +38,14 @@ export const usePages = (): UsePagesReturn => {
 
   // Handle WebSocket page update notifications
   useEffect(() => {
-    if (lastMessage && lastMessage.type === 'page_update') {
-      loadPages(); // Refresh pages when AI modifies them
-    }
-  }, [lastMessage, loadPages]);
+    const unsubscribe = websocket.onMessage((message) => {
+      if (message.type === 'page_update') {
+        loadPages(); // Refresh pages when AI modifies them
+      }
+    });
+
+    return unsubscribe;
+  }, [websocket, loadPages]);
 
   const createPage = useCallback(async (title: string, content = '') => {
     setIsLoading(true);
