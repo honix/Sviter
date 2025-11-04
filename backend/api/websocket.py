@@ -97,21 +97,16 @@ class WebSocketManager:
             if result["success"]:
                 response_data = result["data"]
 
-                # Track if we've sent the initial response
-                initial_response_sent = False
-
-                # Only send initial response if it's not a multi-step process
-                # For multi-step processes, we'll send the final_response instead
-                if response_data["message"] and response_data.get("iterations", 1) == 1:
-                    chat_response = {
+                # Send initial message if it exists (iteration 1 reasoning)
+                if response_data["message"]:
+                    initial_message = {
                         "type": "chat_response",
                         "message": response_data["message"]
                     }
-                    print(f"📤 Sending chat_response: {chat_response}")
-                    await self.send_message(client_id, chat_response)
-                    initial_response_sent = True
+                    print(f"📤 Sending initial message: {response_data['message'][:50]}...")
+                    await self.send_message(client_id, initial_message)
 
-                # Send tool calls if any (now with iteration info)
+                # Send tool calls in real-time if any (for user feedback)
                 page_modified = False
                 print(f"📊 Tool calls to send: {len(response_data['tool_calls'])}")
                 for i, tool_call in enumerate(response_data["tool_calls"]):
@@ -120,37 +115,24 @@ class WebSocketManager:
                         "tool_name": tool_call["tool_name"],
                         "arguments": tool_call["arguments"],
                         "result": tool_call["result"],
-                        "iteration": tool_call.get("iteration", 1)  # Include iteration number
+                        "iteration": tool_call.get("iteration", 1)
                     }
                     print(f"📤 Sending tool_call {i+1}/{len(response_data['tool_calls'])}: {tool_call['tool_name']}")
                     await self.send_message(client_id, tool_message)
 
                     # Check if a page-modifying tool was executed
-                    if tool_call["tool_name"] in ["edit_page"]:
+                    if tool_call["tool_name"] in ["edit_page", "create_page", "delete_page"]:
                         page_modified = True
 
-                # Send iteration info if multi-step process
-                if response_data.get("iterations", 1) > 1:
-                    await self.send_message(client_id, {
-                        "type": "process_info",
-                        "message": f"Completed multi-step process in {response_data['iterations']} iterations",
-                        "iterations": response_data["iterations"]
-                    })
-
-                # Send final response for multi-step processes, or if no initial response was sent
-                if not initial_response_sent and (response_data["final_response"] or response_data["message"]):
-                    final_message = response_data["final_response"] or response_data["message"]
-                    await self.send_message(client_id, {
+                # Send final response with metadata
+                if response_data["final_response"]:
+                    final_message = {
                         "type": "chat_response",
-                        "message": final_message
-                    })
-
-                # If pages were modified, send page update notification
-                if page_modified:
-                    await self.send_message(client_id, {
-                        "type": "page_update",
-                        "action": "refresh"
-                    })
+                        "message": response_data["final_response"],
+                        "page_modified": page_modified
+                    }
+                    print(f"📤 Sending final response: {response_data['final_response'][:50]}...")
+                    await self.send_message(client_id, final_message)
 
                 return {"type": "success"}
             else:

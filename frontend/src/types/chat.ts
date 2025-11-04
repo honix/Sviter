@@ -4,6 +4,8 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   tool_calls?: ToolCall[];
+  tool_count?: number;
+  iterations?: number;
 }
 
 export interface ToolCall {
@@ -23,4 +25,7 @@ export interface WebSocketMessage {
   arguments?: any;
   result?: string;
   page_id?: number;
+  tool_count?: number;
+  iterations?: number;
+  page_modified?: boolean;
 }

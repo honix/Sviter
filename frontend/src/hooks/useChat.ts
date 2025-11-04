@@ -22,6 +22,7 @@ export const useChat = (): UseChatReturn => {
 
       if (message.type === 'chat_response') {
         console.log('useChat: Creating chat_response message with content:', message.message);
+
         const chatMessage: ChatMessage = {
           id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
           type: 'assistant',
@@ -36,6 +37,13 @@ export const useChat = (): UseChatReturn => {
           console.log('useChat: New messages count:', newMessages.length);
           return newMessages;
         });
+
+        // Trigger page refresh if pages were modified
+        if (message.page_modified) {
+          console.log('useChat: Pages were modified, triggering refresh');
+          // Dispatch a custom event that the page tree can listen to
+          window.dispatchEvent(new CustomEvent('pagesModified'));
+        }
       } else if (message.type === 'tool_call') {
         console.log('useChat: Creating tool_call message');
         const toolCallMessage: ChatMessage = {
