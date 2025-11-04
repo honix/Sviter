@@ -8,6 +8,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { AlertCircle, FileText } from 'lucide-react';
+import { RevisionHistory } from '../revisions/RevisionHistory';
+import { PageRevision } from '../../types/page';
 
 const CenterPanel: React.FC = () => {
   const { state, actions } = useAppContext();
@@ -15,19 +17,32 @@ const CenterPanel: React.FC = () => {
   const { setViewMode, updatePage } = actions;
 
   const [editContent, setEditContent] = useState('');
+  const [activeTab, setActiveTab] = useState<'view' | 'edit' | 'history'>('view');
+  const [viewingRevision, setViewingRevision] = useState<PageRevision | null>(null);
 
   // Sync edit content when page changes
   useEffect(() => {
     if (currentPage) {
       setEditContent(currentPage.content);
+      setViewingRevision(null); // Reset revision view when page changes
     }
   }, [currentPage]);
+
+  // Sync activeTab with viewMode for backward compatibility
+  useEffect(() => {
+    if (viewMode === 'edit' && activeTab !== 'edit') {
+      setActiveTab('edit');
+    } else if (viewMode === 'view' && activeTab === 'edit') {
+      setActiveTab('view');
+    }
+  }, [viewMode]);
 
   const handleSave = async () => {
     if (currentPage && editContent !== currentPage.content) {
       await updatePage(currentPage.id, { content: editContent });
     }
     setViewMode('view');
+    setActiveTab('view');
   };
 
   const handleCancel = () => {
@@ -35,6 +50,39 @@ const CenterPanel: React.FC = () => {
       setEditContent(currentPage.content);
     }
     setViewMode('view');
+    setActiveTab('view');
+  };
+
+  const handleRevisionSelect = (revision: PageRevision) => {
+    setViewingRevision(revision);
+    setActiveTab('view');
+  };
+
+  const handleRestoreRevision = async (revision: PageRevision) => {
+    if (!currentPage) return;
+
+    // Restore by creating a new revision with the old content
+    await updatePage(currentPage.id, {
+      content: revision.content,
+      content_json: revision.content_json,
+    });
+    setViewingRevision(null);
+    setActiveTab('view');
+  };
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value as 'view' | 'edit' | 'history');
+    if (value === 'edit') {
+      setViewMode('edit');
+      setViewingRevision(null);
+    } else if (value === 'view') {
+      setViewMode('view');
+      if (viewingRevision) {
+        setViewingRevision(null);
+      }
+    } else if (value === 'history') {
+      setViewMode('view');
+    }
   };
 
   if (isLoading) {
@@ -106,20 +154,38 @@ const CenterPanel: React.FC = () => {
       {/* Content Area with Tabs */}
       <div className="flex-1 overflow-hidden">
         <Tabs
-          value={viewMode}
-          onValueChange={(value) => setViewMode(value as 'view' | 'edit')}
+          value={activeTab}
+          onValueChange={handleTabChange}
           className="h-full flex flex-col"
         >
           <TabsList className="mx-4 mt-4">
             <TabsTrigger value="view">View</TabsTrigger>
             <TabsTrigger value="edit">Edit</TabsTrigger>
+            <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
 
           <TabsContent value="view" className="flex-1 overflow-hidden mt-0">
             <ScrollArea className="h-full">
               <div className="p-6">
+                {viewingRevision && (
+                  <div className="mb-4 p-3 bg-accent rounded-lg border border-accent-foreground/20">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">
+                        Viewing Revision #{viewingRevision.revision_number}
+                        {viewingRevision.comment && ` - ${viewingRevision.comment}`}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setViewingRevision(null)}
+                      >
+                        Back to current
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <div className="prose dark:prose-invert max-w-none">
-                  {parseMarkdown(currentPage.content)}
+                  {parseMarkdown(viewingRevision?.content || currentPage.content)}
                 </div>
               </div>
             </ScrollArea>
@@ -134,6 +200,14 @@ const CenterPanel: React.FC = () => {
                 placeholder="Start writing in markdown..."
               />
             </div>
+          </TabsContent>
+
+          <TabsContent value="history" className="flex-1 overflow-hidden mt-0">
+            <RevisionHistory
+              pageId={currentPage.id}
+              onRevisionSelect={handleRevisionSelect}
+              onRestoreRevision={handleRestoreRevision}
+            />
           </TabsContent>
         </Tabs>
       </div>
