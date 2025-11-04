@@ -97,14 +97,16 @@ class WebSocketManager:
             if result["success"]:
                 response_data = result["data"]
 
-                # Send initial message if it exists (iteration 1 reasoning)
-                if response_data["message"]:
+                # Send initial message if it exists (iteration 1 reasoning) - only if different from final
+                initial_message_sent = False
+                if response_data["message"] and response_data["message"] != response_data["final_response"]:
                     initial_message = {
                         "type": "chat_response",
                         "message": response_data["message"]
                     }
                     print(f"📤 Sending initial message: {response_data['message'][:50]}...")
                     await self.send_message(client_id, initial_message)
+                    initial_message_sent = True
 
                 # Send tool calls in real-time if any (for user feedback)
                 page_modified = False

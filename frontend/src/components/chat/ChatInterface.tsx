@@ -77,13 +77,19 @@ const ChatInterface: React.FC = () => {
       <ChatContainerRoot className="flex-1 p-4">
         <ChatContainerContent>
           {messages.map((message) => (
-            <Message key={message.id} className="mb-4">
+            <Message
+              key={message.id}
+              className={`mb-4 ${message.type === 'user' ? 'flex-row-reverse' : ''}`}
+            >
               <MessageAvatar
                 src={message.type === 'user' ? '/user-avatar.png' : '/ai-avatar.png'}
                 alt={message.type === 'user' ? 'User' : 'AI'}
                 fallback={message.type === 'user' ? 'U' : 'AI'}
               />
-              <MessageContent markdown={message.type === 'assistant'}>
+              <MessageContent
+                markdown={message.type === 'assistant'}
+                className={message.type === 'user' ? 'bg-primary text-primary-foreground' : ''}
+              >
                 {message.content}
               </MessageContent>
             </Message>
