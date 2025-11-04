@@ -76,6 +76,7 @@ build/
 coverage.xml
 *.cover
 .hypothesis/
+.playwright-mcp/
 
 # Jupyter Notebook
 .ipynb_checkpoints
