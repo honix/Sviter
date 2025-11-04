@@ -1,6 +1,9 @@
 import React from 'react';
 import { PageTreeItem, Page } from '../../types/page';
 import PageItem from './PageItem';
+import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Plus, FileText } from 'lucide-react';
 
 interface PageTreeProps {
   items: PageTreeItem[];
@@ -27,49 +30,59 @@ const PageTree: React.FC<PageTreeProps> = ({
   };
 
   return (
-    <div className="h-full bg-white dark:bg-gray-800 flex flex-col">
+    <div className="h-full bg-background flex flex-col">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-          Pages
-        </h2>
-        <button
+      <div className="p-4 border-b border-border">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            Pages
+          </h2>
+        </div>
+        <Button
           onClick={handleCreatePage}
-          className="mt-2 w-full px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          className="w-full"
+          size="sm"
         >
-          + New Page
-        </button>
+          <Plus className="h-4 w-4 mr-2" />
+          New Page
+        </Button>
       </div>
 
       {/* Page Tree Content */}
-      <div className="flex-1 p-4 overflow-y-auto custom-scrollbar">
-        <div className="space-y-1">
+      <ScrollArea className="flex-1">
+        <div className="p-2">
           {items.length === 0 ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              <p className="text-sm">No pages yet</p>
-              <button
+            <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+              <FileText className="h-12 w-12 text-muted-foreground mb-3" />
+              <p className="text-sm text-muted-foreground mb-3">No pages yet</p>
+              <Button
                 onClick={handleCreatePage}
-                className="mt-2 text-blue-600 hover:text-blue-700 text-sm"
+                variant="outline"
+                size="sm"
               >
+                <Plus className="h-4 w-4 mr-2" />
                 Create your first page
-              </button>
+              </Button>
             </div>
           ) : (
-            items.map((item) => {
-              const page = pages.find(p => p.id === item.id);
-              return (
-                <PageItem
-                  key={item.id}
-                  page={page}
-                  isActive={currentPage?.id === item.id}
-                  onSelect={() => page && onPageSelect(page)}
-                  onDelete={() => onDeletePage(item.id)}
-                />
-              );
-            })
+            <div className="space-y-1">
+              {items.map((item) => {
+                const page = pages.find(p => p.id === item.id);
+                return (
+                  <PageItem
+                    key={item.id}
+                    page={page}
+                    isActive={currentPage?.id === item.id}
+                    onSelect={() => page && onPageSelect(page)}
+                    onDelete={() => onDeletePage(item.id)}
+                  />
+                );
+              })}
+            </div>
           )}
         </div>
-      </div>
+      </ScrollArea>
     </div>
   );
 };

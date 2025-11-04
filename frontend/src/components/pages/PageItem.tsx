@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 import { Page } from '../../types/page';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Trash2, Check, X, File } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface PageItemProps {
   page: Page | undefined;
@@ -37,69 +41,74 @@ const PageItem: React.FC<PageItemProps> = ({
   return (
     <div
       onClick={onSelect}
-      className={`group relative p-2 rounded-md cursor-pointer transition-colors ${
+      className={cn(
+        "group relative p-3 rounded-lg cursor-pointer transition-all border",
         isActive
-          ? 'bg-blue-100 dark:bg-blue-900/20 text-blue-900 dark:text-blue-100'
-          : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-white'
-      }`}
+          ? 'bg-primary text-primary-foreground border-primary'
+          : 'hover:bg-accent hover:text-accent-foreground border-transparent'
+      )}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium truncate">
-            {page.title}
-          </div>
-          {page.tags.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {page.tags.slice(0, 2).map(tag => (
-                <span
-                  key={tag}
-                  className="px-1.5 py-0.5 text-xs bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded"
-                >
-                  {tag}
-                </span>
-              ))}
-              {page.tags.length > 2 && (
-                <span className="px-1.5 py-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  +{page.tags.length - 2}
-                </span>
-              )}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex-1 min-w-0 flex items-center gap-2">
+          <File className="h-4 w-4 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium truncate">
+              {page.title}
             </div>
-          )}
+            {page.tags.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {page.tags.slice(0, 2).map(tag => (
+                  <Badge
+                    key={tag}
+                    variant="secondary"
+                    className="text-xs px-1.5 py-0"
+                  >
+                    {tag}
+                  </Badge>
+                ))}
+                {page.tags.length > 2 && (
+                  <span className="text-xs text-muted-foreground">
+                    +{page.tags.length - 2}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Delete button */}
-        <div className="flex-shrink-0 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
           {showDeleteConfirm ? (
-            <div className="flex space-x-1">
-              <button
+            <div className="flex gap-1">
+              <Button
                 onClick={confirmDelete}
-                className="p-1 text-red-600 hover:text-red-700 text-xs"
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6"
                 title="Confirm delete"
               >
-                ✓
-              </button>
-              <button
+                <Check className="h-3 w-3 text-green-600" />
+              </Button>
+              <Button
                 onClick={cancelDelete}
-                className="p-1 text-gray-500 hover:text-gray-600 text-xs"
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6"
                 title="Cancel"
               >
-                ✕
-              </button>
+                <X className="h-3 w-3" />
+              </Button>
             </div>
           ) : (
-            <button
+            <Button
               onClick={handleDelete}
-              className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6"
               title="Delete page"
             >
-              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                <path
-                  fillRule="evenodd"
-                  d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9zM4 5a2 2 0 012-2h8a2 2 0 012 2v6a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 102 0v3a1 1 0 11-2 0V9zm4 0a1 1 0 10-2 0v3a1 1 0 102 0V9z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </button>
+              <Trash2 className="h-3 w-3" />
+            </Button>
           )}
         </div>
       </div>

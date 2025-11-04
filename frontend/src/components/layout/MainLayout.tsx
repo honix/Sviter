@@ -4,30 +4,41 @@ import CenterPanel from './CenterPanel';
 import RightPanel from './RightPanel';
 import ConnectionStatus from './ConnectionStatus';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from '@/components/ui/resizable';
 
 const MainLayout: React.FC = () => {
   // Enable keyboard shortcuts
   useKeyboardShortcuts();
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900 overflow-hidden relative">
+    <div className="h-screen bg-background overflow-hidden relative">
       {/* Connection Status Indicator */}
       <ConnectionStatus />
 
-      {/* Left Panel - Page Tree */}
-      <div className="w-64 flex-shrink-0 border-r border-gray-200 dark:border-gray-700">
-        <LeftPanel />
-      </div>
+      <ResizablePanelGroup direction="horizontal" className="h-full">
+        {/* Left Panel - Page Tree */}
+        <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>
+          <LeftPanel />
+        </ResizablePanel>
 
-      {/* Center Panel - Page Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <CenterPanel />
-      </div>
+        <ResizableHandle withHandle />
 
-      {/* Right Panel - AI Chat */}
-      <div className="w-80 flex-shrink-0 border-l border-gray-200 dark:border-gray-700">
-        <RightPanel />
-      </div>
+        {/* Center Panel - Page Content */}
+        <ResizablePanel defaultSize={55} minSize={30}>
+          <CenterPanel />
+        </ResizablePanel>
+
+        <ResizableHandle withHandle />
+
+        {/* Right Panel - AI Chat */}
+        <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+          <RightPanel />
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 };

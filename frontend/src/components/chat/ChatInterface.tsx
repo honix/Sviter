@@ -1,10 +1,34 @@
-import React from 'react';
-import MessageList from './MessageList';
-import ChatInput from './ChatInput';
+import React, { useState } from 'react';
 import { useChat } from '../../hooks/useChat';
+import {
+  ChatContainerRoot,
+  ChatContainerContent,
+  ChatContainerScrollAnchor,
+} from '@/components/ui/chat-container';
+import {
+  Message,
+  MessageAvatar,
+  MessageContent,
+} from '@/components/ui/message';
+import {
+  PromptInput,
+  PromptInputTextarea,
+  PromptInputActions,
+  PromptInputAction,
+} from '@/components/ui/prompt-input';
+import { Button } from '@/components/ui/button';
+import { ArrowUp, Trash2 } from 'lucide-react';
 
 const ChatInterface: React.FC = () => {
   const { messages, isConnected, connectionStatus, sendMessage, clearMessages } = useChat();
+  const [inputValue, setInputValue] = useState('');
+
+  const handleSend = () => {
+    if (inputValue.trim() && isConnected) {
+      sendMessage(inputValue.trim());
+      setInputValue('');
+    }
+  };
 
   const getStatusColor = () => {
     switch (connectionStatus) {
@@ -25,40 +49,74 @@ const ChatInterface: React.FC = () => {
   };
 
   return (
-    <div className="h-full bg-white dark:bg-gray-800 flex flex-col">
+    <div className="h-full bg-background flex flex-col">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+      <div className="p-4 border-b border-border">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h2 className="text-lg font-semibold text-foreground">
             AI Assistant
           </h2>
-          <button
+          <Button
             onClick={clearMessages}
-            className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            variant="ghost"
+            size="sm"
           >
+            <Trash2 className="h-4 w-4 mr-2" />
             Clear
-          </button>
+          </Button>
         </div>
         <div className="flex items-center mt-2">
           <div className={`w-2 h-2 rounded-full mr-2 ${getStatusColor()}`}></div>
-          <span className="text-sm text-gray-600 dark:text-gray-400">
+          <span className="text-sm text-muted-foreground">
             {getStatusText()}
           </span>
         </div>
       </div>
 
       {/* Chat Messages */}
-      <div className="flex-1 overflow-hidden">
-        <MessageList messages={messages} />
-      </div>
+      <ChatContainerRoot className="flex-1 p-4">
+        <ChatContainerContent>
+          {messages.map((message) => (
+            <Message key={message.id} className="mb-4">
+              <MessageAvatar
+                src={message.type === 'user' ? '/user-avatar.png' : '/ai-avatar.png'}
+                alt={message.type === 'user' ? 'User' : 'AI'}
+                fallback={message.type === 'user' ? 'U' : 'AI'}
+              />
+              <MessageContent markdown={message.type === 'assistant'}>
+                {message.content}
+              </MessageContent>
+            </Message>
+          ))}
+          <ChatContainerScrollAnchor />
+        </ChatContainerContent>
+      </ChatContainerRoot>
 
       {/* Message Input */}
-      <div className="border-t border-gray-200 dark:border-gray-700">
-        <ChatInput
-          onSendMessage={sendMessage}
-          disabled={!isConnected}
-          placeholder={isConnected ? "Ask the AI about your wiki..." : "Connecting..."}
-        />
+      <div className="p-4 border-t border-border">
+        <PromptInput
+          value={inputValue}
+          onValueChange={setInputValue}
+          onSubmit={handleSend}
+          isLoading={!isConnected}
+        >
+          <PromptInputTextarea
+            placeholder={isConnected ? "Ask the AI about your wiki..." : "Connecting..."}
+            disabled={!isConnected}
+          />
+          <PromptInputActions>
+            <PromptInputAction tooltip="Send message">
+              <Button
+                onClick={handleSend}
+                disabled={!isConnected || !inputValue.trim()}
+                size="icon"
+                className="rounded-full"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+            </PromptInputAction>
+          </PromptInputActions>
+        </PromptInput>
       </div>
     </div>
   );
