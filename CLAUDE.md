@@ -17,10 +17,12 @@ This is an AI-powered wiki system with a FastAPI backend and React frontend. The
 
 ### Frontend (React TypeScript)
 - **Framework**: React 19 with TypeScript and Vite
-- **Styling**: TailwindCSS for responsive design
+- **Styling**: TailwindCSS v3.4.0 + Shadcn UI components (uses CSS variables in HSL format)
+- **UI Components**: Shadcn UI with Prompt Kit for chat interface
 - **Layout**: 3-panel design (page tree, content editor, AI chat)
 - **Real-time**: WebSocket client for live communication
 - **State Management**: React Context API with useReducer
+- **Custom Scrollbars**: `.custom-scrollbar` and `.chat-scrollbar` classes for consistent styling
 
 ## Running the Application
 
@@ -80,6 +82,16 @@ npm run dev             # Start Vite dev server on port 5173
 - **Markdown Support**: Simple markdown parser for content rendering
 - **Error Handling**: Error boundaries and loading states
 - **Keyboard Shortcuts**: Ctrl+E (toggle edit), Escape (exit edit)
+- **Shadcn Components**:
+  - MUST use Tailwind CSS v3.4.0 (NOT v4) - v4 is incompatible
+  - Components copied to `src/components/ui/` (not npm packages)
+  - Styling uses CSS variables in `src/index.css` (format: `--primary: 222.2 47.4% 11.2%`)
+  - Custom scrollbars defined in `src/index.css` with `.custom-scrollbar` and `.chat-scrollbar`
+- **Chat Interface**:
+  - Uses Prompt Kit components (Message, PromptInput, etc.)
+  - Auto-scroll enabled via ChatContainer's StickToBottom component
+  - User messages: right-aligned with `bg-primary` styling
+  - AI responses: left-aligned, markdown rendered
 
 ## Dependencies
 
@@ -92,10 +104,13 @@ npm run dev             # Start Vite dev server on port 5173
 - `pytest` - Testing framework
 
 ### Frontend
-- `react` - UI framework
+- `react` v19 - UI framework
 - `typescript` - Type safety
 - `vite` - Build tool
-- `tailwindcss` - Styling
+- `tailwindcss` v3.4.0 - Styling (CRITICAL: must be v3, NOT v4)
+- `@radix-ui/*` - Primitives for Shadcn components
+- `use-stick-to-bottom` - Auto-scroll for chat
+- `lucide-react` - Icons
 - `@types/*` - TypeScript definitions
 
 ## Development Workflow
