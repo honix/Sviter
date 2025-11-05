@@ -93,3 +93,8 @@ body {
 .dark .chat-scrollbar *::-webkit-scrollbar-thumb:hover {
   background: #64748b !important;
 }
+
+/* Hide inactive Radix UI tab content panels only (not tab buttons) */
+[role="tabpanel"][data-state="inactive"] {
+  display: none;
+}

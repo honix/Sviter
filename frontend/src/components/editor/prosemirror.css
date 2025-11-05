@@ -1,0 +1,178 @@
+/* ProseMirror Editor Styles */
+
+.prosemirror-editor {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+}
+
+/* ProseMirror content area */
+.prosemirror-editor .ProseMirror {
+  padding: 1.5rem;
+  min-height: 100%;
+  outline: none;
+}
+
+/* Editable mode styling */
+.prosemirror-editor.editable .ProseMirror {
+  cursor: text;
+}
+
+/* Readonly mode styling */
+.prosemirror-editor.readonly .ProseMirror {
+  cursor: default;
+}
+
+/* Typography - matches prose styles */
+.ProseMirror {
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.75;
+  color: var(--foreground);
+}
+
+.ProseMirror p {
+  margin: 1em 0;
+}
+
+.ProseMirror p:first-child {
+  margin-top: 0;
+}
+
+.ProseMirror p:last-child {
+  margin-bottom: 0;
+}
+
+/* Headings */
+.ProseMirror h1 {
+  font-size: 2.25em;
+  font-weight: 700;
+  line-height: 1.1111111;
+  margin-top: 0;
+  margin-bottom: 0.8888889em;
+}
+
+.ProseMirror h2 {
+  font-size: 1.875em;
+  font-weight: 600;
+  line-height: 1.3333333;
+  margin-top: 1.6em;
+  margin-bottom: 0.8em;
+}
+
+.ProseMirror h3 {
+  font-size: 1.5em;
+  font-weight: 600;
+  line-height: 1.6;
+  margin-top: 1.6em;
+  margin-bottom: 0.6em;
+}
+
+/* Bold and Italic */
+.ProseMirror strong {
+  font-weight: 700;
+}
+
+.ProseMirror em {
+  font-style: italic;
+}
+
+/* Inline code */
+.ProseMirror code {
+  background-color: hsl(var(--muted));
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.875em;
+}
+
+/* Code block */
+.ProseMirror pre {
+  background-color: hsl(var(--muted));
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin: 1.5em 0;
+}
+
+.ProseMirror pre code {
+  background-color: transparent;
+  padding: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.875em;
+  line-height: 1.7142857;
+}
+
+/* Lists */
+.ProseMirror ul,
+.ProseMirror ol {
+  padding-left: 1.625em;
+  margin: 1em 0;
+}
+
+.ProseMirror ul {
+  list-style-type: disc;
+}
+
+.ProseMirror ol {
+  list-style-type: decimal;
+}
+
+.ProseMirror li {
+  margin: 0.25em 0;
+}
+
+.ProseMirror li p {
+  margin: 0.25em 0;
+}
+
+/* Blockquote */
+.ProseMirror blockquote {
+  border-left: 4px solid hsl(var(--border));
+  padding-left: 1em;
+  margin: 1.5em 0;
+  font-style: italic;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Horizontal rule */
+.ProseMirror hr {
+  border: none;
+  border-top: 2px solid hsl(var(--border));
+  margin: 2em 0;
+}
+
+/* Links */
+.ProseMirror a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.ProseMirror a:hover {
+  text-decoration: none;
+}
+
+/* Selection */
+.ProseMirror-selectednode {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+/* Placeholder */
+.ProseMirror p.is-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: hsl(var(--muted-foreground));
+  pointer-events: none;
+  position: absolute;
+}
+
+/* Focus styles for editable mode */
+.prosemirror-editor.editable .ProseMirror:focus {
+  outline: none;
+}
+
+/* Hide cursor in readonly mode */
+.prosemirror-editor.readonly .ProseMirror .ProseMirror-cursor {
+  display: none;
+}
