@@ -16,8 +16,8 @@ export async function fetchPages(): Promise<Page[]> {
   return data.pages;
 }
 
-export async function fetchPage(pageId: number): Promise<Page> {
-  const response = await fetch(`${API_BASE_URL}/pages/${pageId}`);
+export async function fetchPage(title: string): Promise<Page> {
+  const response = await fetch(`${API_BASE_URL}/pages/${encodeURIComponent(title)}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch page: ${response.statusText}`);
   }
@@ -52,16 +52,15 @@ export async function createPage(
 }
 
 export async function updatePage(
-  pageId: number,
+  title: string,
   updates: {
-    title?: string;
     content?: string;
     content_json?: any;
     author?: string;
     tags?: string[];
   }
 ): Promise<Page> {
-  const response = await fetch(`${API_BASE_URL}/pages/${pageId}`, {
+  const response = await fetch(`${API_BASE_URL}/pages/${encodeURIComponent(title)}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -75,8 +74,8 @@ export async function updatePage(
   return response.json();
 }
 
-export async function deletePage(pageId: number): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/pages/${pageId}`, {
+export async function deletePage(title: string, author: string = 'user'): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/pages/${encodeURIComponent(title)}?author=${encodeURIComponent(author)}`, {
     method: 'DELETE',
   });
 
@@ -85,46 +84,20 @@ export async function deletePage(pageId: number): Promise<void> {
   }
 }
 
-// Revision API functions
-export async function fetchRevisions(pageId: number, limit: number = 50): Promise<PageRevision[]> {
-  const response = await fetch(`${API_BASE_URL}/pages/${pageId}/revisions?limit=${limit}`);
+// Git History API functions (replaces revisions)
+export async function fetchPageHistory(title: string, limit: number = 50): Promise<PageRevision[]> {
+  const response = await fetch(`${API_BASE_URL}/pages/${encodeURIComponent(title)}/history?limit=${limit}`);
   if (!response.ok) {
-    throw new Error(`Failed to fetch revisions: ${response.statusText}`);
+    throw new Error(`Failed to fetch page history: ${response.statusText}`);
   }
   const data = await response.json();
-  return data.revisions;
+  return data.history;
 }
 
-export async function fetchRevision(pageId: number, revisionId: number): Promise<PageRevision> {
-  const response = await fetch(`${API_BASE_URL}/pages/${pageId}/revisions/${revisionId}`);
+export async function fetchPageAtRevision(title: string, commitSha: string): Promise<Page> {
+  const response = await fetch(`${API_BASE_URL}/pages/${encodeURIComponent(title)}/revisions/${commitSha}`);
   if (!response.ok) {
-    throw new Error(`Failed to fetch revision: ${response.statusText}`);
-  }
-  return response.json();
-}
-
-export async function createRevision(
-  pageId: number,
-  content: string,
-  contentJson?: any,
-  author: string = 'user',
-  comment?: string
-): Promise<PageRevision> {
-  const response = await fetch(`${API_BASE_URL}/pages/${pageId}/revisions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      content,
-      content_json: contentJson,
-      author,
-      comment,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to create revision: ${response.statusText}`);
+    throw new Error(`Failed to fetch page at revision: ${response.statusText}`);
   }
   return response.json();
 }

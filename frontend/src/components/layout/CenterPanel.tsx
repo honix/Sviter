@@ -50,7 +50,7 @@ const CenterPanel: React.FC = () => {
 
   const handleSave = async () => {
     if (currentPage) {
-      await updatePage(currentPage.id, {
+      await updatePage(currentPage.title, {
         content: editContent,
         content_json: editContentJson,
       });
@@ -81,11 +81,13 @@ const CenterPanel: React.FC = () => {
   const handleRestoreRevision = async (revision: PageRevision) => {
     if (!currentPage) return;
 
-    // Restore by creating a new revision with the old content
-    await updatePage(currentPage.id, {
-      content: revision.content,
-      content_json: revision.content_json,
-    });
+    // TODO: Update to fetch page content at specific commit SHA
+    // For now, this function needs to be updated to work with git-based revisions
+    // await updatePage(currentPage.title, {
+    //   content: revision.content,
+    //   content_json: revision.content_json,
+    // });
+    console.warn('Restore revision needs to be updated for git-based backend');
     setViewingRevision(null);
     setActiveTab('view');
   };

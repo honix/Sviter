@@ -467,3 +467,92 @@ class GitWiki:
 
         except GitCommandError as e:
             raise GitWikiException(f"Failed to get revision {commit_sha}: {e}")
+
+    # Git Branch Operations
+
+    def get_current_branch(self) -> str:
+        """
+        Get the name of the currently active branch.
+
+        Returns:
+            Current branch name
+
+        Raises:
+            GitWikiException: If operation fails
+        """
+        try:
+            return self.repo.active_branch.name
+        except Exception as e:
+            raise GitWikiException(f"Failed to get current branch: {e}")
+
+    def list_branches(self) -> List[str]:
+        """
+        List all branches in the repository.
+
+        Returns:
+            List of branch names
+
+        Raises:
+            GitWikiException: If operation fails
+        """
+        try:
+            return [branch.name for branch in self.repo.branches]
+        except Exception as e:
+            raise GitWikiException(f"Failed to list branches: {e}")
+
+    def checkout_branch(self, branch_name: str) -> bool:
+        """
+        Switch to an existing branch.
+
+        Args:
+            branch_name: Name of the branch to checkout
+
+        Returns:
+            True if successful
+
+        Raises:
+            GitWikiException: If branch doesn't exist or checkout fails
+        """
+        try:
+            if branch_name not in [b.name for b in self.repo.branches]:
+                raise GitWikiException(f"Branch '{branch_name}' does not exist")
+
+            self.repo.git.checkout(branch_name)
+            return True
+        except GitCommandError as e:
+            raise GitWikiException(f"Failed to checkout branch '{branch_name}': {e}")
+
+    def create_branch(self, branch_name: str, from_branch: str = "main", checkout: bool = True) -> str:
+        """
+        Create a new branch from an existing branch.
+
+        Args:
+            branch_name: Name of the new branch
+            from_branch: Branch to create from (default: "main")
+            checkout: Whether to checkout the new branch (default: True)
+
+        Returns:
+            Name of the created branch
+
+        Raises:
+            GitWikiException: If branch already exists or creation fails
+        """
+        try:
+            # Check if branch already exists
+            if branch_name in [b.name for b in self.repo.branches]:
+                raise GitWikiException(f"Branch '{branch_name}' already exists")
+
+            # Check if from_branch exists
+            if from_branch not in [b.name for b in self.repo.branches]:
+                raise GitWikiException(f"Source branch '{from_branch}' does not exist")
+
+            # Create new branch from the specified branch
+            new_branch = self.repo.create_head(branch_name, from_branch)
+
+            # Checkout if requested
+            if checkout:
+                new_branch.checkout()
+
+            return branch_name
+        except GitCommandError as e:
+            raise GitWikiException(f"Failed to create branch '{branch_name}': {e}")

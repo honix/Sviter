@@ -9,8 +9,8 @@ const LeftPanel: React.FC = () => {
 
   // Convert pages to page tree items
   const pageTree = pages.map(page => ({
-    id: page.id,
-    title: page.title
+    title: page.title,
+    path: page.path
   }));
 
   return (

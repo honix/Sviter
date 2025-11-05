@@ -153,6 +153,57 @@ async def get_page_at_revision(title: str, commit_sha: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Git Branch API endpoints
+@app.get("/api/git/branches")
+async def get_branches():
+    """Get list of all git branches"""
+    try:
+        branches = wiki.list_branches()
+        return {"branches": branches}
+    except GitWikiException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/git/current-branch")
+async def get_current_branch():
+    """Get currently active git branch"""
+    try:
+        current = wiki.get_current_branch()
+        return {"branch": current}
+    except GitWikiException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/git/checkout")
+async def checkout_branch(data: dict):
+    """Switch to a different branch"""
+    try:
+        branch_name = data.get("branch")
+        if not branch_name:
+            raise HTTPException(status_code=400, detail="Branch name is required")
+
+        wiki.checkout_branch(branch_name)
+        return {"message": f"Switched to branch '{branch_name}'", "branch": branch_name}
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/git/create-branch")
+async def create_branch(data: dict):
+    """Create a new branch"""
+    try:
+        branch_name = data.get("name")
+        from_branch = data.get("from", "main")
+
+        if not branch_name:
+            raise HTTPException(status_code=400, detail="Branch name is required")
+
+        created_branch = wiki.create_branch(branch_name, from_branch)
+        return {"message": f"Created and switched to branch '{created_branch}'", "branch": created_branch}
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Root endpoint with API info
 @app.get("/")
 async def root():
@@ -166,7 +217,11 @@ async def root():
             "pages": "/api/pages",
             "single_page": "/api/pages/{title}",
             "page_history": "/api/pages/{title}/history",
-            "page_revision": "/api/pages/{title}/revisions/{commit_sha}"
+            "page_revision": "/api/pages/{title}/revisions/{commit_sha}",
+            "git_branches": "/api/git/branches",
+            "git_current_branch": "/api/git/current-branch",
+            "git_checkout": "POST /api/git/checkout",
+            "git_create_branch": "POST /api/git/create-branch"
         },
         "documentation": "/docs"
     }

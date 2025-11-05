@@ -1,6 +1,7 @@
 import React from 'react';
 import { PageTreeItem, Page } from '../../types/page';
 import PageItem from './PageItem';
+import BranchSwitcher from '../git/BranchSwitcher';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Plus, FileText } from 'lucide-react';
@@ -10,7 +11,7 @@ interface PageTreeProps {
   currentPage: Page | null;
   onPageSelect: (page: Page | null) => void;
   onCreatePage: (title: string) => void;
-  onDeletePage: (id: number) => void;
+  onDeletePage: (title: string) => void;
   pages: Page[];
 }
 
@@ -32,13 +33,18 @@ const PageTree: React.FC<PageTreeProps> = ({
   return (
     <div className="h-full bg-background flex flex-col">
       {/* Header */}
-      <div className="p-4 border-b border-border">
-        <div className="flex items-center justify-between mb-3">
+      <div className="p-4 border-b border-border space-y-3">
+        <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
             <FileText className="h-5 w-5" />
             Pages
           </h2>
         </div>
+
+        {/* Branch Switcher */}
+        <BranchSwitcher />
+
+        {/* New Page Button */}
         <Button
           onClick={handleCreatePage}
           className="w-full"
@@ -68,14 +74,14 @@ const PageTree: React.FC<PageTreeProps> = ({
           ) : (
             <div className="space-y-1">
               {items.map((item) => {
-                const page = pages.find(p => p.id === item.id);
+                const page = pages.find(p => p.title === item.title);
                 return (
                   <PageItem
-                    key={item.id}
+                    key={item.title}
                     page={page}
-                    isActive={currentPage?.id === item.id}
+                    isActive={currentPage?.title === item.title}
                     onSelect={() => page && onPageSelect(page)}
-                    onDelete={() => onDeletePage(item.id)}
+                    onDelete={() => onDeletePage(item.title)}
                   />
                 );
               })}

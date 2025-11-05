@@ -1,28 +1,27 @@
 export interface Page {
-  id: number;
-  title: string;
+  title: string; // Unique identifier (used as ID in git backend)
   content: string;
   content_json?: any; // ProseMirror document JSON
   author: string;
   created_at: string;
   updated_at: string;
   tags: string[];
+  path: string; // Relative file path in git repo (e.g., "index.md")
+  metadata?: any; // YAML frontmatter metadata
 }
 
 export interface PageRevision {
-  id: number;
-  page_id: number;
-  revision_number: number;
-  content: string;
-  content_json?: any; // ProseMirror document JSON
+  sha: string; // Git commit SHA
+  short_sha: string; // Short commit SHA (7 chars)
+  message: string; // Commit message
   author: string;
-  created_at: string;
-  comment?: string | null;
+  date: string; // ISO date string
+  timestamp: number; // Unix timestamp
 }
 
 export interface PageTreeItem {
-  id: number;
-  title: string;
+  title: string; // Use title as unique identifier
+  path: string; // File path
   children?: PageTreeItem[];
 }
 
