@@ -1,7 +1,8 @@
 import { keymap } from 'prosemirror-keymap';
 import { undo, redo } from 'prosemirror-history';
 import { toggleMark, setBlockType } from 'prosemirror-commands';
-import { wrapInList, liftListItem, sinkListItem } from 'prosemirror-schema-list';
+import type { Command } from 'prosemirror-state';
+import { wrapInList, liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-list';
 import { schema } from './schema';
 
 /**
@@ -9,7 +10,7 @@ import { schema } from './schema';
  * Provides keyboard shortcuts for formatting commands
  */
 export function buildKeymap() {
-  const keys: { [key: string]: any } = {};
+  const keys: Record<string, Command> = {};
 
   // Text formatting
   keys['Mod-b'] = toggleMark(schema.marks.strong);  // Bold: Ctrl/Cmd+B
@@ -33,6 +34,7 @@ export function buildKeymap() {
 
   // List item manipulation
   if (schema.nodes.list_item) {
+    keys['Enter'] = splitListItem(schema.nodes.list_item);
     keys['Tab'] = sinkListItem(schema.nodes.list_item);
     keys['Shift-Tab'] = liftListItem(schema.nodes.list_item);
   }

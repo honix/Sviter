@@ -1,7 +1,9 @@
+import { useEffect, useReducer } from 'react';
 import { EditorView } from 'prosemirror-view';
-import { EditorState } from 'prosemirror-state';
-import { toggleMark, setBlockType, wrapIn } from 'prosemirror-commands';
-import { wrapInList, liftListItem } from 'prosemirror-schema-list';
+import type { Command } from 'prosemirror-state';
+import { toggleMark, setBlockType } from 'prosemirror-commands';
+import { wrapInList } from 'prosemirror-schema-list';
+import type { MarkType, NodeType } from 'prosemirror-model';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -25,12 +27,37 @@ interface EditorToolbarProps {
 }
 
 export function EditorToolbar({ editorView }: EditorToolbarProps) {
+  // Use reducer to trigger re-renders when selection changes
+  const [, forceUpdate] = useReducer((x) => x + 1, 0);
+
+  // Listen to editor state changes to update toolbar
+  useEffect(() => {
+    if (!editorView) return;
+
+    // Create a custom update handler that triggers re-render
+    const handleUpdate = () => {
+      forceUpdate();
+    };
+
+    // Listen to selection changes and document changes
+    editorView.dom.addEventListener('mouseup', handleUpdate);
+    editorView.dom.addEventListener('keyup', handleUpdate);
+    editorView.dom.addEventListener('click', handleUpdate);
+
+    return () => {
+      editorView.dom.removeEventListener('mouseup', handleUpdate);
+      editorView.dom.removeEventListener('keyup', handleUpdate);
+      editorView.dom.removeEventListener('click', handleUpdate);
+    };
+  }, [editorView]);
+
   if (!editorView) return null;
 
+  // Get current state for UI checks - updates when forceUpdate is called
   const state = editorView.state;
 
   // Check if a mark is active
-  const isMarkActive = (markType: any) => {
+  const isMarkActive = (markType: MarkType) => {
     const { from, $from, to, empty } = state.selection;
     if (empty) {
       return !!markType.isInSet(state.storedMarks || $from.marks());
@@ -39,7 +66,7 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
   };
 
   // Check if a block type is active
-  const isBlockActive = (nodeType: any, attrs = {}) => {
+  const isBlockActive = (nodeType: NodeType, attrs: Record<string, unknown> = {}) => {
     const { $from, to } = state.selection;
     let found = false;
     state.doc.nodesBetween($from.pos, to, (node) => {
@@ -47,17 +74,20 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
         if (Object.keys(attrs).length === 0) {
           found = true;
         } else {
-          found = Object.keys(attrs).every((key) => node.attrs[key] === attrs[key]);
+          found = Object.keys(attrs).every((key) => node.attrs[key as keyof typeof node.attrs] === attrs[key]);
         }
       }
     });
     return found;
   };
 
-  // Execute a command
-  const runCommand = (command: any) => {
-    command(state, editorView.dispatch, editorView);
+  // Execute a command - CRITICAL: Always use fresh state from view, not stale render-time state
+  const runCommand = (command: Command) => {
+    // Get the current state from the view (not the stale state from render time)
+    const currentState = editorView.state;
+    const result = command(currentState, editorView.dispatch, editorView);
     editorView.focus();
+    return result;
   };
 
   // Toggle bold
@@ -92,11 +122,19 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
 
   // Insert link
   const handleLink = () => {
+    // Get fresh state at time of execution
+    const currentState = editorView.state;
+    const { from, to, empty } = currentState.selection;
+
+    if (empty) {
+      alert('Please select text to create a link');
+      return;
+    }
+
     const url = prompt('Enter URL:');
     if (url) {
       const mark = schema.marks.link.create({ href: url });
-      const { from, to } = state.selection;
-      editorView.dispatch(state.tr.addMark(from, to, mark));
+      editorView.dispatch(currentState.tr.addMark(from, to, mark));
       editorView.focus();
     }
   };
