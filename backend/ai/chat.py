@@ -2,7 +2,6 @@ from typing import List, Dict, Any, Optional
 from ai.client import OpenRouterClient
 from ai.tools import WikiTools
 from openai.types.chat import ChatCompletionMessage
-from sqlalchemy.orm import Session
 import json
 
 class ChatHandler:
