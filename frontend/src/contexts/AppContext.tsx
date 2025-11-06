@@ -107,7 +107,7 @@ interface AppContextType {
     addPage: (page: Page) => void;
     updatePage: (title: string, updates: Partial<Page>) => Promise<void>;
     deletePage: (title: string) => Promise<void>;
-    setCurrentPage: (page: Page | null) => void;
+    setCurrentPage: (page: Page | null) => Promise<void>;
     setViewMode: (mode: ViewMode) => void;
     setLoading: (loading: boolean) => void;
     setError: (error: string | null) => void;
@@ -177,7 +177,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Set current page to first page if none selected and pages exist
       if (!state.currentPage && backendPages.length > 0) {
-        dispatch({ type: 'SET_CURRENT_PAGE', payload: backendPages[0] });
+        // Fetch full content for the first page
+        try {
+          const pageResponse = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(backendPages[0].title)}`);
+          if (pageResponse.ok) {
+            const fullPage = await pageResponse.json();
+            dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
+          } else {
+            dispatch({ type: 'SET_CURRENT_PAGE', payload: backendPages[0] });
+          }
+        } catch (pageErr) {
+          console.error('Error loading first page content:', pageErr);
+          dispatch({ type: 'SET_CURRENT_PAGE', payload: backendPages[0] });
+        }
       }
     } catch (err) {
       dispatch({ type: 'SET_ERROR', payload: 'Failed to load pages' });
@@ -265,7 +277,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dispatch({ type: 'SET_LOADING', payload: false });
       }
     },
-    setCurrentPage: (page: Page | null) => dispatch({ type: 'SET_CURRENT_PAGE', payload: page }),
+    setCurrentPage: async (page: Page | null) => {
+      if (!page) {
+        dispatch({ type: 'SET_CURRENT_PAGE', payload: null });
+        return;
+      }
+
+      // Fetch full page content from API
+      dispatch({ type: 'SET_LOADING', payload: true });
+      dispatch({ type: 'SET_ERROR', payload: null });
+
+      try {
+        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(page.title)}`);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const fullPage = await response.json();
+        dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
+      } catch (err) {
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to load page content' });
+        console.error('Error loading page:', err);
+        // Fallback to the page object without content
+        dispatch({ type: 'SET_CURRENT_PAGE', payload: page });
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    },
     setViewMode: (mode: ViewMode) => dispatch({ type: 'SET_VIEW_MODE', payload: mode }),
     setLoading: (loading: boolean) => dispatch({ type: 'SET_LOADING', payload: loading }),
     setError: (error: string | null) => dispatch({ type: 'SET_ERROR', payload: error }),

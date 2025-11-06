@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { PageRevision } from '../../types/page';
+import type { PageRevision } from '../../types/page';
 import { fetchPageHistory } from '../../services/api';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';

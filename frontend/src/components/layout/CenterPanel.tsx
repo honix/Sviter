@@ -1,16 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../../contexts/AppContext';
-import { parseMarkdown } from '../../utils/markdown';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { AlertCircle, FileText } from 'lucide-react';
 import { RevisionHistory } from '../revisions/RevisionHistory';
-import { PageRevision } from '../../types/page';
-import { ProseMirrorEditor, ProseMirrorEditorHandle } from '../editor/ProseMirrorEditor';
+import type { PageRevision } from '../../types/page';
+import { ProseMirrorEditor, type ProseMirrorEditorHandle } from '../editor/ProseMirrorEditor';
 import { EditorToolbar } from '../editor/EditorToolbar';
 
 const CenterPanel: React.FC = () => {
@@ -28,6 +25,11 @@ const CenterPanel: React.FC = () => {
   // Sync edit content when page changes
   useEffect(() => {
     if (currentPage) {
+      console.log('CenterPanel: currentPage changed:', {
+        title: currentPage.title,
+        contentLength: currentPage.content?.length,
+        content: currentPage.content
+      });
       setEditContent(currentPage.content);
       setEditContentJson(currentPage.content_json);
       setViewingRevision(null); // Reset revision view when page changes
@@ -75,20 +77,6 @@ const CenterPanel: React.FC = () => {
 
   const handleRevisionSelect = (revision: PageRevision) => {
     setViewingRevision(revision);
-    setActiveTab('view');
-  };
-
-  const handleRestoreRevision = async (revision: PageRevision) => {
-    if (!currentPage) return;
-
-    // TODO: Update to fetch page content at specific commit SHA
-    // For now, this function needs to be updated to work with git-based revisions
-    // await updatePage(currentPage.title, {
-    //   content: revision.content,
-    //   content_json: revision.content_json,
-    // });
-    console.warn('Restore revision needs to be updated for git-based backend');
-    setViewingRevision(null);
     setActiveTab('view');
   };
 
@@ -192,8 +180,8 @@ const CenterPanel: React.FC = () => {
                 <div className="p-3 bg-accent rounded-lg border border-accent-foreground/20">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">
-                      Viewing Revision #{viewingRevision.revision_number}
-                      {viewingRevision.comment && ` - ${viewingRevision.comment}`}
+                      Viewing Revision {viewingRevision.short_sha}
+                      {viewingRevision.message && ` - ${viewingRevision.message}`}
                     </span>
                     <Button
                       variant="ghost"
@@ -208,7 +196,8 @@ const CenterPanel: React.FC = () => {
             )}
             <div className="flex-1 overflow-hidden">
               <ProseMirrorEditor
-                initialContent={viewingRevision?.content || currentPage.content}
+                key={`view-${currentPage.title}`}
+                initialContent={currentPage.content || ''}
                 editable={false}
                 className="h-full"
               />
@@ -219,8 +208,9 @@ const CenterPanel: React.FC = () => {
             <EditorToolbar editorView={editorView} />
             <div className="flex-1 overflow-hidden">
               <ProseMirrorEditor
+                key={`edit-${currentPage.title}`}
                 ref={editorRef}
-                initialContent={currentPage.content}
+                initialContent={currentPage.content || ''}
                 editable={true}
                 onChange={handleEditorChange}
                 onViewReady={handleEditorViewReady}
@@ -234,7 +224,6 @@ const CenterPanel: React.FC = () => {
               <RevisionHistory
                 pageTitle={currentPage.title}
                 onRevisionSelect={handleRevisionSelect}
-                onRestoreRevision={handleRestoreRevision}
               />
             </div>
           </TabsContent>
