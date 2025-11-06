@@ -72,6 +72,29 @@ async def get_pages(limit: int = 100):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# API endpoints for revisions (git history) - MUST come before general {title:path} routes
+@app.get("/api/pages/{title:path}/history")
+async def get_page_history(title: str, limit: int = 50):
+    """Get commit history for a page"""
+    try:
+        history = wiki.get_page_history(title, limit)
+        return {"title": title, "history": history}
+    except PageNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Page '{title}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/pages/{title:path}/revisions/{commit_sha}")
+async def get_page_at_revision(title: str, commit_sha: str):
+    """Get page content at a specific git commit"""
+    try:
+        page = wiki.get_page_at_revision(title, commit_sha)
+        return page
+    except GitWikiException as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/pages/{title:path}")
 async def get_page(title: str):
     """Get a specific page by title"""
@@ -127,29 +150,6 @@ async def delete_page(title: str, author: str = "user"):
         raise HTTPException(status_code=404, detail=f"Page '{title}' not found")
     except GitWikiException as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# API endpoints for revisions (git history)
-@app.get("/api/pages/{title:path}/history")
-async def get_page_history(title: str, limit: int = 50):
-    """Get commit history for a page"""
-    try:
-        history = wiki.get_page_history(title, limit)
-        return {"title": title, "history": history}
-    except PageNotFoundException:
-        raise HTTPException(status_code=404, detail=f"Page '{title}' not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/pages/{title:path}/revisions/{commit_sha}")
-async def get_page_at_revision(title: str, commit_sha: str):
-    """Get page content at a specific git commit"""
-    try:
-        page = wiki.get_page_at_revision(title, commit_sha)
-        return page
-    except GitWikiException as e:
-        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

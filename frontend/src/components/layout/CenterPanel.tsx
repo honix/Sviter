@@ -232,7 +232,7 @@ const CenterPanel: React.FC = () => {
           <TabsContent value="history" className="flex-1 overflow-hidden mt-0 flex flex-col">
             <div className="flex-1 overflow-hidden">
               <RevisionHistory
-                pageId={currentPage.id}
+                pageTitle={currentPage.title}
                 onRevisionSelect={handleRevisionSelect}
                 onRestoreRevision={handleRestoreRevision}
               />
