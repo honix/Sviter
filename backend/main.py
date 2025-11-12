@@ -1,39 +1,33 @@
-from fastapi import FastAPI, WebSocket, HTTPException, Depends
+from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from database.database import create_tables, get_db_session
-from database.crud import PageCRUD, RevisionCRUD
+from storage import GitWiki, PageNotFoundException, GitWikiException
 from api.websocket import websocket_endpoint
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uvicorn
+from pathlib import Path
 
 # Pydantic models for request/response
 class PageCreate(BaseModel):
     title: str
     content: str = ""
-    content_json: Optional[Dict[str, Any]] = None
     author: str = "user"
     tags: List[str] = []
 
 class PageUpdate(BaseModel):
-    title: Optional[str] = None
     content: Optional[str] = None
-    content_json: Optional[Dict[str, Any]] = None
     author: Optional[str] = None
     tags: Optional[List[str]] = None
 
-class RevisionCreate(BaseModel):
-    content: str
-    content_json: Optional[Dict[str, Any]] = None
-    author: str = "user"
-    comment: Optional[str] = None
+# Initialize GitWiki
+WIKI_REPO_PATH = str(Path(__file__).parent.parent / "wiki-repo")
+wiki = GitWiki(WIKI_REPO_PATH)
 
 # Create FastAPI app
 app = FastAPI(
     title="AI Wiki Backend",
-    description="Backend API for AI-powered wiki system",
-    version="1.0.0"
+    description="Backend API for git-based AI-powered wiki system",
+    version="2.0.0"
 )
 
 # Add CORS middleware for frontend connections
@@ -45,15 +39,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize database tables on startup
+# Startup event
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database tables"""
+    """Verify wiki repository on startup"""
     try:
-        create_tables()
-        print("✅ Database tables initialized successfully")
+        pages = wiki.list_pages(limit=1)
+        print(f"✅ Wiki repository loaded successfully ({WIKI_REPO_PATH})")
+        print(f"📚 Found {len(wiki.list_pages())} pages")
     except Exception as e:
-        print(f"❌ Error initializing database: {e}")
+        print(f"❌ Error loading wiki repository: {e}")
 
 # WebSocket endpoint
 @app.websocket("/ws/{client_id}")
@@ -65,163 +60,147 @@ async def websocket_handler(websocket: WebSocket, client_id: str):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "ai-wiki-backend"}
+    return {"status": "healthy", "service": "ai-wiki-backend", "storage": "git"}
 
 # API endpoints for pages
 @app.get("/api/pages")
-async def get_pages(db: Session = Depends(get_db_session)):
+async def get_pages(limit: int = 100):
     """Get all pages"""
     try:
-        pages = PageCRUD.get_all_pages(db)
-        return {"pages": [page.to_dict() for page in pages]}
+        pages = wiki.list_pages(limit=limit)
+        return {"pages": pages}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/pages/{page_id}")
-async def get_page(page_id: int, db: Session = Depends(get_db_session)):
-    """Get a specific page by ID"""
+# API endpoints for revisions (git history) - MUST come before general {title:path} routes
+@app.get("/api/pages/{title:path}/history")
+async def get_page_history(title: str, limit: int = 50):
+    """Get commit history for a page"""
     try:
-        page = PageCRUD.get_page_by_id(db, page_id)
-        if not page:
-            raise HTTPException(status_code=404, detail="Page not found")
-        return page.to_dict()
-    except HTTPException:
-        raise
+        history = wiki.get_page_history(title, limit)
+        return {"title": title, "history": history}
+    except PageNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Page '{title}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/pages/{title:path}/revisions/{commit_sha}")
+async def get_page_at_revision(title: str, commit_sha: str):
+    """Get page content at a specific git commit"""
+    try:
+        page = wiki.get_page_at_revision(title, commit_sha)
+        return page
+    except GitWikiException as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/pages/{title:path}")
+async def get_page(title: str):
+    """Get a specific page by title"""
+    try:
+        page = wiki.get_page(title)
+        return page
+    except PageNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Page '{title}' not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/pages")
-async def create_page(page_data: PageCreate, db: Session = Depends(get_db_session)):
+async def create_page(page_data: PageCreate):
     """Create a new page"""
     try:
-        new_page = PageCRUD.create_page(
-            db=db,
+        new_page = wiki.create_page(
             title=page_data.title,
             content=page_data.content,
-            content_json=page_data.content_json,
             author=page_data.author,
             tags=page_data.tags
         )
-
-        # Create initial revision
-        RevisionCRUD.create_revision(
-            db=db,
-            page_id=new_page.id,
-            content=new_page.content,
-            content_json=new_page.content_json,
-            author=new_page.author,
-            comment="Initial version"
-        )
-
-        return new_page.to_dict()
+        return new_page
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/pages/{page_id}")
-async def update_page(page_id: int, page_data: PageUpdate, db: Session = Depends(get_db_session)):
-    """Update an existing page and create a revision"""
+@app.put("/api/pages/{title:path}")
+async def update_page(title: str, page_data: PageUpdate):
+    """Update an existing page"""
     try:
-        updated_page = PageCRUD.update_page(
-            db=db,
-            page_id=page_id,
-            title=page_data.title,
-            content=page_data.content,
-            content_json=page_data.content_json,
-            author=page_data.author,
+        updated_page = wiki.update_page(
+            title=title,
+            content=page_data.content if page_data.content is not None else wiki.get_page(title)["content"],
+            author=page_data.author or "user",
             tags=page_data.tags
         )
-
-        if not updated_page:
-            raise HTTPException(status_code=404, detail="Page not found")
-
-        # Create a revision after update (only if content changed)
-        if page_data.content is not None or page_data.content_json is not None:
-            RevisionCRUD.create_revision(
-                db=db,
-                page_id=updated_page.id,
-                content=updated_page.content,
-                content_json=updated_page.content_json,
-                author=page_data.author or updated_page.author,
-                comment=None
-            )
-
-        return updated_page.to_dict()
-    except HTTPException:
-        raise
+        return updated_page
+    except PageNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Page '{title}' not found")
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# API endpoints for revisions
-@app.get("/api/pages/{page_id}/revisions")
-async def get_revisions(page_id: int, limit: int = 50, db: Session = Depends(get_db_session)):
-    """Get all revisions for a page"""
-    try:
-        # Check if page exists
-        page = PageCRUD.get_page_by_id(db, page_id)
-        if not page:
-            raise HTTPException(status_code=404, detail="Page not found")
-
-        revisions = RevisionCRUD.get_revisions_by_page(db, page_id, limit)
-        return {"revisions": [revision.to_dict() for revision in revisions]}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/pages/{page_id}/revisions/{revision_id}")
-async def get_revision(page_id: int, revision_id: int, db: Session = Depends(get_db_session)):
-    """Get a specific revision"""
-    try:
-        # Check if page exists
-        page = PageCRUD.get_page_by_id(db, page_id)
-        if not page:
-            raise HTTPException(status_code=404, detail="Page not found")
-
-        revision = RevisionCRUD.get_revision(db, revision_id)
-        if not revision or revision.page_id != page_id:
-            raise HTTPException(status_code=404, detail="Revision not found")
-
-        return revision.to_dict()
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/pages/{page_id}/revisions")
-async def create_revision(page_id: int, revision_data: RevisionCreate, db: Session = Depends(get_db_session)):
-    """Manually create a revision for a page"""
-    try:
-        # Check if page exists
-        page = PageCRUD.get_page_by_id(db, page_id)
-        if not page:
-            raise HTTPException(status_code=404, detail="Page not found")
-
-        new_revision = RevisionCRUD.create_revision(
-            db=db,
-            page_id=page_id,
-            content=revision_data.content,
-            content_json=revision_data.content_json,
-            author=revision_data.author,
-            comment=revision_data.comment
-        )
-
-        return new_revision.to_dict()
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/api/pages/{page_id}")
-async def delete_page(page_id: int, db: Session = Depends(get_db_session)):
+@app.delete("/api/pages/{title:path}")
+async def delete_page(title: str, author: str = "user"):
     """Delete a page"""
     try:
-        success = PageCRUD.delete_page(db=db, page_id=page_id)
-        if not success:
-            raise HTTPException(status_code=404, detail="Page not found")
+        wiki.delete_page(title, author)
+        return {"message": f"Page '{title}' deleted successfully"}
+    except PageNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Page '{title}' not found")
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-        return {"message": "Page deleted successfully"}
-    except HTTPException:
-        raise
+# Git Branch API endpoints
+@app.get("/api/git/branches")
+async def get_branches():
+    """Get list of all git branches"""
+    try:
+        branches = wiki.list_branches()
+        return {"branches": branches}
+    except GitWikiException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/git/current-branch")
+async def get_current_branch():
+    """Get currently active git branch"""
+    try:
+        current = wiki.get_current_branch()
+        return {"branch": current}
+    except GitWikiException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/git/checkout")
+async def checkout_branch(data: dict):
+    """Switch to a different branch"""
+    try:
+        branch_name = data.get("branch")
+        if not branch_name:
+            raise HTTPException(status_code=400, detail="Branch name is required")
+
+        wiki.checkout_branch(branch_name)
+        return {"message": f"Switched to branch '{branch_name}'", "branch": branch_name}
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/git/create-branch")
+async def create_branch(data: dict):
+    """Create a new branch"""
+    try:
+        branch_name = data.get("name")
+        from_branch = data.get("from", "main")
+
+        if not branch_name:
+            raise HTTPException(status_code=400, detail="Branch name is required")
+
+        created_branch = wiki.create_branch(branch_name, from_branch)
+        return {"message": f"Created and switched to branch '{created_branch}'", "branch": created_branch}
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -230,12 +209,19 @@ async def delete_page(page_id: int, db: Session = Depends(get_db_session)):
 async def root():
     """Root endpoint with API information"""
     return {
-        "message": "AI Wiki Backend API",
-        "version": "1.0.0",
+        "message": "AI Wiki Backend API (Git-based)",
+        "version": "2.0.0",
+        "storage": "git",
         "websocket_endpoint": "/ws/{client_id}",
         "api_endpoints": {
             "pages": "/api/pages",
-            "single_page": "/api/pages/{page_id}"
+            "single_page": "/api/pages/{title}",
+            "page_history": "/api/pages/{title}/history",
+            "page_revision": "/api/pages/{title}/revisions/{commit_sha}",
+            "git_branches": "/api/git/branches",
+            "git_current_branch": "/api/git/current-branch",
+            "git_checkout": "POST /api/git/checkout",
+            "git_create_branch": "POST /api/git/create-branch"
         },
         "documentation": "/docs"
     }

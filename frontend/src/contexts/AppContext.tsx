@@ -45,11 +45,11 @@ function appReducer(state: AppState, action: AppAction): AppState {
 
     case 'UPDATE_PAGE':
       const updatedPages = state.pages.map(page =>
-        page.id === action.payload.id
+        page.title === action.payload.title
           ? { ...page, ...action.payload.updates, updated_at: new Date().toISOString() }
           : page
       );
-      const updatedCurrentPage = state.currentPage?.id === action.payload.id
+      const updatedCurrentPage = state.currentPage?.title === action.payload.title
         ? { ...state.currentPage, ...action.payload.updates, updated_at: new Date().toISOString() }
         : state.currentPage;
 
@@ -60,8 +60,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
       };
 
     case 'DELETE_PAGE':
-      const remainingPages = state.pages.filter(page => page.id !== action.payload);
-      const newCurrentPage = state.currentPage?.id === action.payload
+      const remainingPages = state.pages.filter(page => page.title !== action.payload);
+      const newCurrentPage = state.currentPage?.title === action.payload
         ? (remainingPages.length > 0 ? remainingPages[0] : null)
         : state.currentPage;
 
@@ -105,9 +105,9 @@ interface AppContextType {
   actions: {
     setPages: (pages: Page[]) => void;
     addPage: (page: Page) => void;
-    updatePage: (id: number, updates: Partial<Page>) => Promise<void>;
-    deletePage: (id: number) => void;
-    setCurrentPage: (page: Page | null) => void;
+    updatePage: (title: string, updates: Partial<Page>) => Promise<void>;
+    deletePage: (title: string) => Promise<void>;
+    setCurrentPage: (page: Page | null) => Promise<void>;
     setViewMode: (mode: ViewMode) => void;
     setLoading: (loading: boolean) => void;
     setError: (error: string | null) => void;
@@ -177,7 +177,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Set current page to first page if none selected and pages exist
       if (!state.currentPage && backendPages.length > 0) {
-        dispatch({ type: 'SET_CURRENT_PAGE', payload: backendPages[0] });
+        // Fetch full content for the first page
+        try {
+          const pageResponse = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(backendPages[0].title)}`);
+          if (pageResponse.ok) {
+            const fullPage = await pageResponse.json();
+            dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
+          } else {
+            dispatch({ type: 'SET_CURRENT_PAGE', payload: backendPages[0] });
+          }
+        } catch (pageErr) {
+          console.error('Error loading first page content:', pageErr);
+          dispatch({ type: 'SET_CURRENT_PAGE', payload: backendPages[0] });
+        }
       }
     } catch (err) {
       dispatch({ type: 'SET_ERROR', payload: 'Failed to load pages' });
@@ -218,12 +230,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const actions = {
     setPages: (pages: Page[]) => dispatch({ type: 'SET_PAGES', payload: pages }),
     addPage: (page: Page) => dispatch({ type: 'ADD_PAGE', payload: page }),
-    updatePage: async (id: number, updates: Partial<Page>) => {
+    updatePage: async (title: string, updates: Partial<Page>) => {
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'SET_ERROR', payload: null });
 
       try {
-        const response = await fetch(`http://localhost:8000/api/pages/${id}`, {
+        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(title)}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -236,7 +248,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
 
         const updatedPage = await response.json();
-        dispatch({ type: 'UPDATE_PAGE', payload: { id, updates: updatedPage } });
+        dispatch({ type: 'UPDATE_PAGE', payload: { title, updates: updatedPage } });
       } catch (err) {
         dispatch({ type: 'SET_ERROR', payload: 'Failed to update page' });
         console.error('Error updating page:', err);
@@ -244,8 +256,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dispatch({ type: 'SET_LOADING', payload: false });
       }
     },
-    deletePage: (id: number) => dispatch({ type: 'DELETE_PAGE', payload: id }),
-    setCurrentPage: (page: Page | null) => dispatch({ type: 'SET_CURRENT_PAGE', payload: page }),
+    deletePage: async (title: string) => {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      dispatch({ type: 'SET_ERROR', payload: null });
+
+      try {
+        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(title)}?author=user`, {
+          method: 'DELETE',
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        dispatch({ type: 'DELETE_PAGE', payload: title });
+      } catch (err) {
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to delete page' });
+        console.error('Error deleting page:', err);
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    },
+    setCurrentPage: async (page: Page | null) => {
+      if (!page) {
+        dispatch({ type: 'SET_CURRENT_PAGE', payload: null });
+        return;
+      }
+
+      // Fetch full page content from API
+      dispatch({ type: 'SET_LOADING', payload: true });
+      dispatch({ type: 'SET_ERROR', payload: null });
+
+      try {
+        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(page.title)}`);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const fullPage = await response.json();
+        dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
+      } catch (err) {
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to load page content' });
+        console.error('Error loading page:', err);
+        // Fallback to the page object without content
+        dispatch({ type: 'SET_CURRENT_PAGE', payload: page });
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    },
     setViewMode: (mode: ViewMode) => dispatch({ type: 'SET_VIEW_MODE', payload: mode }),
     setLoading: (loading: boolean) => dispatch({ type: 'SET_LOADING', payload: loading }),
     setError: (error: string | null) => dispatch({ type: 'SET_ERROR', payload: error }),

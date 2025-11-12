@@ -1,6 +1,4 @@
 from fastapi import WebSocket, WebSocketDisconnect
-from sqlalchemy.orm import Session
-from database.database import get_db_session
 from ai.chat import ChatHandler
 import json
 from typing import Dict, Any

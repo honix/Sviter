@@ -1,8 +1,7 @@
 from typing import Dict, List, Any, Optional
-from sqlalchemy.orm import Session
-from database.crud import PageCRUD
-from database.database import get_db_session
+from storage import GitWiki, PageNotFoundException
 import json
+from datetime import datetime
 
 class WikiTools:
     """Wiki-specific AI tools for page operations"""
@@ -99,107 +98,97 @@ class WikiTools:
         ]
     
     @staticmethod
-    def execute_tool(tool_name: str, arguments: Dict[str, Any], db: Session = None) -> str:
+    def execute_tool(tool_name: str, arguments: Dict[str, Any], wiki: GitWiki = None) -> str:
         """Execute a wiki tool and return the result as a string"""
-        if db is None:
-            db = get_db_session()
-        
+        if wiki is None:
+            # Default wiki repository path
+            wiki = GitWiki("../wiki-repo")
+
         try:
             if tool_name == "read_page":
-                return WikiTools._read_page(db, arguments.get("title"))
+                return WikiTools._read_page(wiki, arguments.get("title"))
             elif tool_name == "edit_page":
-                return WikiTools._edit_page(db, arguments)
+                return WikiTools._edit_page(wiki, arguments)
             elif tool_name == "find_pages":
-                return WikiTools._find_pages(db, arguments)
+                return WikiTools._find_pages(wiki, arguments)
             elif tool_name == "list_all_pages":
-                return WikiTools._list_all_pages(db, arguments)
+                return WikiTools._list_all_pages(wiki, arguments)
             else:
                 return f"Unknown tool: {tool_name}"
         except Exception as e:
             return f"Error executing {tool_name}: {str(e)}"
-        finally:
-            if db:
-                db.close()
     
     @staticmethod
-    def _read_page(db: Session, title: str) -> str:
+    def _read_page(wiki: GitWiki, title: str) -> str:
         """Read a wiki page by title"""
         if not title:
             return "Error: Page title is required"
-        
-        page = PageCRUD.get_page_by_title(db, title)
-        if not page:
+
+        try:
+            page = wiki.get_page(title)
+
+            result = {
+                "title": page["title"],
+                "content": page["content"],
+                "author": page["author"],
+                "created_at": page["created_at"],
+                "updated_at": page["updated_at"],
+                "tags": page["tags"]
+            }
+
+            return f"Page '{title}' found:\n\nContent:\n{page['content']}\n\nMetadata: {json.dumps(result, indent=2)}"
+        except PageNotFoundException:
             return f"Page '{title}' not found. You can create it using the edit_page tool."
-        
-        result = {
-            "title": page.title,
-            "content": page.content,
-            "author": page.author,
-            "created_at": page.created_at.isoformat() if page.created_at else None,
-            "updated_at": page.updated_at.isoformat() if page.updated_at else None,
-            "tags": page.tags or []
-        }
-        
-        return f"Page '{title}' found:\n\nContent:\n{page.content}\n\nMetadata: {json.dumps(result, indent=2)}"
     
     @staticmethod
-    def _edit_page(db: Session, arguments: Dict[str, Any]) -> str:
+    def _edit_page(wiki: GitWiki, arguments: Dict[str, Any]) -> str:
         """Edit or create a wiki page"""
         title = arguments.get("title")
         content = arguments.get("content")
-        author = arguments.get("author", "ai-assistant")
+        author = arguments.get("author", "AI Agent")
         tags = arguments.get("tags", [])
-        
+
         if not title or content is None:
             return "Error: Both title and content are required"
-        
-        # Check if page exists
-        existing_page = PageCRUD.get_page_by_title(db, title)
-        
-        if existing_page:
-            # Update existing page
-            updated_page = PageCRUD.update_page_by_title(db, title, content=content, author=author, tags=tags)
-            if updated_page:
-                return f"Page '{title}' updated successfully. New content length: {len(content)} characters."
-            else:
-                return f"Error: Failed to update page '{title}'"
-        else:
-            # Create new page
-            new_page = PageCRUD.create_page(db, title=title, content=content, author=author, tags=tags)
-            if new_page:
-                return f"Page '{title}' created successfully. Content length: {len(content)} characters."
-            else:
-                return f"Error: Failed to create page '{title}'"
+
+        try:
+            # Try to get existing page
+            wiki.get_page(title)
+            # Page exists, update it
+            wiki.update_page(title, content, author, tags)
+            return f"Page '{title}' updated successfully. New content length: {len(content)} characters."
+        except PageNotFoundException:
+            # Page doesn't exist, create it
+            wiki.create_page(title, content, author, tags)
+            return f"Page '{title}' created successfully. Content length: {len(content)} characters."
     
     @staticmethod
-    def _find_pages(db: Session, arguments: Dict[str, Any]) -> str:
+    def _find_pages(wiki: GitWiki, arguments: Dict[str, Any]) -> str:
         """Search for wiki pages"""
         query = arguments.get("query")
         limit = arguments.get("limit", 10)
-        
+
         if not query:
             return "Error: Search query is required"
-        
-        pages = PageCRUD.search_pages(db, query)
-        
+
+        pages = wiki.search_pages(query, limit)
+
         if not pages:
             return f"No pages found matching '{query}'"
-        
-        # Limit results
-        pages = pages[:limit]
-        
+
         results = []
         for page in pages:
             # Create excerpt (first 200 characters)
-            excerpt = page.content[:200] + "..." if len(page.content) > 200 else page.content
+            content = page["content"]
+            excerpt = content[:200] + "..." if len(content) > 200 else content
             results.append({
-                "title": page.title,
+                "title": page["title"],
                 "excerpt": excerpt,
-                "author": page.author,
-                "updated_at": page.updated_at.isoformat() if page.updated_at else None,
-                "tags": page.tags or []
+                "author": page["author"],
+                "updated_at": page["updated_at"],
+                "tags": page["tags"]
             })
-        
+
         result_text = f"Found {len(pages)} pages matching '{query}':\n\n"
         for i, result in enumerate(results, 1):
             result_text += f"{i}. **{result['title']}** (by {result['author']})\n"
@@ -207,26 +196,40 @@ class WikiTools:
             if result['tags']:
                 result_text += f"   Tags: {', '.join(result['tags'])}\n"
             result_text += "\n"
-        
+
         return result_text
     
     @staticmethod
-    def _list_all_pages(db: Session, arguments: Dict[str, Any]) -> str:
+    def _list_all_pages(wiki: GitWiki, arguments: Dict[str, Any]) -> str:
         """List all wiki pages"""
         limit = arguments.get("limit", 50)
-        
-        pages = PageCRUD.get_all_pages(db, limit=limit)
-        
+
+        pages = wiki.list_pages(limit=limit)
+
         if not pages:
             return "No pages found in the wiki."
-        
+
         result_text = f"Found {len(pages)} pages:\n\n"
         for i, page in enumerate(pages, 1):
-            result_text += f"{i}. **{page.title}** (by {page.author})\n"
-            result_text += f"   Created: {page.created_at.strftime('%Y-%m-%d %H:%M') if page.created_at else 'Unknown'}\n"
-            result_text += f"   Updated: {page.updated_at.strftime('%Y-%m-%d %H:%M') if page.updated_at else 'Unknown'}\n"
-            if page.tags:
-                result_text += f"   Tags: {', '.join(page.tags)}\n"
+            result_text += f"{i}. **{page['title']}** (by {page['author']})\n"
+
+            # Format dates if available
+            if page.get('created_at'):
+                try:
+                    created = datetime.fromisoformat(page['created_at']).strftime('%Y-%m-%d %H:%M')
+                    result_text += f"   Created: {created}\n"
+                except:
+                    result_text += f"   Created: {page['created_at']}\n"
+
+            if page.get('updated_at'):
+                try:
+                    updated = datetime.fromisoformat(page['updated_at']).strftime('%Y-%m-%d %H:%M')
+                    result_text += f"   Updated: {updated}\n"
+                except:
+                    result_text += f"   Updated: {page['updated_at']}\n"
+
+            if page.get('tags'):
+                result_text += f"   Tags: {', '.join(page['tags'])}\n"
             result_text += "\n"
-        
+
         return result_text
