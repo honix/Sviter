@@ -13,6 +13,8 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  const buttonRef = React.useRef<HTMLButtonElement>(null);
 
   // Fetch branches and current branch on mount
   useEffect(() => {
@@ -126,13 +128,25 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
     return 'text-blue-600 dark:text-blue-400';
   };
 
+  const handleToggleDropdown = () => {
+    if (!isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 4,
+        left: rect.left
+      });
+    }
+    setIsOpen(!isOpen);
+  };
+
   return (
     <div className="relative">
       {/* Branch Button */}
       <Button
+        ref={buttonRef}
         variant="outline"
         size="sm"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={handleToggleDropdown}
         disabled={isLoading}
         className="w-full justify-start gap-2"
       >
@@ -148,7 +162,7 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
         <>
           {/* Backdrop */}
           <div
-            className="fixed inset-0 z-40"
+            className="fixed inset-0 z-[9998]"
             onClick={() => {
               setIsOpen(false);
               setIsCreating(false);
@@ -156,7 +170,13 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
           />
 
           {/* Menu */}
-          <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-background border rounded-md shadow-lg max-h-80 overflow-y-auto">
+          <div
+            className="fixed z-[9999] bg-background border rounded-md shadow-xl max-h-80 overflow-y-auto min-w-[400px]"
+            style={{
+              top: `${dropdownPosition.top}px`,
+              left: `${dropdownPosition.left}px`
+            }}
+          >
             {/* Branch List */}
             <div className="py-1">
               {branches.map((branch) => (
@@ -168,10 +188,10 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
                     branch === currentBranch ? 'bg-accent' : ''
                   }`}
                 >
-                  <GitBranch className={`h-4 w-4 ${getBranchColor(branch)}`} />
-                  <span className="flex-1 truncate">{branch}</span>
+                  <GitBranch className={`h-4 w-4 flex-shrink-0 ${getBranchColor(branch)}`} />
+                  <span className="flex-1 font-mono text-sm">{branch}</span>
                   {branch === currentBranch && (
-                    <Check className="h-4 w-4 text-primary" />
+                    <Check className="h-4 w-4 flex-shrink-0 text-primary" />
                   )}
                 </button>
               ))}

@@ -556,3 +556,248 @@ class GitWiki:
             return branch_name
         except GitCommandError as e:
             raise GitWikiException(f"Failed to create branch '{branch_name}': {e}")
+
+    def delete_branch(self, branch_name: str, force: bool = False) -> bool:
+        """
+        Delete a branch.
+
+        Args:
+            branch_name: Name of the branch to delete
+            force: Force deletion even if branch has unmerged changes
+
+        Returns:
+            True if successful
+
+        Raises:
+            GitWikiException: If branch doesn't exist or deletion fails
+        """
+        try:
+            if branch_name not in [b.name for b in self.repo.branches]:
+                raise GitWikiException(f"Branch '{branch_name}' does not exist")
+
+            # Can't delete current branch
+            if branch_name == self.repo.active_branch.name:
+                raise GitWikiException(f"Cannot delete current branch '{branch_name}'")
+
+            # Delete branch
+            self.repo.delete_head(branch_name, force=force)
+            return True
+        except GitCommandError as e:
+            raise GitWikiException(f"Failed to delete branch '{branch_name}': {e}")
+
+    def merge_branch(self, source_branch: str, target_branch: str = None,
+                    author: str = "AI Agent", no_ff: bool = True) -> bool:
+        """
+        Merge source branch into target branch.
+
+        Args:
+            source_branch: Branch to merge from
+            target_branch: Branch to merge into (default: current branch)
+            author: Author for merge commit
+            no_ff: Create merge commit even if fast-forward is possible
+
+        Returns:
+            True if successful
+
+        Raises:
+            GitWikiException: If merge fails or branches don't exist
+        """
+        try:
+            # If target not specified, use current branch
+            if target_branch is None:
+                target_branch = self.repo.active_branch.name
+
+            # Verify branches exist
+            branch_names = [b.name for b in self.repo.branches]
+            if source_branch not in branch_names:
+                raise GitWikiException(f"Source branch '{source_branch}' does not exist")
+            if target_branch not in branch_names:
+                raise GitWikiException(f"Target branch '{target_branch}' does not exist")
+
+            # Save current branch to restore later if needed
+            original_branch = self.repo.active_branch.name
+
+            # Checkout target branch
+            if original_branch != target_branch:
+                self.repo.git.checkout(target_branch)
+
+            # Perform merge
+            merge_args = ['--no-ff'] if no_ff else []
+            self.repo.git.merge(source_branch, *merge_args)
+
+            return True
+        except GitCommandError as e:
+            # Check if it's a merge conflict
+            if "CONFLICT" in str(e) or "conflict" in str(e).lower():
+                raise GitWikiException(f"Merge conflict: {e}")
+            raise GitWikiException(f"Failed to merge '{source_branch}' into '{target_branch}': {e}")
+
+    def tag_branch(self, tag_name: str, branch_name: str = None, message: str = None) -> bool:
+        """
+        Create a tag at a branch's current commit.
+
+        Args:
+            tag_name: Name of the tag to create
+            branch_name: Branch to tag (default: current branch)
+            message: Optional tag message
+
+        Returns:
+            True if successful
+
+        Raises:
+            GitWikiException: If tagging fails
+        """
+        try:
+            # Get the commit to tag
+            if branch_name:
+                if branch_name not in [b.name for b in self.repo.branches]:
+                    raise GitWikiException(f"Branch '{branch_name}' does not exist")
+                commit = self.repo.branches[branch_name].commit
+            else:
+                commit = self.repo.head.commit
+
+            # Create tag
+            if message:
+                self.repo.create_tag(tag_name, ref=commit, message=message)
+            else:
+                self.repo.create_tag(tag_name, ref=commit)
+
+            return True
+        except GitCommandError as e:
+            if "already exists" in str(e):
+                raise GitWikiException(f"Tag '{tag_name}' already exists")
+            raise GitWikiException(f"Failed to create tag '{tag_name}': {e}")
+
+    def get_branch_tags(self, branch_name: str = None) -> List[str]:
+        """
+        Get all tags pointing to commits in a branch.
+
+        Args:
+            branch_name: Branch to check (default: current branch)
+
+        Returns:
+            List of tag names
+
+        Raises:
+            GitWikiException: If operation fails
+        """
+        try:
+            if branch_name:
+                if branch_name not in [b.name for b in self.repo.branches]:
+                    raise GitWikiException(f"Branch '{branch_name}' does not exist")
+                commit = self.repo.branches[branch_name].commit
+            else:
+                commit = self.repo.head.commit
+
+            # Find tags pointing to this commit
+            tags = [tag.name for tag in self.repo.tags if tag.commit == commit]
+            return tags
+        except Exception as e:
+            raise GitWikiException(f"Failed to get tags: {e}")
+
+    def list_branches_with_prefix(self, prefix: str) -> List[str]:
+        """
+        List all branches matching a prefix pattern.
+
+        Args:
+            prefix: Branch name prefix (e.g., "agent/")
+
+        Returns:
+            List of matching branch names
+
+        Raises:
+            GitWikiException: If operation fails
+        """
+        try:
+            all_branches = [branch.name for branch in self.repo.branches]
+            return [b for b in all_branches if b.startswith(prefix)]
+        except Exception as e:
+            raise GitWikiException(f"Failed to list branches: {e}")
+
+    def get_diff(self, ref1: str, ref2: str, context_lines: int = 3) -> str:
+        """
+        Get unified diff between two refs (branches, commits, tags).
+
+        Args:
+            ref1: First reference (e.g., "main")
+            ref2: Second reference (e.g., "agent/checker/123")
+            context_lines: Number of context lines in diff
+
+        Returns:
+            Unified diff as string
+
+        Raises:
+            GitWikiException: If refs don't exist or operation fails
+        """
+        try:
+            diff = self.repo.git.diff(ref1, ref2, unified=context_lines)
+            return diff
+        except GitCommandError as e:
+            raise GitWikiException(f"Failed to get diff between '{ref1}' and '{ref2}': {e}")
+
+    def get_diff_stat(self, ref1: str, ref2: str) -> Dict[str, Any]:
+        """
+        Get diff statistics between two refs.
+
+        Args:
+            ref1: First reference (e.g., "main")
+            ref2: Second reference (e.g., "agent/checker/123")
+
+        Returns:
+            Dictionary with diff statistics
+
+        Raises:
+            GitWikiException: If refs don't exist or operation fails
+        """
+        try:
+            # Get stat output
+            stat = self.repo.git.diff(ref1, ref2, stat=True)
+
+            # Get file list with changes
+            files_changed = []
+            lines = stat.strip().split('\n')
+
+            # Parse individual file changes
+            for line in lines[:-1]:  # Skip summary line
+                if '|' in line:
+                    parts = line.split('|')
+                    file_path = parts[0].strip()
+                    changes = parts[1].strip()
+                    files_changed.append({
+                        "path": file_path,
+                        "changes": changes
+                    })
+
+            # Parse summary line (e.g., "3 files changed, 45 insertions(+), 12 deletions(-)")
+            summary = lines[-1] if lines else ""
+
+            return {
+                "files_changed": files_changed,
+                "summary": summary,
+                "raw_stat": stat
+            }
+        except GitCommandError as e:
+            raise GitWikiException(f"Failed to get diff stats: {e}")
+
+    def get_commit_message(self, branch_name: str, format_str: str = "%s%n%n%b") -> str:
+        """
+        Get the commit message from a branch's HEAD.
+
+        Args:
+            branch_name: Branch name
+            format_str: Git log format string (default: subject + body)
+
+        Returns:
+            Commit message
+
+        Raises:
+            GitWikiException: If branch doesn't exist or operation fails
+        """
+        try:
+            if branch_name not in [b.name for b in self.repo.branches]:
+                raise GitWikiException(f"Branch '{branch_name}' does not exist")
+
+            message = self.repo.git.log('-1', f'--format={format_str}', branch_name)
+            return message.strip()
+        except GitCommandError as e:
+            raise GitWikiException(f"Failed to get commit message: {e}")
