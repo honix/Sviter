@@ -10,7 +10,7 @@ interface DiffViewerProps {
 export function DiffViewer({ diff }: DiffViewerProps) {
   if (!diff || diff.trim() === '') {
     return (
-      <div className="text-gray-400 p-4 text-center">
+      <div className="text-muted-foreground p-4 text-center border border-border rounded-md">
         No changes to display
       </div>
     );
@@ -20,25 +20,25 @@ export function DiffViewer({ diff }: DiffViewerProps) {
 
   const getLineClass = (line: string): string => {
     if (line.startsWith('+++') || line.startsWith('---')) {
-      return 'text-gray-400 font-semibold';
+      return 'text-muted-foreground font-semibold';
     }
     if (line.startsWith('+')) {
-      return 'bg-green-900/30 text-green-200';
+      return 'bg-primary/10 text-primary';
     }
     if (line.startsWith('-')) {
-      return 'bg-red-900/30 text-red-200';
+      return 'bg-destructive/10 text-destructive';
     }
     if (line.startsWith('@@')) {
-      return 'text-blue-400 bg-blue-900/20';
+      return 'text-accent-foreground bg-accent';
     }
     if (line.startsWith('diff --git')) {
-      return 'text-purple-400 font-semibold';
+      return 'text-primary font-semibold';
     }
-    return 'text-gray-300';
+    return 'text-foreground';
   };
 
   return (
-    <div className="bg-gray-950 rounded-lg border border-gray-800 overflow-hidden">
+    <div className="bg-muted/30 rounded-md border border-border overflow-hidden">
       <div className="overflow-x-auto">
         <pre className="p-4 text-sm font-mono">
           {lines.map((line, index) => (

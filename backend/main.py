@@ -214,6 +214,40 @@ async def create_branch(data: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/api/git/branches/{branch_name:path}")
+async def delete_branch(branch_name: str, force: bool = False):
+    """Delete a git branch"""
+    try:
+        current_branch = wiki.get_current_branch()
+        if branch_name == current_branch:
+            raise HTTPException(status_code=400, detail="Cannot delete the currently checked out branch")
+
+        if branch_name == "main":
+            raise HTTPException(status_code=400, detail="Cannot delete the main branch")
+
+        success = wiki.delete_branch(branch_name, force=force)
+        if success:
+            return {"message": f"Branch '{branch_name}' deleted successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete branch")
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/git/branches/{branch_name:path}/tags")
+async def get_branch_tags(branch_name: str):
+    """Get tags for a specific branch"""
+    try:
+        tags = wiki.get_branch_tags(branch_name)
+        return {"branch": branch_name, "tags": tags}
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Agent Management API endpoints
 @app.get("/api/agents")
 async def get_agents():

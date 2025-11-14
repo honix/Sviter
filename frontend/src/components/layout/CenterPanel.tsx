@@ -9,11 +9,17 @@ import { RevisionHistory } from '../revisions/RevisionHistory';
 import type { PageRevision } from '../../types/page';
 import { ProseMirrorEditor, type ProseMirrorEditorHandle } from '../editor/ProseMirrorEditor';
 import { EditorToolbar } from '../editor/EditorToolbar';
+import { PRReviewPanel } from '../agents/PRReviewPanel';
 
 const CenterPanel: React.FC = () => {
   const { state, actions } = useAppContext();
-  const { currentPage, viewMode, isLoading, error } = state;
+  const { currentPage, viewMode, isLoading, error, centerPanelMode, selectedPRBranch } = state;
   const { setViewMode, updatePage } = actions;
+
+  // If in PR review mode, show PR review panel
+  if (centerPanelMode === 'pr-review' && selectedPRBranch) {
+    return <PRReviewPanel branch={selectedPRBranch} />;
+  }
 
   const [editContent, setEditContent] = useState('');
   const [editContentJson, setEditContentJson] = useState<any>(null);

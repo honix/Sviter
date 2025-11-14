@@ -11,6 +11,10 @@ interface AppState {
   error: string | null;
   isConnected: boolean;
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
+  // Agent state
+  rightPanelMode: 'chat' | 'agents';
+  centerPanelMode: 'page' | 'pr-review';
+  selectedPRBranch: string | null;
 }
 
 type AppAction =
@@ -23,7 +27,10 @@ type AppAction =
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'SET_CONNECTED'; payload: boolean }
-  | { type: 'SET_CONNECTION_STATUS'; payload: 'connecting' | 'connected' | 'disconnected' | 'error' };
+  | { type: 'SET_CONNECTION_STATUS'; payload: 'connecting' | 'connected' | 'disconnected' | 'error' }
+  | { type: 'SET_RIGHT_PANEL_MODE'; payload: 'chat' | 'agents' }
+  | { type: 'SET_CENTER_PANEL_MODE'; payload: 'page' | 'pr-review' }
+  | { type: 'SET_SELECTED_PR_BRANCH'; payload: string | null };
 
 const initialState: AppState = {
   pages: [],
@@ -32,7 +39,10 @@ const initialState: AppState = {
   isLoading: false,
   error: null,
   isConnected: false,
-  connectionStatus: 'disconnected'
+  connectionStatus: 'disconnected',
+  rightPanelMode: 'chat',
+  centerPanelMode: 'page',
+  selectedPRBranch: null
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -94,6 +104,15 @@ function appReducer(state: AppState, action: AppAction): AppState {
         isConnected
       };
     }
+
+    case 'SET_RIGHT_PANEL_MODE':
+      return { ...state, rightPanelMode: action.payload };
+
+    case 'SET_CENTER_PANEL_MODE':
+      return { ...state, centerPanelMode: action.payload };
+
+    case 'SET_SELECTED_PR_BRANCH':
+      return { ...state, selectedPRBranch: action.payload };
 
     default:
       return state;
@@ -340,6 +359,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
       }
+    },
+
+    // Agent actions
+    setRightPanelMode: (mode: 'chat' | 'agents') => dispatch({ type: 'SET_RIGHT_PANEL_MODE', payload: mode }),
+    setCenterPanelMode: (mode: 'page' | 'pr-review') => dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: mode }),
+    setSelectedPRBranch: (branch: string | null) => dispatch({ type: 'SET_SELECTED_PR_BRANCH', payload: branch }),
+    viewPR: (branch: string) => {
+      dispatch({ type: 'SET_SELECTED_PR_BRANCH', payload: branch });
+      dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'pr-review' });
+    },
+    closePRReview: () => {
+      dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'page' });
+      dispatch({ type: 'SET_SELECTED_PR_BRANCH', payload: null });
     }
   };
 
