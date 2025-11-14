@@ -160,75 +160,161 @@ Custom agents will be supported in post-MVP phases. Users will be able to define
 
 ---
 
-## Configuration System
+## Agent Classes System
 
-### Configuration Hierarchy
+### Python Agent Classes (Hardcoded)
 
-1. **Global Config** (wiki page `Agent:GlobalConfig`):
-   - System-wide settings
-   - Resource limits
-   - Default schedules
+Instead of YAML configuration, agents are defined as Python classes with:
+- **Agent prompt**: System prompt for the AI agent
+- **Schedule**: Cron expression for scheduling
+- **Enabled**: Boolean flag to enable/disable
+- **Settings**: Agent-specific parameters as class attributes
 
-2. **Agent-Specific Config** (wiki pages `Agent:<AgentName>`):
-   - Agent-specific settings
-   - Override global defaults
-   - Enable/disable individual agents
+### Global Configuration
 
-### Global Configuration Example
+```python
+# agents/config.py
 
-**Wiki Page**: `Agent:GlobalConfig`
+class GlobalAgentConfig:
+    """System-wide agent settings"""
 
-```yaml
-# Global Agent Configuration
+    enabled = True
 
-enabled: true
-default_schedule: "0 2 * * *"  # Daily at 2 AM
+    # Loop Control (prevents runaway agents)
+    max_iterations = 15
+    max_tools_per_iteration = 5
+    timeout_seconds = 300
 
-# Resource Limits
-max_concurrent_agents: 3
-max_prs_per_day: 20
-
-# Loop Control
-loop_control:
-  max_iterations: 15
-  max_tools_per_iteration: 5
-  timeout_seconds: 300
-
-# AI Model
-ai_model:
-  primary: "anthropic/claude-3-5-sonnet"
-  temperature: 0.3
+    # AI Model
+    ai_model = "anthropic/claude-3-5-sonnet"
+    temperature = 0.3
 ```
 
-### Agent-Specific Configuration Example
+### Agent Class Example: Information Integrity Agent
 
-**Wiki Page**: `Agent:IntegrityChecker`
+```python
+# agents/integrity_checker.py
 
-```yaml
-agent_type: information_integrity
-enabled: true
-schedule: "0 2 * * *"  # Daily at 2 AM
+class InformationIntegrityAgent:
+    """Agent that ensures information accuracy and consistency"""
 
-settings:
-  check_links: true
-  check_duplicates: true
-  max_pages_per_run: 50
-  max_changes_per_pr: 10
+    schedule = "0 2 * * *"  # Daily at 2 AM
+    enabled = True
+
+    prompt = """
+You are an Information Integrity Agent for a wiki system.
+
+Your task:
+1. Scan wiki pages for broken internal links and consistency issues
+2. When you find issues:
+   - Create a branch: agent/integrity-checker/{timestamp}
+   - Fix the issues
+   - Write a descriptive commit message
+   - Tag the branch for review
+
+Workflow:
+1. create_branch("agent/integrity-checker/{timestamp}")
+2. Use find_pages() to search the wiki
+3. Use read_page() to check pages
+4. Use edit_page() to fix issues
+5. tag_branch_for_review()
+
+Important:
+- Focus only on broken links and integrity issues
+- Do NOT make stylistic changes
+- Say "AGENT_COMPLETE" when done
+
+Begin your analysis.
+    """
 ```
 
-### Configuration Validation
+### Agent Class Example: Style Consistency Agent
 
-The system validates all agent configurations on:
-1. **Agent startup**: Validate before running
-2. **Config save**: Validate when user saves agent config pages
-3. **Manual trigger**: `/api/agents/validate` endpoint
+```python
+# agents/style_checker.py
 
-**Validation checks**:
-- Required fields present
-- Valid cron expressions
-- Valid tool references
-- Resource limits within bounds
-- No circular dependencies
+class StyleConsistencyAgent:
+    """Agent that maintains consistent formatting and structure"""
+
+    schedule = "0 3 * * 0"  # Weekly on Sunday at 3 AM
+    enabled = True
+
+    prompt = """
+You are a Style Consistency Agent for a wiki system.
+
+Your task:
+1. Scan wiki pages for formatting inconsistencies
+2. Fix heading hierarchy issues (H1 → H2 → H3)
+3. Clean up whitespace and formatting issues
+4. Maintain professional tone
+
+When you find issues:
+   - Create a branch: agent/style-checker/{timestamp}
+   - Fix the issues
+   - Write a descriptive commit message
+   - Tag the branch for review
+
+Important:
+- Keep changes focused on style only
+- Do NOT change content meaning
+- Say "AGENT_COMPLETE" when done
+
+Begin your analysis.
+    """
+```
+
+### Agent Class Example: Content Enrichment Agent
+
+```python
+# agents/content_enricher.py
+
+class ContentEnrichmentAgent:
+    """Agent that enhances content with additional context and connections"""
+
+    schedule = "0 5 * * 2"  # Weekly on Tuesday at 5 AM
+    enabled = True
+
+    prompt = """
+You are a Content Enrichment Agent for a wiki system.
+
+Your task:
+1. Scan wiki pages for enrichment opportunities
+2. Find related pages that should link to each other
+3. Add cross-references where appropriate
+4. Add "See Also" sections to connect related content
+
+When you find opportunities:
+   - Create a branch: agent/enrichment/{timestamp}
+   - Make changes
+   - Write a descriptive commit message
+   - Tag the branch for review
+
+Important:
+- Only add high-confidence connections
+- Focus on adding value, not changing existing content
+- Say "AGENT_COMPLETE" when done
+
+Begin your analysis.
+    """
+```
+
+### Agent Registration
+
+All agents are registered in a central location:
+
+```python
+# agents/__init__.py
+
+from .integrity_checker import InformationIntegrityAgent
+from .style_checker import StyleConsistencyAgent
+from .content_enricher import ContentEnrichmentAgent
+
+REGISTERED_AGENTS = [
+    InformationIntegrityAgent,
+    StyleConsistencyAgent,
+    ContentEnrichmentAgent,
+]
+```
 
 ---
 
@@ -255,14 +341,14 @@ The system validates all agent configurations on:
 ```
 1. Scheduler triggers agent (based on cron schedule)
    ↓
-2. Load agent configuration from wiki
+2. Load agent class from agents module
    ↓
-3. Validate configuration and check resource limits
+3. Validate agent configuration and check resource limits
    ↓
 4. Create execution context (isolated state)
    ↓
 5. Initialize AI agent with:
-   - System prompt (from config)
+   - System prompt (from agent.prompt)
    - Available tools
    - Loop control parameters
    ↓
@@ -368,34 +454,19 @@ class AgentLoopController:
 
 ### System Prompts for Agents
 
-Each agent type has a specialized system prompt:
+Each agent class defines its system prompt as a class attribute. The prompt is used directly at runtime without formatting:
 
 ```python
-INFORMATION_INTEGRITY_AGENT_PROMPT = """
-You are an Information Integrity Agent for a wiki system.
+# Agents use their prompt directly
+system_prompt = agent_class.prompt
 
-Your task:
-1. Scan wiki pages for broken internal links
-2. When you find broken links:
-   - Create a branch: agent/integrity-checker/{timestamp}
-   - Fix the links
-   - Write a descriptive commit message
-   - Tag the branch for review
-
-Workflow:
-1. create_branch("agent/integrity-checker/{timestamp}")
-2. Use find_pages() to search the wiki
-3. Use read_page() to check pages
-4. Use edit_page() to fix issues
-5. tag_branch_for_review()
-
-Important:
-- Maximum {max_changes_per_pr} changes per PR
-- Say "AGENT_COMPLETE" when done
-- Do NOT make stylistic changes
-
-Begin your analysis.
-"""
+# Initialize AI client with the prompt
+client = AIClient(
+    model=GlobalAgentConfig.ai_model,
+    system_prompt=system_prompt,
+    temperature=GlobalAgentConfig.temperature,
+    tools=self._get_agent_tools(),
+)
 ```
 
 ### Execution Isolation
@@ -626,10 +697,20 @@ The review interface is minimal and git-focused:
 **File**: `backend/agents/scheduler.py`
 
 ```python
+from .integrity_checker import InformationIntegrityAgent
+from .style_checker import StyleConsistencyAgent
+from .content_enricher import ContentEnrichmentAgent
+
 class AgentScheduler:
     """
     Schedules and executes autonomous wiki agents.
     """
+
+    REGISTERED_AGENTS = [
+        InformationIntegrityAgent,
+        StyleConsistencyAgent,
+        ContentEnrichmentAgent,
+    ]
 
     def __init__(self, wiki: GitWiki):
         self.wiki = wiki
@@ -638,20 +719,19 @@ class AgentScheduler:
         self.state_manager = ExecutionStateManager()
 
     def load_agents(self):
-        """Load agent configurations from wiki pages"""
-        # Find all pages matching 'Agent:*'
-        # Parse YAML configuration
-        # Register with cron scheduler
+        """Register all agent classes with cron scheduler"""
+        for agent_class in self.REGISTERED_AGENTS:
+            if agent_class.enabled:
+                self.schedule_agent(agent_class)
 
-    def schedule_agent(self, agent_config: dict):
-        """Schedule an agent based on its cron expression"""
-        # Parse cron schedule
-        # Register job
+    def schedule_agent(self, agent_class):
+        """Schedule an agent class based on its cron expression"""
+        # Parse cron schedule from agent_class.schedule
+        # Register job with cron scheduler
         # Store in execution state
 
-    def execute_agent(self, agent_name: str):
-        """Execute a specific agent"""
-        # Load config
+    def execute_agent(self, agent_class):
+        """Execute a specific agent class"""
         # Create execution context
         # Run agent with loop control
         # Handle results (PRs, issues)
@@ -664,26 +744,33 @@ class AgentScheduler:
 **File**: `backend/agents/executor.py`
 
 ```python
+from agents.config import GlobalAgentConfig
+
 class AgentExecutor:
     """
     Executes individual agent runs with proper isolation and control.
     """
 
-    def execute(self, agent_config: dict) -> ExecutionResult:
-        """Execute an agent with full loop control"""
+    def execute(self, agent_class) -> ExecutionResult:
+        """Execute an agent class with full loop control"""
 
         # Create isolated execution context
-        context = self._create_context(agent_config)
+        context = self._create_context(agent_class)
 
         # Initialize AI client with agent system prompt
         client = AIClient(
-            model=agent_config['ai_model']['primary'],
-            system_prompt=self._build_system_prompt(agent_config),
-            tools=self._get_agent_tools(agent_config),
+            model=GlobalAgentConfig.ai_model,
+            system_prompt=agent_class.prompt,
+            temperature=GlobalAgentConfig.temperature,
+            tools=self._get_agent_tools(),
         )
 
         # Initialize loop controller
-        loop_controller = AgentLoopController(agent_config['loop_control'])
+        loop_controller = AgentLoopController({
+            'max_iterations': GlobalAgentConfig.max_iterations,
+            'max_tools_per_iteration': GlobalAgentConfig.max_tools_per_iteration,
+            'timeout_seconds': GlobalAgentConfig.timeout_seconds,
+        })
 
         # Execute agent loop
         iteration = 0
@@ -710,12 +797,11 @@ class AgentExecutor:
 
         # Return execution results
         return ExecutionResult(
-            agent_name=agent_config['name'],
+            agent_name=agent_class.__name__,
             status='completed' if reason == 'natural_completion' else 'stopped',
             stop_reason=reason,
             iterations=iteration,
             prs_created=context.prs_created,
-            issues_created=context.issues_created,
             pages_analyzed=len(context.pages_analyzed),
             execution_time=time.time() - context.start_time,
             logs=context.logs
