@@ -4,29 +4,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an AI-powered wiki system with a FastAPI backend and React frontend. The system combines traditional wiki functionality with AI agents for intelligent content management through chat interface.
+This is an AI-powered wiki system with a FastAPI backend and React frontend. The system combines traditional wiki functionality with:
+
+- **AI Chat Assistant**: Real-time AI assistance via WebSocket for wiki content
+- **Autonomous Agents**: Background agents that can read/edit pages and create PRs for review
+- **Git-Native Workflow**: All changes tracked in git with branch-based PR system
 
 ## Architecture
 
 ### Backend (Python FastAPI)
+
 - **Framework**: FastAPI with WebSocket support for real-time communication
-- **Database**: SQLite with SQLAlchemy ORM for page persistence
-- **AI Integration**: OpenRouter API with wiki-specific tools (read/edit/find pages)
+- **Storage**: Git-based wiki storage with GitWiki class (no database needed)
+- **AI Integration**: OpenRouter API with wiki-specific tools (read/edit/find/list pages)
 - **Real-time**: WebSocket endpoints for chat and live updates
+- **Agent System**: Autonomous agents with loop control, PR creation, and git-native workflow
+  - Agents module with BaseAgent, executor, loop_controller, pr_manager
+  - Git-native PRs using branches (`agent/<name>/<timestamp>`) and tags (`review`, `approved`, `rejected`)
+  - 5-layer loop control to prevent runaway agents
 - **Virtual Environment**: Uses `venv` for dependency isolation
 
 ### Frontend (React TypeScript)
+
 - **Framework**: React 19 with TypeScript and Vite
 - **Styling**: TailwindCSS v3.4.0 + Shadcn UI components (uses CSS variables in HSL format)
 - **UI Components**: Shadcn UI with Prompt Kit for chat interface
-- **Layout**: 3-panel design (page tree, content editor, AI chat)
+- **Layout**: 3-panel resizable design (left: page tree, center: content/PR review, right: chat/agents)
+  - No routing - uses context-based state management for panel modes
+  - Right panel: Tabs for Chat/Agents switcher
+  - Center panel: Dynamic page view or PR review mode
 - **Real-time**: WebSocket client for live communication
 - **State Management**: React Context API with useReducer
+  - `rightPanelMode`: 'chat' | 'agents'
+  - `centerPanelMode`: 'page' | 'pr-review'
+  - `selectedPRBranch`: Current PR being reviewed
+- **Git Integration**: Branch selector with tags display, branch creation/deletion
 - **Custom Scrollbars**: `.custom-scrollbar` and `.chat-scrollbar` classes for consistent styling
 
 ## Running the Application
 
 ### Backend
+
 ```bash
 cd backend
 source venv/bin/activate  # Activate virtual environment
@@ -34,6 +52,7 @@ python main.py           # Start FastAPI server on port 8000
 ```
 
 ### Frontend
+
 ```bash
 cd frontend
 npm install              # Install dependencies (first time only)
@@ -50,18 +69,31 @@ npm run dev             # Start Vite dev server on port 5173
 │   ├── venv/                 # Virtual environment (IMPORTANT: use this)
 │   ├── main.py               # FastAPI app entry point
 │   ├── requirements.txt      # Python dependencies
-│   ├── wiki_ai.db           # SQLite database
-│   ├── database/            # Database models and operations
+│   ├── storage/             # Git-based wiki storage (GitWiki)
 │   ├── ai/                  # AI integration (OpenRouter + tools)
+│   ├── agents/              # Autonomous agent system
+│   │   ├── base.py          # BaseAgent class
+│   │   ├── executor.py      # Agent execution engine
+│   │   ├── loop_controller.py # 5-layer loop control
+│   │   ├── pr_manager.py    # Git-native PR management
+│   │   ├── config.py        # Global agent config
+│   │   ├── example_agent.py # Read-only example agent
+│   │   └── test_agent.py    # Test agent (creates pages)
 │   ├── api/                 # WebSocket handlers
 │   └── tests/               # Backend tests
 └── frontend/                # React TypeScript frontend
     ├── src/
-    │   ├── components/      # React components (layout, chat, pages)
+    │   ├── components/
+    │   │   ├── layout/      # MainLayout, LeftPanel, CenterPanel, RightPanel
+    │   │   ├── chat/        # ChatInterface with StickToBottom scrolling
+    │   │   ├── pages/       # PageTree, PageItem
+    │   │   ├── git/         # BranchSwitcher with tags/delete
+    │   │   ├── agents/      # AgentPanel, PRReviewPanel, DiffViewer
+    │   │   └── ui/          # Shadcn UI components
     │   ├── hooks/           # Custom React hooks
-    │   ├── contexts/        # Global state management
-    │   ├── services/        # WebSocket and API services
-    │   ├── types/           # TypeScript type definitions
+    │   ├── contexts/        # AppContext with agent/PR state
+    │   ├── services/        # WebSocket, agents-api
+    │   ├── types/           # TypeScript type definitions (Agent, PullRequest, etc.)
     │   └── utils/           # Utility functions
     ├── package.json         # Node.js dependencies
     └── vite.config.ts       # Vite configuration
@@ -70,15 +102,36 @@ npm run dev             # Start Vite dev server on port 5173
 ## Key Implementation Details
 
 ### Backend
+
 - **Virtual Environment**: ALWAYS use `source venv/bin/activate` before running Python commands
-- **Database**: SQLite with pages table for wiki content and metadata
+- **Storage**: Git-based with GitWiki class - all content in `wiki-repo/` git repository
 - **WebSocket**: Real-time communication on `/ws/{client_id}` endpoint
-- **AI Tools**: Custom functions for page management (read_page, edit_page, find_pages)
+- **AI Tools**: Custom functions for page management (read_page, edit_page, find_pages, list_all_pages)
+- **Agent APIs**: `/api/agents`, `/api/agents/{name}/run`, `/api/prs/*`
+- **Git APIs**: `/api/git/branches`, `/api/git/branches/{name}/tags`, `/api/git/checkout`, etc.
+- **PR Workflow**:
+  - Agents create branches: `agent/<name>/<timestamp>`
+  - PRs tracked via git tags: `review`, `approved`, `rejected`
+  - Approval merges to main, rejection deletes branch
 - **CORS**: Configured for frontend connections
 
 ### Frontend
+
+- **No Routing**: Context-based state management, no react-router-dom
+- **Panel Modes**:
+  - Right panel: Chat/Agents tabs (`rightPanelMode`)
+  - Center panel: Page view or PR review (`centerPanelMode`)
 - **WebSocket Integration**: Automatic connection and reconnection to backend
 - **Page Management**: Create, edit, view, delete pages with real-time sync
+- **Git Integration**:
+  - Branch selector with tags display (color-coded: yellow=review, green=approved, red=rejected)
+  - Branch creation/deletion with confirmation
+  - Checkout branches with page reload
+- **Agent Management**:
+  - Run agents manually from right panel
+  - View pending PRs (tagged with 'review')
+  - Click PR to open in center panel for review
+  - Approve (merges to main) or Reject (deletes branch)
 - **Markdown Support**: Simple markdown parser for content rendering
 - **Error Handling**: Error boundaries and loading states
 - **Keyboard Shortcuts**: Ctrl+E (toggle edit), Escape (exit edit)
@@ -90,12 +143,14 @@ npm run dev             # Start Vite dev server on port 5173
 - **Chat Interface**:
   - Uses Prompt Kit components (Message, PromptInput, etc.)
   - Auto-scroll enabled via ChatContainer's StickToBottom component
+  - Proper flex layout with `min-h-0` for scrolling
   - User messages: right-aligned with `bg-primary` styling
   - AI responses: left-aligned, markdown rendered
 
 ## Dependencies
 
 ### Backend (in venv)
+
 - `fastapi` - Web framework
 - `uvicorn` - ASGI server
 - `websockets` - WebSocket support
@@ -104,6 +159,7 @@ npm run dev             # Start Vite dev server on port 5173
 - `pytest` - Testing framework
 
 ### Frontend
+
 - `react` v19 - UI framework
 - `typescript` - Type safety
 - `vite` - Build tool
@@ -133,5 +189,7 @@ npm run dev             # Start Vite dev server on port 5173
 - **Virtual Environment**: The backend MUST be run with the virtual environment activated
 - **Port Configuration**: Backend on 8000, Frontend on 5173
 - **WebSocket URL**: Frontend connects to `ws://localhost:8000/ws/`
-- **Database**: SQLite file created automatically on first run
+- **Git Repository**: Wiki content stored in `wiki-repo/` directory
+- **No Routing**: Application uses context-based state, NOT react-router-dom
+- **Flexbox Scrolling**: Use `min-h-0` on flex children to enable proper scrolling
 - **Real-time Features**: Full bidirectional communication between frontend and backend
