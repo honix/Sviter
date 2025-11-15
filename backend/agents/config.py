@@ -22,11 +22,6 @@ class GlobalAgentConfig:
     pr_branch_prefix = "agent/"  # All agent branches start with "agent/"
     default_base_branch = "main"
 
-    # Tags for PR workflow
-    tag_review = "review"  # Tag for PRs awaiting review
-    tag_approved = "approved"  # Tag for approved PRs
-    tag_rejected = "rejected"  # Tag for rejected PRs
-
     # Resource Limits
     max_pages_per_run = 100
     max_edits_per_pr = 10

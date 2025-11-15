@@ -13,8 +13,8 @@ interface AppState {
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
   // Agent state
   rightPanelMode: 'chat' | 'agents';
-  centerPanelMode: 'page' | 'pr-review';
-  selectedPRBranch: string | null;
+  centerPanelMode: 'page' | 'branch-diff';
+  selectedBranchForDiff: string | null;
 }
 
 type AppAction =
@@ -29,8 +29,8 @@ type AppAction =
   | { type: 'SET_CONNECTED'; payload: boolean }
   | { type: 'SET_CONNECTION_STATUS'; payload: 'connecting' | 'connected' | 'disconnected' | 'error' }
   | { type: 'SET_RIGHT_PANEL_MODE'; payload: 'chat' | 'agents' }
-  | { type: 'SET_CENTER_PANEL_MODE'; payload: 'page' | 'pr-review' }
-  | { type: 'SET_SELECTED_PR_BRANCH'; payload: string | null };
+  | { type: 'SET_CENTER_PANEL_MODE'; payload: 'page' | 'branch-diff' }
+  | { type: 'SET_SELECTED_BRANCH_FOR_DIFF'; payload: string | null };
 
 const initialState: AppState = {
   pages: [],
@@ -42,7 +42,7 @@ const initialState: AppState = {
   connectionStatus: 'disconnected',
   rightPanelMode: 'chat',
   centerPanelMode: 'page',
-  selectedPRBranch: null
+  selectedBranchForDiff: null
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -111,8 +111,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_CENTER_PANEL_MODE':
       return { ...state, centerPanelMode: action.payload };
 
-    case 'SET_SELECTED_PR_BRANCH':
-      return { ...state, selectedPRBranch: action.payload };
+    case 'SET_SELECTED_BRANCH_FOR_DIFF':
+      return { ...state, selectedBranchForDiff: action.payload };
 
     default:
       return state;
@@ -131,6 +131,11 @@ interface AppContextType {
     setLoading: (loading: boolean) => void;
     setError: (error: string | null) => void;
     createPage: (title: string, content?: string) => Promise<void>;
+    setRightPanelMode: (mode: 'chat' | 'agents') => void;
+    setCenterPanelMode: (mode: 'page' | 'branch-diff') => void;
+    setSelectedBranchForDiff: (branch: string | null) => void;
+    viewBranchDiff: (branch: string) => void;
+    closeBranchDiff: () => void;
   };
   websocket: {
     sendMessage: (message: any) => void;
@@ -363,15 +368,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Agent actions
     setRightPanelMode: (mode: 'chat' | 'agents') => dispatch({ type: 'SET_RIGHT_PANEL_MODE', payload: mode }),
-    setCenterPanelMode: (mode: 'page' | 'pr-review') => dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: mode }),
-    setSelectedPRBranch: (branch: string | null) => dispatch({ type: 'SET_SELECTED_PR_BRANCH', payload: branch }),
-    viewPR: (branch: string) => {
-      dispatch({ type: 'SET_SELECTED_PR_BRANCH', payload: branch });
-      dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'pr-review' });
+    setCenterPanelMode: (mode: 'page' | 'branch-diff') => dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: mode }),
+    setSelectedBranchForDiff: (branch: string | null) => dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: branch }),
+    viewBranchDiff: (branch: string) => {
+      dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: branch });
+      dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'branch-diff' });
     },
-    closePRReview: () => {
+    closeBranchDiff: () => {
       dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'page' });
-      dispatch({ type: 'SET_SELECTED_PR_BRANCH', payload: null });
+      dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: null });
     }
   };
 

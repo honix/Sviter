@@ -169,6 +169,11 @@ class AgentExecutor:
                 if tool_calls_raw:
                     for tool_call in tool_calls_raw:
                         tool_name = tool_call.function.name
+                        # Sanitize tool name (remove any garbage after the actual name)
+                        if '<' in tool_name:
+                            tool_name = tool_name.split('<')[0]
+                        tool_name = tool_name.strip()
+
                         tool_args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
 
                         logs.append(f"Executing tool: {tool_name}({tool_args})")
@@ -189,13 +194,8 @@ class AgentExecutor:
                             "content": str(result)
                         })
 
-            # After loop: tag branch for review if changes were made
+            # After loop: check if changes were made
             stats = loop_controller.get_stats()
-            if stats['changes_made'] > 0:
-                logs.append("Tagging branch for review")
-                self.wiki.tag_branch(GlobalAgentConfig.tag_review, branch_name=branch_name)
-            else:
-                logs.append("No changes made, not tagging for review")
 
             # Switch back to main branch
             logs.append("Switching back to main branch")

@@ -1,19 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { GitBranch, Plus, Check, Trash2 } from 'lucide-react';
+import { GitBranch, Plus, Check, Trash2, GitMerge } from 'lucide-react';
 import { Button } from '../ui/button';
+import { useAppContext } from '../../contexts/AppContext';
 
 interface BranchSwitcherProps {
   onBranchChange?: (branch: string) => void;
 }
 
-interface BranchInfo {
-  name: string;
-  tags: string[];
-}
-
 const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
+  const { actions } = useAppContext();
   const [branches, setBranches] = useState<string[]>([]);
-  const [branchTags, setBranchTags] = useState<Map<string, string[]>>(new Map());
   const [currentBranch, setCurrentBranch] = useState<string>('main');
   const [isOpen, setIsOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -34,22 +30,6 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
       const data = await response.json();
       const branchList = data.branches || [];
       setBranches(branchList);
-
-      // Fetch tags for each branch
-      const tagsMap = new Map<string, string[]>();
-      await Promise.all(
-        branchList.map(async (branch: string) => {
-          try {
-            const tagsResponse = await fetch(`http://localhost:8000/api/git/branches/${encodeURIComponent(branch)}/tags`);
-            const tagsData = await tagsResponse.json();
-            tagsMap.set(branch, tagsData.tags || []);
-          } catch (err) {
-            console.error(`Failed to fetch tags for branch ${branch}:`, err);
-            tagsMap.set(branch, []);
-          }
-        })
-      );
-      setBranchTags(tagsMap);
     } catch (error) {
       console.error('Failed to fetch branches:', error);
     }
@@ -189,13 +169,6 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
     return 'text-blue-600 dark:text-blue-400';
   };
 
-  const getTagColor = (tag: string) => {
-    if (tag === 'review') return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
-    if (tag === 'approved') return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
-    if (tag === 'rejected') return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
-    return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
-  };
-
   const handleToggleDropdown = () => {
     if (!isOpen && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
@@ -248,7 +221,6 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
             {/* Branch List */}
             <div className="py-1">
               {branches.map((branch) => {
-                const tags = branchTags.get(branch) || [];
                 return (
                   <div
                     key={branch}
@@ -265,32 +237,36 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
                         <GitBranch className={`h-4 w-4 flex-shrink-0 ${getBranchColor(branch)}`} />
                         <div className="flex-1 min-w-0">
                           <div className="font-mono text-sm truncate">{branch}</div>
-                          {tags.length > 0 && (
-                            <div className="flex gap-1 mt-1 flex-wrap">
-                              {tags.map((tag) => (
-                                <span
-                                  key={tag}
-                                  className={`text-[10px] px-1.5 py-0.5 rounded ${getTagColor(tag)}`}
-                                >
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          )}
                         </div>
                         {branch === currentBranch && (
                           <Check className="h-4 w-4 flex-shrink-0 text-primary" />
                         )}
                       </button>
-                      {branch !== 'main' && branch !== currentBranch && (
-                        <button
-                          onClick={(e) => handleDeleteBranch(branch, e)}
-                          disabled={isLoading}
-                          className="p-1 hover:bg-destructive/10 rounded text-destructive disabled:opacity-50"
-                          title="Delete branch"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                      {branch !== currentBranch && (
+                        <>
+                          {branch !== 'main' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                actions.viewBranchDiff(branch);
+                                setIsOpen(false);
+                              }}
+                              disabled={isLoading}
+                              className="p-1 hover:bg-primary/10 rounded text-primary disabled:opacity-50"
+                              title="View diff and merge"
+                            >
+                              <GitMerge className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          <button
+                            onClick={(e) => handleDeleteBranch(branch, e)}
+                            disabled={isLoading}
+                            className="p-1 hover:bg-destructive/10 rounded text-destructive disabled:opacity-50"
+                            title="Delete branch"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

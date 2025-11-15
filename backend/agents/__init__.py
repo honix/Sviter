@@ -7,11 +7,11 @@ from .base import BaseAgent
 from .config import GlobalAgentConfig
 from .loop_controller import AgentLoopController
 from .executor import AgentExecutor, ExecutionResult
-from .pr_manager import GitPRManager
 
 # Import agent classes
 from .example_agent import ExampleAgent
 from .test_agent import TestAgent
+from .poet_agent import PoetAgent
 # from .integrity_checker import InformationIntegrityAgent  # Phase 2+
 # from .style_checker import StyleConsistencyAgent  # Phase 2+
 # from .content_enricher import ContentEnrichmentAgent  # Phase 2+
@@ -20,6 +20,7 @@ from .test_agent import TestAgent
 REGISTERED_AGENTS = [
     ExampleAgent,
     TestAgent,
+    PoetAgent,
 ]
 
 
@@ -63,7 +64,6 @@ __all__ = [
     'AgentLoopController',
     'AgentExecutor',
     'ExecutionResult',
-    'GitPRManager',
     'REGISTERED_AGENTS',
     'get_agent_by_name',
     'list_available_agents',

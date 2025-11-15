@@ -20,19 +20,6 @@ export interface AgentExecutionResult {
   error?: string;
 }
 
-export interface PullRequest {
-  branch: string;
-  agent_name: string;
-  timestamp_str: string;
-  timestamp: number;
-  commit_message: string;
-  diff_summary: string;
-  tags: string[];
-  files_changed: number;
-  status?: 'approved' | 'rejected';
-  error?: string;
-}
-
 export interface DiffStats {
   files_changed: Array<{
     path: string;
@@ -42,7 +29,9 @@ export interface DiffStats {
   raw_stat: string;
 }
 
-export interface PRDiff {
-  branch: string;
+export interface BranchDiff {
+  branch1: string;
+  branch2: string;
   diff: string;
+  stats: DiffStats;
 }

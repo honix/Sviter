@@ -20,7 +20,7 @@ This is an AI-powered wiki system with a FastAPI backend and React frontend. The
 - **Real-time**: WebSocket endpoints for chat and live updates
 - **Agent System**: Autonomous agents with loop control, PR creation, and git-native workflow
   - Agents module with BaseAgent, executor, loop_controller, pr_manager
-  - Git-native PRs using branches (`agent/<name>/<timestamp>`) and tags (`review`, `approved`, `rejected`)
+  - Git-native PRs using branches (`agent/<name>/<timestamp>`)
   - 5-layer loop control to prevent runaway agents
 - **Virtual Environment**: Uses `venv` for dependency isolation
 
@@ -38,7 +38,7 @@ This is an AI-powered wiki system with a FastAPI backend and React frontend. The
   - `rightPanelMode`: 'chat' | 'agents'
   - `centerPanelMode`: 'page' | 'pr-review'
   - `selectedPRBranch`: Current PR being reviewed
-- **Git Integration**: Branch selector with tags display, branch creation/deletion
+- **Git Integration**: Branch selector, branch creation/deletion
 - **Custom Scrollbars**: `.custom-scrollbar` and `.chat-scrollbar` classes for consistent styling
 
 ## Running the Application
@@ -111,8 +111,8 @@ npm run dev             # Start Vite dev server on port 5173
 - **Git APIs**: `/api/git/branches`, `/api/git/branches/{name}/tags`, `/api/git/checkout`, etc.
 - **PR Workflow**:
   - Agents create branches: `agent/<name>/<timestamp>`
-  - PRs tracked via git tags: `review`, `approved`, `rejected`
-  - Approval merges to main, rejection deletes branch
+  - Approval merges to main and deletes branch
+  - Rejection deletes branch (changes kept in git history)
 - **CORS**: Configured for frontend connections
 
 ### Frontend
@@ -124,14 +124,13 @@ npm run dev             # Start Vite dev server on port 5173
 - **WebSocket Integration**: Automatic connection and reconnection to backend
 - **Page Management**: Create, edit, view, delete pages with real-time sync
 - **Git Integration**:
-  - Branch selector with tags display (color-coded: yellow=review, green=approved, red=rejected)
-  - Branch creation/deletion with confirmation
+  - Branch selector with branch creation/deletion
   - Checkout branches with page reload
 - **Agent Management**:
   - Run agents manually from right panel
-  - View pending PRs (tagged with 'review')
+  - View pending PRs (all agent branches)
   - Click PR to open in center panel for review
-  - Approve (merges to main) or Reject (deletes branch)
+  - Approve (merges to main and deletes branch) or Reject (deletes branch)
 - **Markdown Support**: Simple markdown parser for content rendering
 - **Error Handling**: Error boundaries and loading states
 - **Keyboard Shortcuts**: Ctrl+E (toggle edit), Escape (exit edit)

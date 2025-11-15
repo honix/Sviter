@@ -1,17 +1,18 @@
 /**
- * PR Review Panel - displays PR review in center panel
+ * Branch Diff Panel - displays branch diff and merge options in center panel
  */
 import React, { useState, useEffect } from 'react';
-import { AgentsAPI } from '../../services/agents-api';
+import { GitAPI } from '../../services/git-api';
 import { useAppContext } from '../../contexts/AppContext';
 import { DiffViewer } from './DiffViewer';
 import type { DiffStats } from '../../types/agent';
 
-interface PRReviewPanelProps {
+interface BranchDiffPanelProps {
   branch: string;
+  currentBranch: string;
 }
 
-export function PRReviewPanel({ branch }: PRReviewPanelProps) {
+export function BranchDiffPanel({ branch, currentBranch }: BranchDiffPanelProps) {
   const { actions } = useAppContext();
   const [diff, setDiff] = useState<string>('');
   const [stats, setStats] = useState<DiffStats | null>(null);
@@ -20,32 +21,32 @@ export function PRReviewPanel({ branch }: PRReviewPanelProps) {
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
-    loadPRData();
-  }, [branch]);
+    loadDiffData();
+  }, [branch, currentBranch]);
 
-  const loadPRData = async () => {
+  const loadDiffData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const [diffData, statsData] = await Promise.all([
-        AgentsAPI.getPRDiff(branch),
-        AgentsAPI.getPRStats(branch),
+      const [diffText, statsData] = await Promise.all([
+        GitAPI.getBranchDiff(currentBranch, branch),
+        GitAPI.getBranchDiffStats(currentBranch, branch),
       ]);
 
-      setDiff(diffData.diff);
+      setDiff(diffText);
       setStats(statsData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load PR data');
+      setError(err instanceof Error ? err.message : 'Failed to load diff');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleApprove = async () => {
+  const handleMerge = async () => {
     if (processing) return;
 
-    if (!confirm('Are you sure you want to approve and merge this PR?')) {
+    if (!confirm(`Are you sure you want to merge "${branch}" into "${currentBranch}"?`)) {
       return;
     }
 
@@ -53,21 +54,23 @@ export function PRReviewPanel({ branch }: PRReviewPanelProps) {
       setProcessing(true);
       setError(null);
 
-      await AgentsAPI.approvePR(branch);
+      await GitAPI.mergeBranch(branch, currentBranch);
 
-      // Close review and return to page view
-      actions.closePRReview();
+      // Delete the branch after successful merge
+      await GitAPI.deleteBranch(branch);
+
+      // Close diff view and return to page view
+      actions.closeBranchDiff();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to approve PR');
+      setError(err instanceof Error ? err.message : 'Failed to merge branch');
       setProcessing(false);
     }
   };
 
-  const handleReject = async () => {
+  const handleDelete = async () => {
     if (processing) return;
 
-    const reason = prompt('Reason for rejection (optional):');
-    if (reason === null) {
+    if (!confirm(`Are you sure you want to delete branch "${branch}" without merging?`)) {
       return;
     }
 
@@ -75,12 +78,30 @@ export function PRReviewPanel({ branch }: PRReviewPanelProps) {
       setProcessing(true);
       setError(null);
 
-      await AgentsAPI.rejectPR(branch, reason || undefined);
+      await GitAPI.deleteBranch(branch);
 
-      // Close review and return to page view
-      actions.closePRReview();
+      // Close diff view and return to page view
+      actions.closeBranchDiff();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reject PR');
+      setError(err instanceof Error ? err.message : 'Failed to delete branch');
+      setProcessing(false);
+    }
+  };
+
+  const handleCheckout = async () => {
+    if (processing) return;
+
+    try {
+      setProcessing(true);
+      setError(null);
+
+      await GitAPI.checkoutBranch(branch);
+
+      // Close diff view and reload to show new branch content
+      actions.closeBranchDiff();
+      window.location.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to checkout branch');
       setProcessing(false);
     }
   };
@@ -88,7 +109,7 @@ export function PRReviewPanel({ branch }: PRReviewPanelProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-muted-foreground">Loading PR...</div>
+        <div className="text-muted-foreground">Loading diff...</div>
       </div>
     );
   }
@@ -101,15 +122,19 @@ export function PRReviewPanel({ branch }: PRReviewPanelProps) {
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
               <button
-                onClick={() => actions.closePRReview()}
+                onClick={() => actions.closeBranchDiff()}
                 className="text-muted-foreground hover:text-foreground text-sm"
               >
                 ← Back
               </button>
               <span className="text-muted-foreground">|</span>
-              <h2 className="text-lg font-semibold">Pull Request Review</h2>
+              <h2 className="text-lg font-semibold">Branch Diff</h2>
             </div>
-            <div className="font-mono text-xs text-muted-foreground">{branch}</div>
+            <div className="text-xs text-muted-foreground">
+              <span className="font-mono">{currentBranch}</span>
+              <span className="text-muted-foreground mx-2">←</span>
+              <span className="font-mono">{branch}</span>
+            </div>
           </div>
         </div>
 
@@ -154,20 +179,27 @@ export function PRReviewPanel({ branch }: PRReviewPanelProps) {
 
       {/* Action Buttons */}
       <div className="border-t border-border p-4 bg-background">
-        <div className="flex gap-3">
+        <div className="flex gap-2">
           <button
-            onClick={handleApprove}
+            onClick={handleMerge}
             disabled={processing}
-            className="flex-1 px-4 py-2 bg-primary hover:bg-primary/90 disabled:bg-muted disabled:cursor-not-allowed text-primary-foreground rounded-md font-semibold transition-colors"
+            className="flex-1 px-4 py-2 bg-primary hover:bg-primary/90 disabled:bg-muted disabled:cursor-not-allowed text-primary-foreground rounded-md font-semibold transition-colors text-sm"
           >
-            {processing ? 'Processing...' : '✓ Approve & Merge'}
+            {processing ? 'Processing...' : `Merge into ${currentBranch}`}
           </button>
           <button
-            onClick={handleReject}
+            onClick={handleCheckout}
             disabled={processing}
-            className="flex-1 px-4 py-2 bg-destructive hover:bg-destructive/90 disabled:bg-muted disabled:cursor-not-allowed text-destructive-foreground rounded-md font-semibold transition-colors"
+            className="px-4 py-2 bg-secondary hover:bg-secondary/90 disabled:bg-muted disabled:cursor-not-allowed text-secondary-foreground rounded-md font-semibold transition-colors text-sm"
           >
-            {processing ? 'Processing...' : '✗ Reject'}
+            {processing ? 'Processing...' : 'Checkout'}
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={processing}
+            className="px-4 py-2 bg-destructive hover:bg-destructive/90 disabled:bg-muted disabled:cursor-not-allowed text-destructive-foreground rounded-md font-semibold transition-colors text-sm"
+          >
+            {processing ? 'Processing...' : 'Delete'}
           </button>
         </div>
       </div>

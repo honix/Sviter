@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from storage import GitWiki, PageNotFoundException, GitWikiException
 from api.websocket import websocket_endpoint
 from agents import (
-    AgentExecutor, GitPRManager, get_agent_by_name,
-    list_available_agents, REGISTERED_AGENTS
+    AgentExecutor, get_agent_by_name,
+    list_available_agents
 )
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -31,7 +31,6 @@ wiki = GitWiki(WIKI_REPO_PATH)
 # Initialize Agent System
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
 agent_executor = AgentExecutor(wiki, OPENROUTER_API_KEY)
-pr_manager = GitPRManager(wiki)
 
 # Create FastAPI app
 app = FastAPI(
@@ -237,16 +236,50 @@ async def delete_branch(branch_name: str, force: bool = False):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/git/branches/{branch_name:path}/tags")
-async def get_branch_tags(branch_name: str):
-    """Get tags for a specific branch"""
+@app.get("/api/git/diff")
+async def get_branch_diff(branch1: str, branch2: str):
+    """Get unified diff between two branches"""
     try:
-        tags = wiki.get_branch_tags(branch_name)
-        return {"branch": branch_name, "tags": tags}
+        diff = wiki.get_diff(branch1, branch2)
+        return {"branch1": branch1, "branch2": branch2, "diff": diff}
+    except GitWikiException as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/git/diff-stats")
+async def get_branch_diff_stats(branch1: str, branch2: str):
+    """Get diff statistics between two branches"""
+    try:
+        stats = wiki.get_diff_stat(branch1, branch2)
+        return {"branch1": branch1, "branch2": branch2, "stats": stats}
+    except GitWikiException as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/git/merge")
+async def merge_branches(data: dict):
+    """Merge source branch into target branch"""
+    try:
+        source_branch = data.get("source_branch")
+        target_branch = data.get("target_branch")
+
+        if not source_branch or not target_branch:
+            raise HTTPException(status_code=400, detail="source_branch and target_branch are required")
+
+        wiki.merge_branch(
+            source_branch=source_branch,
+            target_branch=target_branch,
+            author="Human Reviewer",
+            no_ff=True
+        )
+        return {"message": f"Merged '{source_branch}' into '{target_branch}'"}
     except GitWikiException as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # Agent Management API endpoints
 @app.get("/api/agents")
@@ -277,70 +310,6 @@ async def run_agent(agent_name: str, background_tasks: BackgroundTasks):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# PR Management API endpoints
-@app.get("/api/prs/pending")
-async def get_pending_prs():
-    """Get all pending pull requests (branches tagged 'review')"""
-    try:
-        pending = pr_manager.list_pending_prs()
-        return {"prs": pending}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/prs/recent")
-async def get_recent_prs(limit: int = 10):
-    """Get recent approved/rejected PRs"""
-    try:
-        recent = pr_manager.list_recent_prs(limit=limit)
-        return {"prs": recent}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/prs/{branch:path}/diff")
-async def get_pr_diff(branch: str):
-    """Get unified diff for a PR"""
-    try:
-        diff = pr_manager.get_pr_diff(branch)
-        return {"branch": branch, "diff": diff}
-    except GitWikiException as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/prs/{branch:path}/stats")
-async def get_pr_stats(branch: str):
-    """Get diff statistics for a PR"""
-    try:
-        stats = pr_manager.get_pr_diff_stats(branch)
-        return {"branch": branch, "stats": stats}
-    except GitWikiException as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/prs/{branch:path}/approve")
-async def approve_pr(branch: str, data: dict = None):
-    """Approve and merge a PR"""
-    try:
-        author = (data or {}).get("author", "Human Reviewer")
-        pr_manager.approve_and_merge(branch, author=author)
-        return {"message": f"PR '{branch}' approved and merged", "status": "approved"}
-    except GitWikiException as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/prs/{branch:path}/reject")
-async def reject_pr(branch: str, data: dict = None):
-    """Reject a PR"""
-    try:
-        reason = (data or {}).get("reason", None)
-        pr_manager.reject_pr(branch, reason=reason)
-        return {"message": f"PR '{branch}' rejected", "status": "rejected"}
-    except GitWikiException as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 # Root endpoint with API info
 @app.get("/")

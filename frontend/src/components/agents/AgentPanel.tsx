@@ -3,36 +3,28 @@
  */
 import React, { useState, useEffect } from 'react';
 import { AgentsAPI } from '../../services/agents-api';
-import { useAppContext } from '../../contexts/AppContext';
-import type { Agent, PullRequest, AgentExecutionResult } from '../../types/agent';
+import type { Agent, AgentExecutionResult } from '../../types/agent';
 
 export function AgentPanel() {
-  const { actions } = useAppContext();
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [pendingPRs, setPendingPRs] = useState<PullRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [runningAgent, setRunningAgent] = useState<string | null>(null);
   const [executionResult, setExecutionResult] = useState<AgentExecutionResult | null>(null);
 
   useEffect(() => {
-    loadData();
+    loadAgents();
   }, []);
 
-  const loadData = async () => {
+  const loadAgents = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const [agentsData, pendingData] = await Promise.all([
-        AgentsAPI.listAgents(),
-        AgentsAPI.getPendingPRs(),
-      ]);
-
+      const agentsData = await AgentsAPI.listAgents();
       setAgents(agentsData);
-      setPendingPRs(pendingData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
+      setError(err instanceof Error ? err.message : 'Failed to load agents');
     } finally {
       setLoading(false);
     }
@@ -46,19 +38,11 @@ export function AgentPanel() {
 
       const result = await AgentsAPI.runAgent(agentName);
       setExecutionResult(result);
-
-      // Reload PRs to show newly created PR
-      const pendingData = await AgentsAPI.getPendingPRs();
-      setPendingPRs(pendingData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run agent');
     } finally {
       setRunningAgent(null);
     }
-  };
-
-  const handleViewPR = (branch: string) => {
-    actions.viewPR(branch);
   };
 
   if (loading) {
@@ -139,35 +123,6 @@ export function AgentPanel() {
           )}
         </div>
 
-        {/* Pending PRs */}
-        <div>
-          <h2 className="text-sm font-semibold mb-3 text-foreground">
-            Pending Reviews ({pendingPRs.length})
-          </h2>
-          {pendingPRs.length === 0 ? (
-            <div className="text-muted-foreground text-sm">No pending PRs</div>
-          ) : (
-            <div className="space-y-2">
-              {pendingPRs.map((pr) => (
-                <button
-                  key={pr.branch}
-                  onClick={() => handleViewPR(pr.branch)}
-                  className="w-full text-left border border-border rounded-md p-3 bg-muted/30 hover:bg-muted/50 transition-colors"
-                >
-                  <div className="font-mono text-xs text-muted-foreground mb-1">
-                    {pr.agent_name}
-                  </div>
-                  <div className="text-sm font-medium line-clamp-2">
-                    {pr.commit_message.split('\n')[0]}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-2">
-                    {pr.files_changed} file{pr.files_changed !== 1 ? 's' : ''}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
