@@ -15,6 +15,9 @@ interface AppState {
   rightPanelMode: 'chat' | 'agents';
   centerPanelMode: 'page' | 'branch-diff';
   selectedBranchForDiff: string | null;
+  // Chat mode state
+  chatMode: 'interactive' | 'agent-viewing';
+  currentAgent: string | null; // null = ChatAgent (interactive), else agent name
 }
 
 type AppAction =
@@ -30,7 +33,9 @@ type AppAction =
   | { type: 'SET_CONNECTION_STATUS'; payload: 'connecting' | 'connected' | 'disconnected' | 'error' }
   | { type: 'SET_RIGHT_PANEL_MODE'; payload: 'chat' | 'agents' }
   | { type: 'SET_CENTER_PANEL_MODE'; payload: 'page' | 'branch-diff' }
-  | { type: 'SET_SELECTED_BRANCH_FOR_DIFF'; payload: string | null };
+  | { type: 'SET_SELECTED_BRANCH_FOR_DIFF'; payload: string | null }
+  | { type: 'SET_CHAT_MODE'; payload: 'interactive' | 'agent-viewing' }
+  | { type: 'SET_CURRENT_AGENT'; payload: string | null };
 
 const initialState: AppState = {
   pages: [],
@@ -42,7 +47,9 @@ const initialState: AppState = {
   connectionStatus: 'disconnected',
   rightPanelMode: 'chat',
   centerPanelMode: 'page',
-  selectedBranchForDiff: null
+  selectedBranchForDiff: null,
+  chatMode: 'interactive',
+  currentAgent: null
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -114,6 +121,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_SELECTED_BRANCH_FOR_DIFF':
       return { ...state, selectedBranchForDiff: action.payload };
 
+    case 'SET_CHAT_MODE':
+      return { ...state, chatMode: action.payload };
+
+    case 'SET_CURRENT_AGENT':
+      return { ...state, currentAgent: action.payload };
+
     default:
       return state;
   }
@@ -136,6 +149,10 @@ interface AppContextType {
     setSelectedBranchForDiff: (branch: string | null) => void;
     viewBranchDiff: (branch: string) => void;
     closeBranchDiff: () => void;
+    setChatMode: (mode: 'interactive' | 'agent-viewing') => void;
+    setCurrentAgent: (agent: string | null) => void;
+    startNewChat: () => void;
+    viewAgentExecution: (agentName: string) => void;
   };
   websocket: {
     sendMessage: (message: any) => void;
@@ -377,6 +394,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     closeBranchDiff: () => {
       dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'page' });
       dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: null });
+    },
+    setChatMode: (mode: 'interactive' | 'agent-viewing') => dispatch({ type: 'SET_CHAT_MODE', payload: mode }),
+    setCurrentAgent: (agent: string | null) => dispatch({ type: 'SET_CURRENT_AGENT', payload: agent }),
+    startNewChat: () => {
+      // Reset to interactive chat mode
+      dispatch({ type: 'SET_CHAT_MODE', payload: 'interactive' });
+      dispatch({ type: 'SET_CURRENT_AGENT', payload: null });
+      dispatch({ type: 'SET_RIGHT_PANEL_MODE', payload: 'chat' });
+      // Send reset message to backend
+      wsService.current?.send({ type: 'reset' });
+    },
+    viewAgentExecution: (agentName: string) => {
+      // Switch to chat tab in agent-viewing mode
+      dispatch({ type: 'SET_CHAT_MODE', payload: 'agent-viewing' });
+      dispatch({ type: 'SET_CURRENT_AGENT', payload: agentName });
+      dispatch({ type: 'SET_RIGHT_PANEL_MODE', payload: 'chat' });
     }
   };
 

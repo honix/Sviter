@@ -1,7 +1,7 @@
 from fastapi import FastAPI, WebSocket, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from storage import GitWiki, PageNotFoundException, GitWikiException
-from api.websocket import websocket_endpoint
+from api.websocket import websocket_endpoint, initialize_websocket_manager
 from agents import (
     AgentExecutor, get_agent_by_name,
     list_available_agents
@@ -51,11 +51,14 @@ app.add_middleware(
 # Startup event
 @app.on_event("startup")
 async def startup_event():
-    """Verify wiki repository on startup"""
+    """Verify wiki repository and initialize WebSocket manager on startup"""
     try:
         pages = wiki.list_pages(limit=1)
         print(f"✅ Wiki repository loaded successfully ({WIKI_REPO_PATH})")
         print(f"📚 Found {len(wiki.list_pages())} pages")
+
+        # Initialize WebSocket manager with wiki instance
+        initialize_websocket_manager(wiki, OPENROUTER_API_KEY)
     except Exception as e:
         print(f"❌ Error loading wiki repository: {e}")
 

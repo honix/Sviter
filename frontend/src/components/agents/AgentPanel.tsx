@@ -2,10 +2,12 @@
  * Agent Panel - displays agent list and controls in right panel
  */
 import React, { useState, useEffect } from 'react';
+import { useAppContext } from '../../contexts/AppContext';
 import { AgentsAPI } from '../../services/agents-api';
 import type { Agent, AgentExecutionResult } from '../../types/agent';
 
 export function AgentPanel() {
+  const { actions, websocket } = useAppContext();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,17 +32,44 @@ export function AgentPanel() {
     }
   };
 
-  const handleRunAgent = async (agentName: string) => {
+  const handleRunAgent = (agentName: string) => {
     try {
       setRunningAgent(agentName);
       setExecutionResult(null);
       setError(null);
 
-      const result = await AgentsAPI.runAgent(agentName);
-      setExecutionResult(result);
+      // Switch to chat tab to view agent execution
+      actions.viewAgentExecution(agentName);
+
+      // Run agent via WebSocket for real-time streaming
+      websocket.sendMessage({
+        type: 'run_agent',
+        agent_name: agentName
+      });
+
+      // Listen for completion
+      const unsubscribe = websocket.onMessage((message) => {
+        if (message.type === 'agent_complete') {
+          setExecutionResult({
+            agent_name: agentName,
+            status: message.status,
+            stop_reason: message.stop_reason || 'completed',
+            iterations: message.iterations,
+            branch_created: message.branch_created,
+            pages_analyzed: 0,
+            execution_time: 0,
+            logs: []
+          });
+          setRunningAgent(null);
+          unsubscribe();
+        } else if (message.type === 'error') {
+          setError(message.message || 'Agent execution failed');
+          setRunningAgent(null);
+          unsubscribe();
+        }
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run agent');
-    } finally {
       setRunningAgent(null);
     }
   };
