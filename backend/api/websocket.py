@@ -229,8 +229,8 @@ class WebSocketManager:
                 "branch_created": result.branch_created
             })
 
-            # Clean up - end session and return to main branch
-            self.executors[client_id].end_session()
+            # Clean up - end session and return to main branch after agent execution
+            self.executors[client_id].end_session(reset_branch=True)
 
             return {"type": "success", "result": result.to_dict()}
 

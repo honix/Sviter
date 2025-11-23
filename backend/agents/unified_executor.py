@@ -366,14 +366,19 @@ Be concise, helpful, and proactive in using the available tools to assist users.
         self.loop_controller = None
         self.iteration_count = 0
 
-    def end_session(self):
+    def end_session(self, reset_branch: bool = False):
         """
-        End the session and clean up (switch back to main branch if needed).
+        End the session and clean up.
+
+        Args:
+            reset_branch: If True, switch back to main branch. Default is False to preserve
+                         user's branch selection. Only set to True after agent execution.
         """
-        try:
-            # Switch back to main branch if we're not already on it
-            current_branch = self.wiki.get_current_branch()
-            if current_branch != GlobalAgentConfig.default_base_branch:
-                self.wiki.checkout_branch(GlobalAgentConfig.default_base_branch)
-        except Exception as e:
-            print(f"Warning: Failed to switch back to main branch: {e}")
+        if reset_branch:
+            try:
+                # Switch back to main branch if we're not already on it
+                current_branch = self.wiki.get_current_branch()
+                if current_branch != GlobalAgentConfig.default_base_branch:
+                    self.wiki.checkout_branch(GlobalAgentConfig.default_base_branch)
+            except Exception as e:
+                print(f"Warning: Failed to switch back to main branch: {e}")
