@@ -11,6 +11,7 @@ from storage.git_wiki import GitWiki
 from ai.client import OpenRouterClient
 from ai.tools import get_wiki_tools, WikiTools
 from .base import BaseAgent
+from .chat_agent import ChatAgent
 from .loop_controller import AgentLoopController
 from .config import GlobalAgentConfig
 
@@ -79,6 +80,7 @@ class UnifiedAgentExecutor:
         self.loop_controller: Optional[AgentLoopController] = None
         self.start_time: float = 0
         self.iteration_count: int = 0
+        self.current_model: str = BaseAgent.get_model()
 
     async def _call_callback(self, callback: Optional[Callable], *args, **kwargs):
         """Helper to call sync or async callbacks"""
@@ -90,7 +92,7 @@ class UnifiedAgentExecutor:
             callback(*args, **kwargs)
 
     async def start_session(self,
-                           agent_class: type[BaseAgent] = None,
+                           agent_class: type[BaseAgent],
                            system_prompt: str = None,
                            human_in_loop: bool = False,
                            create_branch: bool = True,
@@ -100,7 +102,7 @@ class UnifiedAgentExecutor:
         Start a new agent session.
 
         Args:
-            agent_class: Agent class to execute (optional, for predefined agents)
+            agent_class: Agent class to execute (required - use ChatAgent for chat mode)
             system_prompt: Custom system prompt (optional, overrides agent prompt)
             human_in_loop: If True, waits for user input between iterations
             create_branch: If True, creates a PR branch for changes
@@ -119,31 +121,25 @@ class UnifiedAgentExecutor:
         branch_created = None
 
         try:
-            # Determine agent name and prompt
-            if agent_class:
-                agent_name = agent_class.get_name()
-                agent_prompt = system_prompt or agent_class.get_prompt()
+            # Get agent configuration
+            agent_name = agent_class.get_name()
+            agent_prompt = system_prompt or agent_class.get_prompt()
+            self.current_model = agent_class.get_model()
 
-                # Check if agent is enabled
-                if not agent_class.is_enabled():
-                    return {
-                        "success": False,
-                        "error": "Agent is disabled",
-                        "agent_name": agent_name
-                    }
-            else:
-                agent_name = "ChatAgent"
-                agent_prompt = system_prompt or self._get_default_chat_prompt()
+            # Check if agent is enabled
+            if not agent_class.is_enabled():
+                return {
+                    "success": False,
+                    "error": "Agent is disabled",
+                    "agent_name": agent_name
+                }
 
             logs.append(f"Starting session: {agent_name}")
 
             # Create branch if requested (and not human-in-loop)
             if create_branch and not human_in_loop:
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                if agent_class:
-                    branch_name = f"{agent_class.get_branch_prefix()}{timestamp}"
-                else:
-                    branch_name = f"agent/chat/{timestamp}"
+                branch_name = f"{agent_class.get_branch_prefix()}{timestamp}"
 
                 logs.append(f"Creating branch: {branch_name}")
                 self.wiki.create_branch(branch_name, from_branch=GlobalAgentConfig.default_base_branch, checkout=True)
@@ -208,8 +204,8 @@ class UnifiedAgentExecutor:
                 })
                 logs.append(f"User: {user_message[:100]}...")
 
-            # Initialize AI client
-            client = OpenRouterClient(api_key=self.api_key)
+            # Initialize AI client with current session's model
+            client = OpenRouterClient(api_key=self.api_key, model=self.current_model)
 
             # Get wiki tools
             wiki_tools = get_wiki_tools(self.wiki)
@@ -346,16 +342,6 @@ class UnifiedAgentExecutor:
             })
         return openai_tools
 
-    def _get_default_chat_prompt(self) -> str:
-        """Get default chat assistant prompt"""
-        return """You are a helpful wiki assistant. You can help users:
-- Read and search wiki pages
-- Create and edit pages
-- Find information across the wiki
-- Organize and structure content
-
-Be concise, helpful, and proactive in using the available tools to assist users."""
-
     def get_conversation_history(self) -> List[Dict[str, Any]]:
         """Get current conversation history"""
         return self.conversation_history.copy()
@@ -365,6 +351,7 @@ Be concise, helpful, and proactive in using the available tools to assist users.
         self.conversation_history = []
         self.loop_controller = None
         self.iteration_count = 0
+        self.current_model = BaseAgent.get_model()  # Reset to default
 
     def end_session(self, reset_branch: bool = False):
         """

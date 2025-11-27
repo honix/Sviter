@@ -22,7 +22,7 @@ import { ArrowUp, Trash2, Plus } from 'lucide-react';
 
 const ChatInterface: React.FC = () => {
   const { state, actions } = useAppContext();
-  const { chatMode, currentAgent } = state;
+  const { chatMode, currentAgent, currentAgentModel } = state;
   const { messages, isConnected, connectionStatus, sendMessage, clearMessages } = useChat();
   const [inputValue, setInputValue] = useState('');
 
@@ -62,11 +62,12 @@ const ChatInterface: React.FC = () => {
             <h2 className="text-lg font-semibold text-foreground">
               {isAgentViewing ? `Agent: ${currentAgent}` : 'AI Assistant'}
             </h2>
-            {isAgentViewing && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Viewing agent execution (read-only)
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground mt-1">
+              {currentAgentModel && `Model: ${currentAgentModel}`}
+              {isAgentViewing && currentAgentModel && ' • '}
+              {isAgentViewing && 'Viewing agent execution (read-only)'}
+              {!isAgentViewing && !currentAgentModel && 'Interactive chat mode'}
+            </p>
           </div>
           <Button
             onClick={isAgentViewing ? actions.startNewChat : clearMessages}

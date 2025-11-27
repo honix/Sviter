@@ -14,8 +14,7 @@ class GlobalAgentConfig:
     max_tools_per_iteration = 5
     timeout_seconds = 300  # 5 minutes
 
-    # AI Model
-    ai_model = "anthropic/claude-3.5-sonnet"
+    # AI Model - now configured per-agent via BaseAgent.model property
     temperature = 0.3
 
     # PR and Branch Settings

@@ -12,12 +12,14 @@ class BaseAgent:
     - schedule: Cron expression (not used in MVP, manual only)
     - enabled: Boolean flag
     - prompt: System prompt for the AI agent
+    - model: AI model to use (defaults to "openai/gpt-oss-20b")
     """
 
     # These should be overridden by subclasses
     schedule: str = None  # Not used in Phase 1 (manual only)
     enabled: bool = True
     prompt: str = ""
+    model: str = "openai/gpt-oss-20b"  # Default AI model
 
     @classmethod
     def get_name(cls) -> str:
@@ -41,3 +43,8 @@ class BaseAgent:
     def get_prompt(cls) -> str:
         """Get the system prompt for this agent"""
         return cls.prompt
+
+    @classmethod
+    def get_model(cls) -> str:
+        """Get the AI model for this agent"""
+        return cls.model

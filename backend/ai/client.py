@@ -4,16 +4,17 @@ import json
 from typing import List, Dict, Any
 
 class OpenRouterClient:
-    """OpenRouter API client for LLM interactions"""
-    
-    def __init__(self, api_key: str = "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"):
+    """OpenRouter API client for LLM interactions with configurable model"""
+
+    def __init__(self, api_key: str = "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",
+                 model: str = "openai/gpt-oss-20b"):
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key,
         )
-        
-        # Model configuration - can be made configurable later
-        self.model_name = "openai/gpt-oss-20b"  # $0.15/M output tokens | 128K context | good and smart
+
+        # Model configuration - configurable via constructor parameter
+        self.model_name = model
         
         # System message for wiki context
         self.system_message = """You are a helpful AI assistant for a wiki system. You can read, edit, and search wiki pages using the provided tools.

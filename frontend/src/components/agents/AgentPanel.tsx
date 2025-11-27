@@ -38,8 +38,11 @@ export function AgentPanel() {
       setExecutionResult(null);
       setError(null);
 
+      // Find agent to get model
+      const agent = agents.find(a => a.name === agentName);
+
       // Switch to chat tab to view agent execution
-      actions.viewAgentExecution(agentName);
+      actions.viewAgentExecution(agentName, agent?.model);
 
       // Run agent via WebSocket for real-time streaming
       websocket.sendMessage({
@@ -136,6 +139,9 @@ export function AgentPanel() {
                         ) : (
                           <span className="text-muted-foreground">○ Disabled</span>
                         )}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        Model: {agent.model}
                       </div>
                     </div>
                   </div>

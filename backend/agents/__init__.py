@@ -9,18 +9,24 @@ from .loop_controller import AgentLoopController
 from .executor import AgentExecutor, ExecutionResult
 
 # Import agent classes
+from .chat_agent import ChatAgent
 from .example_agent import ExampleAgent
 from .test_agent import TestAgent
 from .poet_agent import PoetAgent
+from .poet_agent_grok import PoetAgentGrok
+from .wiki_overview_agent_grok import WikiOverviewAgentGrok
 # from .integrity_checker import InformationIntegrityAgent  # Phase 2+
 # from .style_checker import StyleConsistencyAgent  # Phase 2+
 # from .content_enricher import ContentEnrichmentAgent  # Phase 2+
 
 # Register all enabled agents
 REGISTERED_AGENTS = [
+    ChatAgent,
     ExampleAgent,
     TestAgent,
     PoetAgent,
+    PoetAgentGrok,
+    WikiOverviewAgentGrok,
 ]
 
 
@@ -55,6 +61,7 @@ def list_available_agents() -> list:
         "name": agent.get_name(),
         "enabled": agent.is_enabled(),
         "schedule": agent.schedule,
+        "model": agent.get_model(),
     } for agent in REGISTERED_AGENTS]
 
 

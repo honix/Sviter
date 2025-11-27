@@ -6,6 +6,7 @@ export interface Agent {
   name: string;
   enabled: boolean;
   schedule: string | null;
+  model: string;
 }
 
 export interface AgentExecutionResult {

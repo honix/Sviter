@@ -18,6 +18,7 @@ interface AppState {
   // Chat mode state
   chatMode: 'interactive' | 'agent-viewing';
   currentAgent: string | null; // null = ChatAgent (interactive), else agent name
+  currentAgentModel: string | null; // Model being used by current agent
 }
 
 type AppAction =
@@ -35,7 +36,8 @@ type AppAction =
   | { type: 'SET_CENTER_PANEL_MODE'; payload: 'page' | 'branch-diff' }
   | { type: 'SET_SELECTED_BRANCH_FOR_DIFF'; payload: string | null }
   | { type: 'SET_CHAT_MODE'; payload: 'interactive' | 'agent-viewing' }
-  | { type: 'SET_CURRENT_AGENT'; payload: string | null };
+  | { type: 'SET_CURRENT_AGENT'; payload: string | null }
+  | { type: 'SET_CURRENT_AGENT_MODEL'; payload: string | null };
 
 const initialState: AppState = {
   pages: [],
@@ -49,7 +51,8 @@ const initialState: AppState = {
   centerPanelMode: 'page',
   selectedBranchForDiff: null,
   chatMode: 'interactive',
-  currentAgent: null
+  currentAgent: null,
+  currentAgentModel: null // Will be fetched from backend
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -127,6 +130,9 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_CURRENT_AGENT':
       return { ...state, currentAgent: action.payload };
 
+    case 'SET_CURRENT_AGENT_MODEL':
+      return { ...state, currentAgentModel: action.payload };
+
     default:
       return state;
   }
@@ -151,8 +157,9 @@ interface AppContextType {
     closeBranchDiff: () => void;
     setChatMode: (mode: 'interactive' | 'agent-viewing') => void;
     setCurrentAgent: (agent: string | null) => void;
-    startNewChat: () => void;
-    viewAgentExecution: (agentName: string) => void;
+    setCurrentAgentModel: (model: string | null) => void;
+    startNewChat: () => Promise<void>;
+    viewAgentExecution: (agentName: string, agentModel?: string) => void;
   };
   websocket: {
     sendMessage: (message: any) => void;
@@ -200,6 +207,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       wsService.current?.disconnect();
     };
   }, []);
+
+  // Helper function to fetch and set ChatAgent model
+  const fetchChatAgentModel = useCallback(async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/agents');
+      const data = await response.json();
+      const chatAgent = data.agents.find((a: any) => a.name === 'ChatAgent');
+      dispatch({ type: 'SET_CURRENT_AGENT_MODEL', payload: chatAgent?.model || null });
+    } catch (error) {
+      console.error('Failed to fetch ChatAgent model:', error);
+      dispatch({ type: 'SET_CURRENT_AGENT_MODEL', payload: null });
+    }
+  }, []);
+
+  // Fetch ChatAgent model on initialization
+  useEffect(() => {
+    fetchChatAgentModel();
+  }, [fetchChatAgentModel]);
 
   const loadPages = React.useCallback(async () => {
     dispatch({ type: 'SET_LOADING', payload: true });
@@ -397,18 +422,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     setChatMode: (mode: 'interactive' | 'agent-viewing') => dispatch({ type: 'SET_CHAT_MODE', payload: mode }),
     setCurrentAgent: (agent: string | null) => dispatch({ type: 'SET_CURRENT_AGENT', payload: agent }),
-    startNewChat: () => {
+    setCurrentAgentModel: (model: string | null) => dispatch({ type: 'SET_CURRENT_AGENT_MODEL', payload: model }),
+    startNewChat: async () => {
       // Reset to interactive chat mode
       dispatch({ type: 'SET_CHAT_MODE', payload: 'interactive' });
       dispatch({ type: 'SET_CURRENT_AGENT', payload: null });
+
+      // Fetch ChatAgent model from backend
+      await fetchChatAgentModel();
+
       dispatch({ type: 'SET_RIGHT_PANEL_MODE', payload: 'chat' });
       // Send reset message to backend
       wsService.current?.send({ type: 'reset' });
     },
-    viewAgentExecution: (agentName: string) => {
+    viewAgentExecution: (agentName: string, agentModel?: string) => {
       // Switch to chat tab in agent-viewing mode
       dispatch({ type: 'SET_CHAT_MODE', payload: 'agent-viewing' });
       dispatch({ type: 'SET_CURRENT_AGENT', payload: agentName });
+      dispatch({ type: 'SET_CURRENT_AGENT_MODEL', payload: agentModel || null });
       dispatch({ type: 'SET_RIGHT_PANEL_MODE', payload: 'chat' });
     }
   };

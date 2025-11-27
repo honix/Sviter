@@ -98,8 +98,8 @@ class AgentExecutor:
             self.wiki.create_branch(branch_name, from_branch=GlobalAgentConfig.default_base_branch, checkout=True)
             branch_created = branch_name
 
-            # Initialize AI client with agent system prompt
-            client = OpenRouterClient(api_key=self.api_key)
+            # Initialize AI client with agent's model
+            client = OpenRouterClient(api_key=self.api_key, model=agent_class.get_model())
 
             # Get wiki tools - convert to OpenAI format
             wiki_tools = get_wiki_tools(self.wiki)
