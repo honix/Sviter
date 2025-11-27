@@ -16,6 +16,8 @@ class ChatAgent(BaseAgent):
     - Generic wiki assistance prompt
     """
 
+    model = "x-ai/grok-4.1-fast:free"
+
     # Always enabled for chat
     enabled = True
 
