@@ -2,7 +2,6 @@ import React from 'react';
 import LeftPanel from './LeftPanel';
 import CenterPanel from './CenterPanel';
 import RightPanel from './RightPanel';
-import ConnectionStatus from './ConnectionStatus';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import {
   ResizablePanelGroup,
@@ -16,9 +15,6 @@ const MainLayout: React.FC = () => {
 
   return (
     <div className="h-screen bg-background overflow-hidden relative">
-      {/* Connection Status Indicator */}
-      <ConnectionStatus />
-
       <ResizablePanelGroup direction="horizontal" className="h-full">
         {/* Left Panel - Page Tree */}
         <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>

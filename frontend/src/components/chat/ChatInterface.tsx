@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useChat } from '../../hooks/useChat';
+import { useAppContext } from '../../contexts/AppContext';
 import {
   ChatContainerRoot,
   ChatContainerContent,
@@ -17,11 +18,15 @@ import {
   PromptInputAction,
 } from '@/components/ui/prompt-input';
 import { Button } from '@/components/ui/button';
-import { ArrowUp, Trash2 } from 'lucide-react';
+import { ArrowUp, Trash2, Plus } from 'lucide-react';
 
 const ChatInterface: React.FC = () => {
+  const { state, actions } = useAppContext();
+  const { chatMode, currentAgent, currentAgentModel } = state;
   const { messages, isConnected, connectionStatus, sendMessage, clearMessages } = useChat();
   const [inputValue, setInputValue] = useState('');
+
+  const isAgentViewing = chatMode === 'agent-viewing';
 
   const handleSend = () => {
     if (inputValue.trim() && isConnected) {
@@ -51,18 +56,35 @@ const ChatInterface: React.FC = () => {
   return (
     <div className="h-full bg-background flex flex-col">
       {/* Header */}
-      <div className="p-4 border-b border-border">
+      <div className="p-4 border-b border-border flex-shrink-0">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-foreground">
-            AI Assistant
-          </h2>
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">
+              {isAgentViewing ? `Agent: ${currentAgent}` : 'AI Assistant'}
+            </h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              {currentAgentModel && `Model: ${currentAgentModel}`}
+              {isAgentViewing && currentAgentModel && ' • '}
+              {isAgentViewing && 'Viewing agent execution (read-only)'}
+              {!isAgentViewing && !currentAgentModel && 'Interactive chat mode'}
+            </p>
+          </div>
           <Button
-            onClick={clearMessages}
+            onClick={isAgentViewing ? actions.startNewChat : clearMessages}
             variant="ghost"
             size="sm"
           >
-            <Trash2 className="h-4 w-4 mr-2" />
-            Clear
+            {isAgentViewing ? (
+              <>
+                <Plus className="h-4 w-4 mr-2" />
+                Start New Chat
+              </>
+            ) : (
+              <>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Clear
+              </>
+            )}
           </Button>
         </div>
         <div className="flex items-center mt-2">
@@ -74,7 +96,7 @@ const ChatInterface: React.FC = () => {
       </div>
 
       {/* Chat Messages */}
-      <ChatContainerRoot className="flex-1 p-4">
+      <ChatContainerRoot className="flex-1 min-h-0 p-4">
         <ChatContainerContent>
           {messages.map((message) => (
             <Message
@@ -99,31 +121,33 @@ const ChatInterface: React.FC = () => {
       </ChatContainerRoot>
 
       {/* Message Input */}
-      <div className="p-4 border-t border-border">
-        <PromptInput
-          value={inputValue}
-          onValueChange={setInputValue}
-          onSubmit={handleSend}
-          isLoading={!isConnected}
-        >
-          <PromptInputTextarea
-            placeholder={isConnected ? "Ask the AI about your wiki..." : "Connecting..."}
-            disabled={!isConnected}
-          />
-          <PromptInputActions>
-            <PromptInputAction tooltip="Send message">
-              <Button
-                onClick={handleSend}
-                disabled={!isConnected || !inputValue.trim()}
-                size="icon"
-                className="rounded-full"
-              >
-                <ArrowUp className="h-4 w-4" />
-              </Button>
-            </PromptInputAction>
-          </PromptInputActions>
-        </PromptInput>
-      </div>
+      {!isAgentViewing && (
+        <div className="p-4 border-t border-border flex-shrink-0">
+          <PromptInput
+            value={inputValue}
+            onValueChange={setInputValue}
+            onSubmit={handleSend}
+            isLoading={!isConnected}
+          >
+            <PromptInputTextarea
+              placeholder={isConnected ? "Ask the AI about your wiki..." : "Connecting..."}
+              disabled={!isConnected}
+            />
+            <PromptInputActions>
+              <PromptInputAction tooltip="Send message">
+                <Button
+                  onClick={handleSend}
+                  disabled={!isConnected || !inputValue.trim()}
+                  size="icon"
+                  className="rounded-full"
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+              </PromptInputAction>
+            </PromptInputActions>
+          </PromptInput>
+        </div>
+      )}
     </div>
   );
 };

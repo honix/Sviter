@@ -9,18 +9,35 @@ import { RevisionHistory } from '../revisions/RevisionHistory';
 import type { PageRevision } from '../../types/page';
 import { ProseMirrorEditor, type ProseMirrorEditorHandle } from '../editor/ProseMirrorEditor';
 import { EditorToolbar } from '../editor/EditorToolbar';
+import { BranchDiffPanel } from '../agents/BranchDiffPanel';
 
 const CenterPanel: React.FC = () => {
   const { state, actions } = useAppContext();
-  const { currentPage, viewMode, isLoading, error } = state;
+  const { currentPage, viewMode, isLoading, error, centerPanelMode, selectedBranchForDiff } = state;
   const { setViewMode, updatePage } = actions;
 
+  // All hooks must be declared before any conditional returns
+  const [currentBranch, setCurrentBranch] = useState<string>('main');
   const [editContent, setEditContent] = useState('');
   const [editContentJson, setEditContentJson] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'view' | 'edit' | 'history'>('view');
   const [viewingRevision, setViewingRevision] = useState<PageRevision | null>(null);
   const editorRef = useRef<ProseMirrorEditorHandle>(null);
-  const [editorView, setEditorView] = useState<any>(null); // Store editor view for toolbar
+  const [editorView, setEditorView] = useState<any>(null);
+
+  // Fetch current branch on mount
+  useEffect(() => {
+    const fetchCurrentBranch = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/git/current-branch');
+        const data = await response.json();
+        setCurrentBranch(data.branch);
+      } catch (error) {
+        console.error('Failed to fetch current branch:', error);
+      }
+    };
+    fetchCurrentBranch();
+  }, []);
 
   // Sync edit content when page changes
   useEffect(() => {
@@ -94,6 +111,11 @@ const CenterPanel: React.FC = () => {
       setViewMode('view');
     }
   };
+
+  // If in branch diff mode, show branch diff panel
+  if (centerPanelMode === 'branch-diff' && selectedBranchForDiff) {
+    return <BranchDiffPanel branch={selectedBranchForDiff} currentBranch={currentBranch} />;
+  }
 
   if (isLoading) {
     return (

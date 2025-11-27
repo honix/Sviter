@@ -1,49 +1,108 @@
 from fastapi import WebSocket, WebSocketDisconnect
-from ai.chat import ChatHandler
+from agents.unified_executor import UnifiedAgentExecutor
+from agents.chat_agent import ChatAgent
+from storage import GitWiki
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import asyncio
+import os
 
 class WebSocketManager:
-    """Manages WebSocket connections and chat sessions"""
-    
-    def __init__(self):
+    """Manages WebSocket connections and unified agent sessions"""
+
+    def __init__(self, wiki: GitWiki, api_key: str = None):
+        self.wiki = wiki
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
         self.active_connections: Dict[str, WebSocket] = {}
-        self.chat_handlers: Dict[str, ChatHandler] = {}
+        self.executors: Dict[str, UnifiedAgentExecutor] = {}
+        self.session_info: Dict[str, Dict[str, Any]] = {}  # Track session metadata
     
-    async def connect(self, websocket: WebSocket, client_id: str):
-        """Accept WebSocket connection and initialize chat handler"""
-        print(f"🔌 WebSocketManager.connect() called for client: {client_id}")
+    async def connect(self, websocket: WebSocket, client_id: str, agent_name: str = None):
+        """Accept WebSocket connection and initialize unified executor session"""
+        print(f"🔌 WebSocketManager.connect() called for client: {client_id}, agent: {agent_name or 'ChatAgent'}")
         await websocket.accept()
         print(f"✅ WebSocket accepted for client: {client_id}")
 
         self.active_connections[client_id] = websocket
         print(f"📝 Added {client_id} to active_connections. Total connections: {len(self.active_connections)}")
 
-        # Initialize chat handler
-        self.chat_handlers[client_id] = ChatHandler()
-        print(f"🤖 Created chat handler for {client_id}. Total handlers: {len(self.chat_handlers)}")
+        # Initialize unified executor
+        self.executors[client_id] = UnifiedAgentExecutor(wiki=self.wiki, api_key=self.api_key)
+        print(f"🤖 Created executor for {client_id}. Total executors: {len(self.executors)}")
 
-        # Send welcome message
-        await self.send_message(client_id, {
-            "type": "system",
-            "message": "Connected to AI Wiki Assistant. You can ask questions or request wiki operations."
-        })
+        # Start session with ChatAgent (human-in-the-loop mode) unless specific agent requested
+        if agent_name:
+            # TODO: For future - support starting with specific agent
+            # For now, always use ChatAgent for WebSocket connections
+            agent_name = "ChatAgent"
+
+        # Define callbacks for streaming
+        async def on_message_callback(msg_type: str, content: str):
+            """Stream messages to client"""
+            if msg_type == "system_prompt":
+                await self.send_message(client_id, {
+                    "type": "system_prompt",
+                    "content": content
+                })
+            elif msg_type == "assistant":
+                await self.send_message(client_id, {
+                    "type": "chat_response",
+                    "message": content
+                })
+
+        async def on_tool_call_callback(tool_info: Dict[str, Any]):
+            """Stream tool calls to client"""
+            await self.send_message(client_id, {
+                "type": "tool_call",
+                "tool_name": tool_info["tool_name"],
+                "arguments": tool_info["arguments"],
+                "result": tool_info["result"],
+                "iteration": tool_info["iteration"]
+            })
+
+        session_result = await self.executors[client_id].start_session(
+            agent_class=ChatAgent,
+            human_in_loop=True,
+            create_branch=False,  # Chat mode - no PR branches
+            on_message=on_message_callback,
+            on_tool_call=on_tool_call_callback
+        )
+
+        if session_result["success"]:
+            self.session_info[client_id] = session_result
+            print(f"✅ Session started for {client_id}: {session_result['agent_name']}")
+
+            # Send welcome message
+            await self.send_message(client_id, {
+                "type": "system",
+                "message": "Connected to AI Wiki Assistant. You can ask questions or request wiki operations."
+            })
+        else:
+            print(f"❌ Failed to start session for {client_id}: {session_result.get('error')}")
+            await self.send_message(client_id, {
+                "type": "error",
+                "message": f"Failed to start session: {session_result.get('error')}"
+            })
     
     def disconnect(self, client_id: str):
         """Clean up connection and resources"""
         print(f"🔌❌ WebSocketManager.disconnect() called for client: {client_id}")
+
+        # End session and cleanup
+        if client_id in self.executors:
+            try:
+                self.executors[client_id].end_session()
+            except Exception as e:
+                print(f"⚠️ Error ending session for {client_id}: {e}")
+            del self.executors[client_id]
+            print(f"🗑️ Removed executor for {client_id}. Remaining: {len(self.executors)}")
+
+        if client_id in self.session_info:
+            del self.session_info[client_id]
+
         if client_id in self.active_connections:
             del self.active_connections[client_id]
             print(f"🗑️ Removed {client_id} from active_connections. Remaining: {len(self.active_connections)}")
-        else:
-            print(f"⚠️ Client {client_id} was not in active_connections during disconnect")
-
-        if client_id in self.chat_handlers:
-            del self.chat_handlers[client_id]
-            print(f"🗑️ Removed chat handler for {client_id}. Remaining handlers: {len(self.chat_handlers)}")
-        else:
-            print(f"⚠️ Client {client_id} had no chat handler during disconnect")
     
     async def send_message(self, client_id: str, message: Dict[str, Any]):
         """Send message to specific client"""
@@ -69,12 +128,12 @@ class WebSocketManager:
 
         print(f"📨 WebSocket received message from {client_id}: {message_data}")
         print(f"🔍 Current active_connections: {list(self.active_connections.keys())}")
-        print(f"🔍 Current chat_handlers: {list(self.chat_handlers.keys())}")
+        print(f"🔍 Current executors: {list(self.executors.keys())}")
 
-        if client_id not in self.chat_handlers:
-            print(f"❌ Chat handler not found for client {client_id}")
-            print(f"❌ Available handlers: {list(self.chat_handlers.keys())}")
-            return {"type": "error", "message": "Chat handler not found"}
+        if client_id not in self.executors:
+            print(f"❌ Executor not found for client {client_id}")
+            print(f"❌ Available executors: {list(self.executors.keys())}")
+            return {"type": "error", "message": "Executor not found"}
 
         message_type = message_data.get("type")
         print(f"🔍 Processing message type: {message_type}")
@@ -87,75 +146,164 @@ class WebSocketManager:
                 print("❌ Empty message received")
                 return {"type": "error", "message": "Empty message"}
 
-            print(f"🤖 Processing chat message with AI...")
-            # Process message through chat handler
-            result = self.chat_handlers[client_id].process_message(user_message)
-            print(f"🔄 AI processing result: {result.get('success', False)}")
+            print(f"🤖 Processing chat message with unified executor...")
 
-            if result["success"]:
-                response_data = result["data"]
+            # Process turn through unified executor (runs until stopped or needs input)
+            result = await self.executors[client_id].process_turn(user_message)
 
-                # Send initial message if it exists (iteration 1 reasoning) - only if different from final
-                initial_message_sent = False
-                if response_data["message"] and response_data["message"] != response_data["final_response"]:
-                    initial_message = {
-                        "type": "chat_response",
-                        "message": response_data["message"]
-                    }
-                    print(f"📤 Sending initial message: {response_data['message'][:50]}...")
-                    await self.send_message(client_id, initial_message)
-                    initial_message_sent = True
+            print(f"🔄 Execution result status: {result.status}")
 
-                # Send tool calls in real-time if any (for user feedback)
-                page_modified = False
-                print(f"📊 Tool calls to send: {len(response_data['tool_calls'])}")
-                for i, tool_call in enumerate(response_data["tool_calls"]):
-                    tool_message = {
-                        "type": "tool_call",
-                        "tool_name": tool_call["tool_name"],
-                        "arguments": tool_call["arguments"],
-                        "result": tool_call["result"],
-                        "iteration": tool_call.get("iteration", 1)
-                    }
-                    print(f"📤 Sending tool_call {i+1}/{len(response_data['tool_calls'])}: {tool_call['tool_name']}")
-                    await self.send_message(client_id, tool_message)
-
-                    # Check if a page-modifying tool was executed
-                    if tool_call["tool_name"] in ["edit_page", "create_page", "delete_page"]:
-                        page_modified = True
-
-                # Send final response with metadata
-                if response_data["final_response"]:
-                    final_message = {
-                        "type": "chat_response",
-                        "message": response_data["final_response"],
-                        "page_modified": page_modified
-                    }
-                    print(f"📤 Sending final response: {response_data['final_response'][:50]}...")
-                    await self.send_message(client_id, final_message)
-
+            if result.status in ['completed', 'stopped']:
+                # Success - messages and tool calls were already streamed via callbacks
                 return {"type": "success"}
+            elif result.status == 'error':
+                return {"type": "error", "message": result.error}
             else:
-                return {"type": "error", "message": result["error"]}
-        
+                return {"type": "error", "message": f"Unexpected status: {result.status}"}
+
+        elif message_type == "run_agent":
+            # Run an autonomous agent and stream execution to chat
+            agent_name = message_data.get("agent_name", "")
+            if not agent_name:
+                return {"type": "error", "message": "Agent name is required"}
+
+            print(f"🤖 Running agent: {agent_name}")
+
+            # Import agent classes
+            from agents import get_agent_by_name
+
+            # Get the agent class
+            agent_class = get_agent_by_name(agent_name)
+            if not agent_class:
+                return {"type": "error", "message": f"Agent '{agent_name}' not found"}
+
+            # Reset executor and start new session with autonomous agent
+            self.executors[client_id].reset_conversation()
+
+            # Setup streaming callbacks
+            async def on_message_callback(msg_type: str, content: str):
+                """Stream messages to client"""
+                if msg_type == "system_prompt":
+                    await self.send_message(client_id, {
+                        "type": "system_prompt",
+                        "content": content
+                    })
+                elif msg_type == "assistant":
+                    await self.send_message(client_id, {
+                        "type": "chat_response",
+                        "message": content
+                    })
+
+            async def on_tool_call_callback(tool_info: Dict[str, Any]):
+                """Stream tool calls to client"""
+                await self.send_message(client_id, {
+                    "type": "tool_call",
+                    "tool_name": tool_info["tool_name"],
+                    "arguments": tool_info["arguments"],
+                    "result": tool_info["result"],
+                    "iteration": tool_info["iteration"]
+                })
+
+            # Start autonomous agent session
+            session_result = await self.executors[client_id].start_session(
+                agent_class=agent_class,
+                human_in_loop=False,  # Autonomous mode
+                create_branch=True,   # Create PR branch
+                on_message=on_message_callback,
+                on_tool_call=on_tool_call_callback
+            )
+
+            if not session_result["success"]:
+                return {"type": "error", "message": f"Failed to start agent: {session_result.get('error')}"}
+
+            # Run agent execution (without user input)
+            result = await self.executors[client_id].process_turn()
+
+            print(f"🔄 Agent execution result: {result.status}")
+
+            # Send completion message
+            await self.send_message(client_id, {
+                "type": "agent_complete",
+                "status": result.status,
+                "iterations": result.iterations,
+                "branch_created": result.branch_created
+            })
+
+            # Clean up - end session and return to main branch after agent execution
+            self.executors[client_id].end_session(reset_branch=True)
+
+            return {"type": "success", "result": result.to_dict()}
+
         elif message_type == "reset":
-            # Reset conversation
-            self.chat_handlers[client_id].reset_conversation()
-            return {"type": "success", "message": "Conversation reset"}
-        
+            # Reset conversation - restart session
+            print(f"🔄 Resetting session for {client_id}")
+            self.executors[client_id].reset_conversation()
+
+            # Restart session with same configuration
+            session_info = self.session_info.get(client_id, {})
+
+            # Re-setup callbacks
+            async def on_message_callback(msg_type: str, content: str):
+                """Stream messages to client"""
+                if msg_type == "system_prompt":
+                    await self.send_message(client_id, {
+                        "type": "system_prompt",
+                        "content": content
+                    })
+                elif msg_type == "assistant":
+                    await self.send_message(client_id, {
+                        "type": "chat_response",
+                        "message": content
+                    })
+
+            async def on_tool_call_callback(tool_info: Dict[str, Any]):
+                """Stream tool calls to client"""
+                await self.send_message(client_id, {
+                    "type": "tool_call",
+                    "tool_name": tool_info["tool_name"],
+                    "arguments": tool_info["arguments"],
+                    "result": tool_info["result"],
+                    "iteration": tool_info["iteration"]
+                })
+
+            session_result = await self.executors[client_id].start_session(
+                agent_class=ChatAgent,
+                human_in_loop=True,
+                create_branch=False,
+                on_message=on_message_callback,
+                on_tool_call=on_tool_call_callback
+            )
+
+            if session_result["success"]:
+                self.session_info[client_id] = session_result
+                return {"type": "success", "message": "Conversation reset"}
+            else:
+                return {"type": "error", "message": f"Failed to reset: {session_result.get('error')}"}
+
         elif message_type == "get_history":
             # Get conversation history
-            history = self.chat_handlers[client_id].get_conversation_history()
+            history = self.executors[client_id].get_conversation_history()
             return {"type": "history", "data": history}
-        
+
         else:
             return {"type": "error", "message": f"Unknown message type: {message_type}"}
 
-# Global WebSocket manager instance
-websocket_manager = WebSocketManager()
+# Global WebSocket manager instance - will be initialized in main.py
+websocket_manager: Optional[WebSocketManager] = None
+
+def initialize_websocket_manager(wiki: GitWiki, api_key: str = None):
+    """Initialize the global WebSocket manager with wiki instance"""
+    global websocket_manager
+    websocket_manager = WebSocketManager(wiki, api_key)
+    print(f"✅ WebSocket manager initialized")
 
 async def websocket_endpoint(websocket: WebSocket, client_id: str = "default"):
     """WebSocket endpoint handler"""
+    if websocket_manager is None:
+        print("❌ WebSocket manager not initialized!")
+        await websocket.close(code=1011, reason="Server not ready")
+        return
+
     await websocket_manager.connect(websocket, client_id)
     
     try:

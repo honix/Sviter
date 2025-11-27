@@ -64,6 +64,26 @@ export const useChat = (): UseChatReturn => {
         };
 
         setMessages(prev => [...prev, systemMessage]);
+      } else if (message.type === 'system_prompt') {
+        console.log('useChat: Creating system_prompt message');
+        const systemPromptMessage: ChatMessage = {
+          id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+          type: 'system',
+          content: `🤖 Agent Initialized\n\n${message.message || message.content || ''}`,
+          timestamp: new Date().toISOString()
+        };
+
+        setMessages(prev => [...prev, systemPromptMessage]);
+      } else if (message.type === 'agent_complete') {
+        console.log('useChat: Creating agent_complete message');
+        const agentCompleteMessage: ChatMessage = {
+          id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+          type: 'system',
+          content: `✅ Agent Execution Complete\nStatus: ${message.status || 'completed'}\nIterations: ${message.iterations || 0}`,
+          timestamp: new Date().toISOString()
+        };
+
+        setMessages(prev => [...prev, agentCompleteMessage]);
       }
     });
 

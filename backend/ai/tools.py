@@ -233,3 +233,115 @@ class WikiTools:
             result_text += "\n"
 
         return result_text
+
+
+def get_wiki_tools(wiki: GitWiki) -> List[Dict[str, Any]]:
+    """
+    Get tool definitions with bound wiki instance for use in agents.
+
+    Args:
+        wiki: GitWiki instance to bind to tools
+
+    Returns:
+        List of tool definitions with executable functions
+    """
+    def read_page_func(title: str) -> str:
+        return WikiTools._read_page(wiki, title)
+
+    def edit_page_func(title: str, content: str, author: str = "AI Agent", tags: Optional[List[str]] = None) -> str:
+        arguments = {
+            "title": title,
+            "content": content,
+            "author": author,
+            "tags": tags or []
+        }
+        return WikiTools._edit_page(wiki, arguments)
+
+    def find_pages_func(query: str, limit: int = 10) -> str:
+        arguments = {"query": query, "limit": limit}
+        return WikiTools._find_pages(wiki, arguments)
+
+    def list_all_pages_func(limit: int = 50) -> str:
+        arguments = {"limit": limit}
+        return WikiTools._list_all_pages(wiki, arguments)
+
+    # Return tool definitions with bound functions
+    return [
+        {
+            "name": "read_page",
+            "description": "Read the content of a wiki page by title. Returns the page content, metadata, and status.",
+            "function": read_page_func,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "The title of the wiki page to read"
+                    }
+                },
+                "required": ["title"]
+            }
+        },
+        {
+            "name": "edit_page",
+            "description": "Create or update a wiki page with new content. If the page doesn't exist, it will be created.",
+            "function": edit_page_func,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "The title of the wiki page to edit or create"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The new content for the page (supports markdown)"
+                    },
+                    "author": {
+                        "type": "string",
+                        "description": "The author of the edit (optional, defaults to 'AI Agent')"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Tags for the page (optional)"
+                    }
+                },
+                "required": ["title", "content"]
+            }
+        },
+        {
+            "name": "find_pages",
+            "description": "Search for wiki pages by title or content. Returns a list of matching pages with their titles and excerpts.",
+            "function": find_pages_func,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to find pages"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (default: 10)"
+                    }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "list_all_pages",
+            "description": "Get a list of all wiki pages with their titles and basic metadata.",
+            "function": list_all_pages_func,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of pages to return (default: 50)"
+                    }
+                },
+                "required": []
+            }
+        }
+    ]

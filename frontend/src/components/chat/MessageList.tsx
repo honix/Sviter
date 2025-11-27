@@ -60,7 +60,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
   if (isSystem) {
     return (
       <div className="flex justify-center">
-        <div className="bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-400">
+        <div className="bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
           {message.content}
         </div>
       </div>
