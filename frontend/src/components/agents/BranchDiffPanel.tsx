@@ -78,7 +78,7 @@ export function BranchDiffPanel({ branch, currentBranch }: BranchDiffPanelProps)
       setProcessing(true);
       setError(null);
 
-      await GitAPI.deleteBranch(branch);
+      await GitAPI.deleteBranch(branch, true);
 
       // Close diff view and return to page view
       actions.closeBranchDiff();

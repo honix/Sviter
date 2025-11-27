@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { GitBranch, Plus, Check, Trash2, GitMerge } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useAppContext } from '../../contexts/AppContext';
+import { GitAPI } from '../../services/git-api';
 
 interface BranchSwitcherProps {
   onBranchChange?: (branch: string) => void;
@@ -26,9 +27,7 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
 
   const fetchBranches = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/git/branches');
-      const data = await response.json();
-      const branchList = data.branches || [];
+      const branchList = await GitAPI.listBranches();
       setBranches(branchList);
     } catch (error) {
       console.error('Failed to fetch branches:', error);
@@ -37,9 +36,8 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
 
   const fetchCurrentBranch = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/git/current-branch');
-      const data = await response.json();
-      setCurrentBranch(data.branch);
+      const branch = await GitAPI.getCurrentBranch();
+      setCurrentBranch(branch);
     } catch (error) {
       console.error('Failed to fetch current branch:', error);
     }
@@ -53,15 +51,7 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
 
     setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/git/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ branch: branchName }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to checkout branch');
-      }
+      await GitAPI.checkoutBranch(branchName);
 
       setCurrentBranch(branchName);
       setIsOpen(false);
@@ -88,32 +78,18 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
 
     setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/git/create-branch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newBranchName.trim(),
-          from: currentBranch
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Failed to create branch');
-      }
-
-      const data = await response.json();
+      const branch = await GitAPI.createBranch(newBranchName.trim(), currentBranch);
 
       // Refresh branches list
       await fetchBranches();
-      setCurrentBranch(data.branch);
+      setCurrentBranch(branch);
       setNewBranchName('');
       setIsCreating(false);
       setIsOpen(false);
 
       // Notify parent component
       if (onBranchChange) {
-        onBranchChange(data.branch);
+        onBranchChange(branch);
       }
 
       // Reload to show new branch
@@ -145,14 +121,7 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
 
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:8000/api/git/branches/${encodeURIComponent(branchName)}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Failed to delete branch');
-      }
+      await GitAPI.deleteBranch(branchName, true);
 
       // Refresh branches list
       await fetchBranches();
