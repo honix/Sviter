@@ -1,30 +1,30 @@
 import React, { useState } from 'react';
-import { Page } from '../../types/page';
-import { Badge } from '@/components/ui/badge';
+import { ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Trash2, Check, X, File } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { TreeItem } from '../../types/page';
 
-interface PageItemProps {
-  page: Page | undefined;
-  isActive: boolean;
-  onSelect: () => void;
+interface FolderItemProps {
+  folder: TreeItem;
+  isExpanded: boolean;
+  onToggle: () => void;
   onDelete: () => void;
-  indentLevel?: number;
+  indentLevel: number;
   isDragging?: boolean;
+  isOver?: boolean;
 }
 
-const PageItem: React.FC<PageItemProps> = ({
-  page,
-  isActive,
-  onSelect,
+const FolderItem: React.FC<FolderItemProps> = ({
+  folder,
+  isExpanded,
+  onToggle,
   onDelete,
-  indentLevel = 0,
-  isDragging = false
+  indentLevel,
+  isDragging,
+  isOver
 }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
-  if (!page) return null;
+  const childCount = folder.children?.length || 0;
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -44,48 +44,45 @@ const PageItem: React.FC<PageItemProps> = ({
 
   return (
     <div
-      onClick={onSelect}
+      onClick={onToggle}
       className={cn(
         "group relative p-3 rounded-lg cursor-pointer transition-all border",
-        isActive
-          ? 'bg-primary text-primary-foreground border-primary'
-          : 'hover:bg-accent hover:text-accent-foreground border-transparent',
-        isDragging && 'opacity-50 ring-2 ring-primary'
+        "hover:bg-accent hover:text-accent-foreground border-transparent",
+        isDragging && "opacity-50",
+        isOver && "bg-accent/50 border-primary border-dashed"
       )}
       style={{ paddingLeft: `${12 + indentLevel * 16}px` }}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex-1 min-w-0 flex items-center gap-2">
-          <File className="h-4 w-4 flex-shrink-0" />
+          {/* Expand/Collapse chevron */}
+          {isExpanded ? (
+            <ChevronDown className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+          )}
+
+          {/* Folder icon */}
+          {isExpanded ? (
+            <FolderOpen className="h-4 w-4 flex-shrink-0 text-yellow-500" />
+          ) : (
+            <Folder className="h-4 w-4 flex-shrink-0 text-yellow-500" />
+          )}
+
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium truncate">
-              {page.title}
+              {folder.title}
             </div>
-            {page.tags.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {page.tags.slice(0, 2).map(tag => (
-                  <Badge
-                    key={tag}
-                    variant="secondary"
-                    className="text-xs px-1.5 py-0"
-                  >
-                    {tag}
-                  </Badge>
-                ))}
-                {page.tags.length > 2 && (
-                  <span className="text-xs text-muted-foreground">
-                    +{page.tags.length - 2}
-                  </span>
-                )}
-              </div>
-            )}
+            <div className="text-xs text-muted-foreground">
+              {childCount} {childCount === 1 ? 'item' : 'items'}
+            </div>
           </div>
         </div>
 
         {/* Delete button */}
         <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
           {showDeleteConfirm ? (
-            <div className="flex gap-1">
+            <div className="flex gap-1" onClick={e => e.stopPropagation()}>
               <Button
                 onClick={confirmDelete}
                 size="icon"
@@ -111,7 +108,8 @@ const PageItem: React.FC<PageItemProps> = ({
               size="icon"
               variant="ghost"
               className="h-6 w-6"
-              title="Delete page"
+              disabled={childCount > 0}
+              title={childCount > 0 ? "Cannot delete non-empty folder" : "Delete folder"}
             >
               <Trash2 className="h-3 w-3" />
             </Button>
@@ -122,4 +120,4 @@ const PageItem: React.FC<PageItemProps> = ({
   );
 };
 
-export default PageItem;
+export default FolderItem;

@@ -87,13 +87,196 @@ class GitWiki:
         """
         # Remove .md extension
         name = filename.replace('.md', '')
+        # Remove numeric order prefix if present (e.g., "01-intro" -> "intro")
+        order, slug = GitWiki._parse_order_from_filename(name + '.md')
+        if order > 0:
+            name = slug
         # Replace hyphens with spaces and title case
         return name.replace('-', ' ').title()
 
+    @staticmethod
+    def _parse_order_from_filename(filename: str) -> tuple:
+        """
+        Extract order number and slug from filename.
+
+        Args:
+            filename: Filename like '01-introduction.md' or '02-folder'
+
+        Returns:
+            Tuple of (order: int, slug: str)
+        """
+        # Remove .md extension for processing
+        name = filename.replace('.md', '')
+
+        # Match pattern: NN-slug or NNN-slug
+        match = re.match(r'^(\d{2,3})-(.+)$', name)
+        if match:
+            return int(match.group(1)), match.group(2)
+
+        # No order prefix - return 0 and full name
+        return 0, name
+
+    @staticmethod
+    def _build_ordered_filename(order: int, slug: str, is_folder: bool = False) -> str:
+        """
+        Build filename with order prefix.
+
+        Args:
+            order: Order number (1-999)
+            slug: URL-safe slug
+            is_folder: If True, don't add .md extension
+
+        Returns:
+            Filename like '01-introduction.md' or '01-getting-started'
+        """
+        prefix = f"{order:02d}" if order < 100 else f"{order:03d}"
+        if is_folder:
+            return f"{prefix}-{slug}"
+        return f"{prefix}-{slug}.md"
+
+    def _get_next_order(self, parent_path: Optional[str] = None) -> int:
+        """
+        Get the next available order number in a directory.
+
+        Args:
+            parent_path: Parent directory path (None for root pages dir)
+
+        Returns:
+            Next order number (max + 1)
+        """
+        if parent_path:
+            directory = self.pages_dir / parent_path
+        else:
+            directory = self.pages_dir
+
+        if not directory.exists():
+            return 1
+
+        max_order = 0
+        for entry in directory.iterdir():
+            if entry.name.startswith('.'):
+                continue
+            order, _ = self._parse_order_from_filename(entry.name)
+            if order > max_order:
+                max_order = order
+
+        return max_order + 1
+
+    def _renumber_siblings(self, parent_path: Optional[str] = None) -> None:
+        """
+        Renumber all items in a directory to close gaps.
+
+        Args:
+            parent_path: Parent directory path (None for root pages dir)
+        """
+        if parent_path:
+            directory = self.pages_dir / parent_path
+        else:
+            directory = self.pages_dir
+
+        if not directory.exists():
+            return
+
+        # Get all items with their current order
+        items = []
+        for entry in directory.iterdir():
+            if entry.name.startswith('.'):
+                continue
+            if entry.is_file() and not entry.suffix == '.md':
+                continue
+            order, slug = self._parse_order_from_filename(entry.name)
+            items.append((order, slug, entry.is_dir(), entry))
+
+        # Sort by current order
+        items.sort(key=lambda x: x[0])
+
+        # Renumber sequentially starting from 1
+        renames = []
+        for new_order, (old_order, slug, is_folder, entry) in enumerate(items, start=1):
+            if old_order != new_order:
+                new_name = self._build_ordered_filename(new_order, slug, is_folder)
+                new_path = entry.parent / new_name
+                renames.append((entry, new_path))
+
+        # Perform renames using git mv
+        for old_path, new_path in renames:
+            old_rel = old_path.relative_to(self.repo_path)
+            new_rel = new_path.relative_to(self.repo_path)
+            self.repo.git.mv(str(old_rel), str(new_rel))
+
+    def _make_room_for_order(self, parent_path: Optional[str], target_order: int) -> None:
+        """
+        Shift items to make room for an item at target_order.
+
+        Args:
+            parent_path: Parent directory path (None for root pages dir)
+            target_order: The order position to make room for
+        """
+        if parent_path:
+            directory = self.pages_dir / parent_path
+        else:
+            directory = self.pages_dir
+
+        if not directory.exists():
+            return
+
+        # Get items at or after target_order
+        items_to_shift = []
+        for entry in directory.iterdir():
+            if entry.name.startswith('.'):
+                continue
+            if entry.is_file() and not entry.suffix == '.md':
+                continue
+            order, slug = self._parse_order_from_filename(entry.name)
+            if order >= target_order:
+                items_to_shift.append((order, slug, entry.is_dir(), entry))
+
+        # Sort by order descending (shift highest first to avoid collision)
+        items_to_shift.sort(key=lambda x: x[0], reverse=True)
+
+        # Shift each item up by 1
+        for order, slug, is_folder, entry in items_to_shift:
+            new_order = order + 1
+            new_name = self._build_ordered_filename(new_order, slug, is_folder)
+            new_path = entry.parent / new_name
+            old_rel = entry.relative_to(self.repo_path)
+            new_rel = new_path.relative_to(self.repo_path)
+            self.repo.git.mv(str(old_rel), str(new_rel))
+
     def _get_page_path(self, title: str) -> Path:
-        """Get full filesystem path for a page by title"""
+        """Get full filesystem path for a page by title or path.
+
+        Handles:
+        - Direct paths (e.g., "01-purpose.md", "02-test-folder/01-home.md")
+        - Title lookups that search for matching files with order prefixes
+        """
+        # If title looks like a path (has extension or slash), try direct lookup
+        if title.endswith('.md') or '/' in title:
+            direct_path = self.pages_dir / title
+            if direct_path.exists():
+                return direct_path
+
+        # Try exact filename match (legacy support)
         filename = self.title_to_filename(title)
-        return self.pages_dir / filename
+        exact_path = self.pages_dir / filename
+        if exact_path.exists():
+            return exact_path
+
+        # Search for file matching the slug with any order prefix
+        slug = self.title_to_filename(title).replace('.md', '')
+
+        # Search recursively for files matching *-{slug}.md
+        for md_file in self.pages_dir.rglob(f'*-{slug}.md'):
+            if md_file.is_file():
+                return md_file
+
+        # Search for exact slug match (files without order prefix)
+        for md_file in self.pages_dir.rglob(f'{slug}.md'):
+            if md_file.is_file():
+                return md_file
+
+        # Fallback to the exact filename (will fail exists check later)
+        return exact_path
 
     def _parse_page(self, filepath: Path) -> Dict[str, Any]:
         """
@@ -467,6 +650,261 @@ class GitWiki:
 
         except GitCommandError as e:
             raise GitWikiException(f"Failed to get revision {commit_sha}: {e}")
+
+    # Page Tree and Folder Operations
+
+    def get_page_tree(self) -> List[Dict[str, Any]]:
+        """
+        Get hierarchical tree of all pages and folders with ordering.
+
+        Returns:
+            List of tree items, each with id, title, path, type, order, children
+        """
+        def build_tree(directory: Path, parent_path: Optional[str] = None) -> List[Dict]:
+            items = []
+
+            if not directory.exists():
+                return items
+
+            for entry in directory.iterdir():
+                if entry.name.startswith('.'):
+                    continue
+
+                order, slug = self._parse_order_from_filename(entry.name)
+
+                if entry.is_dir():
+                    rel_path = str(entry.relative_to(self.pages_dir))
+                    item = {
+                        "id": rel_path,
+                        "title": slug.replace('-', ' ').title(),
+                        "path": rel_path,
+                        "type": "folder",
+                        "order": order if order > 0 else 999,
+                        "parent_path": parent_path,
+                        "children": build_tree(entry, rel_path)
+                    }
+                    items.append(item)
+                elif entry.suffix == '.md':
+                    try:
+                        page_data = self._parse_page(entry)
+                        rel_path = str(entry.relative_to(self.pages_dir))
+                        item = {
+                            "id": rel_path.replace('.md', ''),
+                            "title": page_data["title"],
+                            "path": rel_path,
+                            "type": "page",
+                            "order": order if order > 0 else 999,
+                            "parent_path": parent_path,
+                            "children": None
+                        }
+                        items.append(item)
+                    except Exception as e:
+                        print(f"Warning: Failed to parse {entry}: {e}")
+                        continue
+
+            # Sort by order
+            items.sort(key=lambda x: x["order"])
+            return items
+
+        return build_tree(self.pages_dir)
+
+    def create_folder(self, name: str, parent_path: Optional[str] = None,
+                     author: str = "System") -> Dict[str, Any]:
+        """
+        Create a new folder with automatic ordering.
+
+        Args:
+            name: Folder name (will be converted to slug)
+            parent_path: Parent folder path (None for root)
+            author: Author name for commit
+
+        Returns:
+            Dictionary with folder info
+
+        Raises:
+            GitWikiException: If folder already exists or creation fails
+        """
+        # Convert name to slug
+        slug = re.sub(r'[^\w\s-]', '', name.lower())
+        slug = re.sub(r'[-\s]+', '-', slug).strip('-')
+        if not slug:
+            slug = "untitled"
+
+        # Determine parent directory
+        if parent_path:
+            parent_dir = self.pages_dir / parent_path
+            if not parent_dir.is_dir():
+                raise GitWikiException(f"Parent folder '{parent_path}' not found")
+        else:
+            parent_dir = self.pages_dir
+
+        # Get next order number
+        order = self._get_next_order(parent_path)
+
+        # Build folder name with order prefix
+        folder_name = self._build_ordered_filename(order, slug, is_folder=True)
+        folder_path = parent_dir / folder_name
+
+        if folder_path.exists():
+            raise GitWikiException(f"Folder '{name}' already exists")
+
+        # Create directory
+        folder_path.mkdir(parents=True)
+
+        # Add .gitkeep to track empty folder
+        gitkeep = folder_path / ".gitkeep"
+        gitkeep.write_text("")
+
+        # Git add and commit
+        try:
+            relative_path = gitkeep.relative_to(self.repo_path)
+            self.repo.index.add([str(relative_path)])
+            self.repo.index.commit(f"Create folder: {name}", author=self._create_author(author))
+        except GitCommandError as e:
+            # Rollback
+            gitkeep.unlink()
+            folder_path.rmdir()
+            raise GitWikiException(f"Git commit failed: {e}")
+
+        rel_path = str(folder_path.relative_to(self.pages_dir))
+        return {
+            "id": rel_path,
+            "title": name,
+            "path": rel_path,
+            "type": "folder",
+            "order": order,
+            "parent_path": parent_path,
+            "children": []
+        }
+
+    def delete_folder(self, path: str, author: str = "System") -> bool:
+        """
+        Delete a folder and all its contents recursively.
+
+        Args:
+            path: Folder path relative to pages directory
+            author: Author name for commit
+
+        Returns:
+            True if deleted successfully
+
+        Raises:
+            GitWikiException: If folder doesn't exist or deletion fails
+        """
+        folder_path = self.pages_dir / path
+
+        if not folder_path.exists():
+            raise GitWikiException(f"Folder '{path}' not found")
+
+        if not folder_path.is_dir():
+            raise GitWikiException(f"'{path}' is not a folder")
+
+        # Get parent path before deletion for renumbering
+        parent_path = str(folder_path.parent.relative_to(self.pages_dir))
+        if parent_path == '.':
+            parent_path = None
+
+        try:
+            # Use git rm -r to recursively remove folder and all contents
+            relative_path = folder_path.relative_to(self.repo_path)
+            self.repo.git.rm('-r', str(relative_path))
+            self.repo.index.commit(f"Delete folder: {path}", author=self._create_author(author))
+
+            # Renumber siblings to close gap
+            self._renumber_siblings(parent_path)
+            if parent_path:
+                self.repo.index.commit(f"Renumber items after deleting {path}",
+                                      author=self._create_author(author))
+
+        except GitCommandError as e:
+            raise GitWikiException(f"Failed to delete folder: {e}")
+
+        return True
+
+    def move_item(self, source_path: str, target_parent: Optional[str],
+                 new_order: int, author: str = "System") -> Dict[str, Any]:
+        """
+        Move a page or folder to a new location with specified order.
+
+        Args:
+            source_path: Current path of item (relative to pages dir)
+            target_parent: Target parent folder path (None for root)
+            new_order: Desired order position in target folder
+            author: Author name for commit
+
+        Returns:
+            Dictionary with new path info
+
+        Raises:
+            PageNotFoundException: If source item not found
+            GitWikiException: If target folder not found or move fails
+        """
+        source = self.pages_dir / source_path
+
+        if not source.exists():
+            raise PageNotFoundException(f"Item '{source_path}' not found")
+
+        # Parse current filename
+        order, slug = self._parse_order_from_filename(source.name)
+        is_folder = source.is_dir()
+
+        # Determine target directory
+        if target_parent:
+            target_dir = self.pages_dir / target_parent
+            if not target_dir.is_dir():
+                raise GitWikiException(f"Target folder '{target_parent}' not found")
+            # Prevent moving folder into itself or its descendants
+            if is_folder:
+                target_resolved = target_dir.resolve()
+                source_resolved = source.resolve()
+                if target_resolved == source_resolved or str(target_resolved).startswith(str(source_resolved) + '/'):
+                    raise GitWikiException("Cannot move folder into itself or its descendants")
+        else:
+            target_dir = self.pages_dir
+
+        # Get source parent for later renumbering
+        source_parent = str(source.parent.relative_to(self.pages_dir))
+        if source_parent == '.':
+            source_parent = None
+
+        # Build new filename with order
+        new_filename = self._build_ordered_filename(new_order, slug, is_folder)
+        target_path = target_dir / new_filename
+
+        # Check if we're moving within same folder (just reordering)
+        same_folder = source.parent == target_dir
+
+        try:
+            # Make room for the new item at target_order (unless same folder reorder)
+            if not same_folder:
+                self._make_room_for_order(target_parent, new_order)
+
+            # Git move
+            source_rel = source.relative_to(self.repo_path)
+            target_rel = target_path.relative_to(self.repo_path)
+
+            self.repo.git.mv(str(source_rel), str(target_rel))
+
+            # Renumber source directory to close gap (if moved to different folder)
+            if not same_folder and source_parent != target_parent:
+                self._renumber_siblings(source_parent)
+
+            # If same folder reorder, renumber to fix order
+            if same_folder:
+                self._renumber_siblings(target_parent)
+
+            self.repo.index.commit(f"Move {source_path} to {target_rel}",
+                                  author=self._create_author(author))
+
+        except GitCommandError as e:
+            raise GitWikiException(f"Failed to move item: {e}")
+
+        new_rel_path = str(target_path.relative_to(self.pages_dir))
+        return {
+            "path": new_rel_path,
+            "order": new_order,
+            "parent_path": target_parent
+        }
 
     # Git Branch Operations
 

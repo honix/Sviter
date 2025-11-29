@@ -25,4 +25,28 @@ export interface PageTreeItem {
   children?: PageTreeItem[];
 }
 
+// Enhanced tree item with folder support
+export interface TreeItem {
+  id: string; // Unique identifier (full path without extension)
+  title: string; // Display name (without numeric prefix)
+  path: string; // Full relative path (e.g., "01-getting-started/02-installation.md")
+  type: 'page' | 'folder';
+  order: number; // Extracted from numeric prefix
+  children?: TreeItem[] | null;
+  parent_path: string | null; // Parent folder path (null = root)
+}
+
+// Move operation payload
+export interface MoveOperation {
+  sourcePath: string;
+  targetParentPath: string | null; // null = root
+  newOrder: number;
+}
+
+// Folder create payload
+export interface FolderCreate {
+  name: string;
+  parentPath: string | null; // null = root
+}
+
 export type ViewMode = 'view' | 'edit';

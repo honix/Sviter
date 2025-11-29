@@ -23,6 +23,15 @@ class PageUpdate(BaseModel):
     author: Optional[str] = None
     tags: Optional[List[str]] = None
 
+class FolderCreate(BaseModel):
+    name: str
+    parent_path: Optional[str] = None
+
+class MoveRequest(BaseModel):
+    source_path: str
+    target_parent_path: Optional[str] = None
+    new_order: int
+
 # Initialize GitWiki and Agent System
 wiki = GitWiki(WIKI_REPO_PATH)
 agent_executor = AgentExecutor(wiki, OPENROUTER_API_KEY)
@@ -76,6 +85,16 @@ async def get_pages(limit: int = 100):
     try:
         pages = wiki.list_pages(limit=limit)
         return {"pages": pages}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Page Tree endpoint - MUST come before {title:path} routes
+@app.get("/api/pages/tree")
+async def get_page_tree():
+    """Get hierarchical page tree with folders and ordering"""
+    try:
+        tree = wiki.get_page_tree()
+        return {"tree": tree}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -155,6 +174,51 @@ async def delete_page(title: str, author: str = "user"):
         return {"message": f"Page '{title}' deleted successfully"}
     except PageNotFoundException:
         raise HTTPException(status_code=404, detail=f"Page '{title}' not found")
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Folder API endpoints
+@app.post("/api/pages/move")
+async def move_page_item(request: MoveRequest):
+    """Move a page or folder to a new location with specified order"""
+    try:
+        result = wiki.move_item(
+            source_path=request.source_path,
+            target_parent=request.target_parent_path,
+            new_order=request.new_order,
+            author="user"
+        )
+        return result
+    except PageNotFoundException as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/folders")
+async def create_folder(request: FolderCreate):
+    """Create a new folder"""
+    try:
+        folder = wiki.create_folder(
+            name=request.name,
+            parent_path=request.parent_path,
+            author="user"
+        )
+        return folder
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/folders/{path:path}")
+async def delete_folder(path: str):
+    """Delete an empty folder"""
+    try:
+        wiki.delete_folder(path, author="user")
+        return {"message": f"Folder '{path}' deleted successfully"}
     except GitWikiException as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useReducer, useEffect, useRef, useState, useCallback } from 'react';
-import { Page, ViewMode } from '../types/page';
+import { Page, ViewMode, TreeItem } from '../types/page';
 import { createWebSocketService, WebSocketService } from '../services/websocket';
 import { WebSocketMessage } from '../types/chat';
+import { treeApi } from '../services/tree-api';
 
 interface AppState {
   pages: Page[];
@@ -19,6 +20,9 @@ interface AppState {
   chatMode: 'interactive' | 'agent-viewing';
   currentAgent: string | null; // null = ChatAgent (interactive), else agent name
   currentAgentModel: string | null; // Model being used by current agent
+  // Page tree state
+  pageTree: TreeItem[];
+  expandedFolders: string[];
 }
 
 type AppAction =
@@ -37,7 +41,9 @@ type AppAction =
   | { type: 'SET_SELECTED_BRANCH_FOR_DIFF'; payload: string | null }
   | { type: 'SET_CHAT_MODE'; payload: 'interactive' | 'agent-viewing' }
   | { type: 'SET_CURRENT_AGENT'; payload: string | null }
-  | { type: 'SET_CURRENT_AGENT_MODEL'; payload: string | null };
+  | { type: 'SET_CURRENT_AGENT_MODEL'; payload: string | null }
+  | { type: 'SET_PAGE_TREE'; payload: TreeItem[] }
+  | { type: 'TOGGLE_FOLDER'; payload: string };
 
 const initialState: AppState = {
   pages: [],
@@ -52,7 +58,9 @@ const initialState: AppState = {
   selectedBranchForDiff: null,
   chatMode: 'interactive',
   currentAgent: null,
-  currentAgentModel: null // Will be fetched from backend
+  currentAgentModel: null, // Will be fetched from backend
+  pageTree: [],
+  expandedFolders: []
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -133,6 +141,19 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_CURRENT_AGENT_MODEL':
       return { ...state, currentAgentModel: action.payload };
 
+    case 'SET_PAGE_TREE':
+      return { ...state, pageTree: action.payload };
+
+    case 'TOGGLE_FOLDER': {
+      const isExpanded = state.expandedFolders.includes(action.payload);
+      return {
+        ...state,
+        expandedFolders: isExpanded
+          ? state.expandedFolders.filter(id => id !== action.payload)
+          : [...state.expandedFolders, action.payload]
+      };
+    }
+
     default:
       return state;
   }
@@ -160,6 +181,12 @@ interface AppContextType {
     setCurrentAgentModel: (model: string | null) => void;
     startNewChat: () => Promise<void>;
     viewAgentExecution: (agentName: string, agentModel?: string) => void;
+    // Tree actions
+    loadPageTree: () => Promise<void>;
+    toggleFolder: (folderId: string) => void;
+    moveItem: (sourcePath: string, targetParentPath: string | null, newOrder: number) => Promise<void>;
+    createFolder: (name: string, parentPath?: string) => Promise<void>;
+    deleteFolder: (path: string) => Promise<void>;
   };
   websocket: {
     sendMessage: (message: any) => void;
@@ -336,6 +363,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
 
         dispatch({ type: 'DELETE_PAGE', payload: title });
+        // Reload tree to reflect deletion
+        const tree = await treeApi.getTree();
+        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
       } catch (err) {
         dispatch({ type: 'SET_ERROR', payload: 'Failed to delete page' });
         console.error('Error deleting page:', err);
@@ -400,6 +430,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dispatch({ type: 'ADD_PAGE', payload: newPage });
         dispatch({ type: 'SET_CURRENT_PAGE', payload: newPage });
         dispatch({ type: 'SET_VIEW_MODE', payload: 'edit' });
+        // Reload tree to show new page
+        const tree = await treeApi.getTree();
+        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
       } catch (err) {
         dispatch({ type: 'SET_ERROR', payload: 'Failed to create page' });
         console.error('Error creating page:', err);
@@ -441,6 +474,68 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatch({ type: 'SET_CURRENT_AGENT', payload: agentName });
       dispatch({ type: 'SET_CURRENT_AGENT_MODEL', payload: agentModel || null });
       dispatch({ type: 'SET_RIGHT_PANEL_MODE', payload: 'chat' });
+    },
+
+    // Tree actions
+    loadPageTree: async () => {
+      try {
+        const tree = await treeApi.getTree();
+        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
+      } catch (err) {
+        console.error('Failed to load page tree:', err);
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to load page tree' });
+      }
+    },
+
+    toggleFolder: (folderId: string) => {
+      dispatch({ type: 'TOGGLE_FOLDER', payload: folderId });
+    },
+
+    moveItem: async (sourcePath: string, targetParentPath: string | null, newOrder: number) => {
+      try {
+        await treeApi.moveItem({ sourcePath, targetParentPath, newOrder });
+        // Reload tree after move
+        const tree = await treeApi.getTree();
+        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
+        // Also reload pages to update any changed paths
+        const response = await fetch('http://localhost:8000/api/pages');
+        if (response.ok) {
+          const data = await response.json();
+          dispatch({ type: 'SET_PAGES', payload: data.pages });
+        }
+      } catch (err) {
+        console.error('Failed to move item:', err);
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to move item' });
+        // Reload tree to ensure we have fresh paths even on error
+        try {
+          const tree = await treeApi.getTree();
+          dispatch({ type: 'SET_PAGE_TREE', payload: tree });
+        } catch (e) {
+          console.error('Failed to reload tree:', e);
+        }
+      }
+    },
+
+    createFolder: async (name: string, parentPath?: string) => {
+      try {
+        await treeApi.createFolder({ name, parentPath: parentPath || null });
+        const tree = await treeApi.getTree();
+        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
+      } catch (err) {
+        console.error('Failed to create folder:', err);
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to create folder' });
+      }
+    },
+
+    deleteFolder: async (path: string) => {
+      try {
+        await treeApi.deleteFolder(path);
+        const tree = await treeApi.getTree();
+        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
+      } catch (err) {
+        console.error('Failed to delete folder:', err);
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to delete folder' });
+      }
     }
   };
 
