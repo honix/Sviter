@@ -2,9 +2,10 @@
 """Test script for GitWiki"""
 
 from storage import GitWiki
+from config import WIKI_REPO_PATH
 
 # Initialize wiki
-wiki = GitWiki("../wiki-repo")
+wiki = GitWiki(WIKI_REPO_PATH)
 
 print("Testing GitWiki...")
 

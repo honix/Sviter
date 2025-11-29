@@ -1,0 +1,3 @@
+[submodule "etoneto-wiki"]
+	path = etoneto-wiki
+	url = https://github.com/honix/etoneto-wiki.git

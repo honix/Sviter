@@ -1,5 +1,6 @@
 from typing import Dict, List, Any, Optional
 from storage import GitWiki, PageNotFoundException
+from config import WIKI_REPO_PATH
 import json
 from datetime import datetime
 
@@ -101,8 +102,8 @@ class WikiTools:
     def execute_tool(tool_name: str, arguments: Dict[str, Any], wiki: GitWiki = None) -> str:
         """Execute a wiki tool and return the result as a string"""
         if wiki is None:
-            # Default wiki repository path
-            wiki = GitWiki("../wiki-repo")
+            # Use central config for wiki path
+            wiki = GitWiki(WIKI_REPO_PATH)
 
         try:
             if tool_name == "read_page":

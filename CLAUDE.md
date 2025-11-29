@@ -104,7 +104,7 @@ npm run dev             # Start Vite dev server on port 5173
 ### Backend
 
 - **Virtual Environment**: ALWAYS use `source venv/bin/activate` before running Python commands
-- **Storage**: Git-based with GitWiki class - all content in `wiki-repo/` git repository
+- **Storage**: Git-based with GitWiki class - all content in `etoneto-wiki/` git submodule
 - **WebSocket**: Real-time communication on `/ws/{client_id}` endpoint
 - **AI Tools**: Custom functions for page management (read_page, edit_page, find_pages, list_all_pages)
 - **Agent APIs**: `/api/agents`, `/api/agents/{name}/run`, `/api/prs/*`
@@ -188,7 +188,7 @@ npm run dev             # Start Vite dev server on port 5173
 - **Virtual Environment**: The backend MUST be run with the virtual environment activated
 - **Port Configuration**: Backend on 8000, Frontend on 5173
 - **WebSocket URL**: Frontend connects to `ws://localhost:8000/ws/`
-- **Git Repository**: Wiki content stored in `wiki-repo/` directory
+- **Git Repository**: Wiki content stored in `etoneto-wiki/` submodule (https://github.com/honix/etoneto-wiki)
 - **No Routing**: Application uses context-based state, NOT react-router-dom
 - **Flexbox Scrolling**: Use `min-h-0` on flex children to enable proper scrolling
 - **Real-time Features**: Full bidirectional communication between frontend and backend

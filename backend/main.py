@@ -9,8 +9,7 @@ from agents import (
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uvicorn
-from pathlib import Path
-import os
+from config import WIKI_REPO_PATH, OPENROUTER_API_KEY
 
 # Pydantic models for request/response
 class PageCreate(BaseModel):
@@ -24,12 +23,8 @@ class PageUpdate(BaseModel):
     author: Optional[str] = None
     tags: Optional[List[str]] = None
 
-# Initialize GitWiki
-WIKI_REPO_PATH = str(Path(__file__).parent.parent / "wiki-repo")
+# Initialize GitWiki and Agent System
 wiki = GitWiki(WIKI_REPO_PATH)
-
-# Initialize Agent System
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
 agent_executor = AgentExecutor(wiki, OPENROUTER_API_KEY)
 
 # Create FastAPI app
