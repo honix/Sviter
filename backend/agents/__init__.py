@@ -15,6 +15,7 @@ from .test_agent import TestAgent
 from .poet_agent import PoetAgent
 from .poet_agent_grok import PoetAgentGrok
 from .wiki_overview_agent_grok import WikiOverviewAgentGrok
+from .wiki_overview_agent import WikiOverviewAgent
 # from .integrity_checker import InformationIntegrityAgent  # Phase 2+
 # from .style_checker import StyleConsistencyAgent  # Phase 2+
 # from .content_enricher import ContentEnrichmentAgent  # Phase 2+
@@ -27,6 +28,7 @@ REGISTERED_AGENTS = [
     PoetAgent,
     PoetAgentGrok,
     WikiOverviewAgentGrok,
+    WikiOverviewAgent,
 ]
 
 

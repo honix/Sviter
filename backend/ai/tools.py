@@ -120,6 +120,13 @@ class WikiTools:
             return f"Error executing {tool_name}: {str(e)}"
     
     @staticmethod
+    def _serialize_datetime(obj):
+        """Convert datetime objects to ISO strings for JSON serialization"""
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
+
+    @staticmethod
     def _read_page(wiki: GitWiki, title: str) -> str:
         """Read a wiki page by title"""
         if not title:
@@ -128,12 +135,16 @@ class WikiTools:
         try:
             page = wiki.get_page(title)
 
+            # Convert datetime objects to strings
+            created_at = WikiTools._serialize_datetime(page["created_at"])
+            updated_at = WikiTools._serialize_datetime(page["updated_at"])
+
             result = {
                 "title": page["title"],
                 "content": page["content"],
                 "author": page["author"],
-                "created_at": page["created_at"],
-                "updated_at": page["updated_at"],
+                "created_at": created_at,
+                "updated_at": updated_at,
                 "tags": page["tags"]
             }
 
@@ -186,7 +197,7 @@ class WikiTools:
                 "title": page["title"],
                 "excerpt": excerpt,
                 "author": page["author"],
-                "updated_at": page["updated_at"],
+                "updated_at": WikiTools._serialize_datetime(page["updated_at"]),
                 "tags": page["tags"]
             })
 
@@ -216,18 +227,26 @@ class WikiTools:
 
             # Format dates if available
             if page.get('created_at'):
-                try:
-                    created = datetime.fromisoformat(page['created_at']).strftime('%Y-%m-%d %H:%M')
-                    result_text += f"   Created: {created}\n"
-                except:
-                    result_text += f"   Created: {page['created_at']}\n"
+                created_at = page['created_at']
+                if isinstance(created_at, datetime):
+                    result_text += f"   Created: {created_at.strftime('%Y-%m-%d %H:%M')}\n"
+                else:
+                    try:
+                        created = datetime.fromisoformat(str(created_at)).strftime('%Y-%m-%d %H:%M')
+                        result_text += f"   Created: {created}\n"
+                    except:
+                        result_text += f"   Created: {created_at}\n"
 
             if page.get('updated_at'):
-                try:
-                    updated = datetime.fromisoformat(page['updated_at']).strftime('%Y-%m-%d %H:%M')
-                    result_text += f"   Updated: {updated}\n"
-                except:
-                    result_text += f"   Updated: {page['updated_at']}\n"
+                updated_at = page['updated_at']
+                if isinstance(updated_at, datetime):
+                    result_text += f"   Updated: {updated_at.strftime('%Y-%m-%d %H:%M')}\n"
+                else:
+                    try:
+                        updated = datetime.fromisoformat(str(updated_at)).strftime('%Y-%m-%d %H:%M')
+                        result_text += f"   Updated: {updated}\n"
+                    except:
+                        result_text += f"   Updated: {updated_at}\n"
 
             if page.get('tags'):
                 result_text += f"   Tags: {', '.join(page['tags'])}\n"
