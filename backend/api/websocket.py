@@ -59,22 +59,35 @@ class WebSocketManager:
                 "result": tool_info["result"],
                 "iteration": tool_info["iteration"]
             })
+            # Send page_updated for live page updates in center panel
+            if tool_info["tool_name"] == "edit_page":
+                await self.send_message(client_id, {
+                    "type": "page_updated",
+                    "title": tool_info["arguments"].get("title"),
+                    "content": tool_info["result"]
+                })
+
+        async def on_branch_created_callback(branch_name: str):
+            """Send branch_created and branch_switched messages immediately"""
+            await self.send_message(client_id, {
+                "type": "branch_created",
+                "branch": branch_name
+            })
+            await self.send_message(client_id, {
+                "type": "branch_switched",
+                "branch": branch_name
+            })
 
         session_result = await self.executors[client_id].start_session(
             agent_class=ChatAgent,
             on_message=on_message_callback,
-            on_tool_call=on_tool_call_callback
+            on_tool_call=on_tool_call_callback,
+            on_branch_created=on_branch_created_callback
         )
 
         if session_result["success"]:
             self.session_info[client_id] = session_result
             print(f"✅ Session started for {client_id}: {session_result['agent_name']}")
-
-            # Send welcome message
-            await self.send_message(client_id, {
-                "type": "system",
-                "message": "Connected to AI Wiki Assistant. You can ask questions or request wiki operations."
-            })
         else:
             print(f"❌ Failed to start session for {client_id}: {session_result.get('error')}")
             await self.send_message(client_id, {
@@ -209,11 +222,30 @@ class WebSocketManager:
                     "result": tool_info["result"],
                     "iteration": tool_info["iteration"]
                 })
+                # Send page_updated for live page updates in center panel
+                if tool_info["tool_name"] == "edit_page":
+                    await self.send_message(client_id, {
+                        "type": "page_updated",
+                        "title": tool_info["arguments"].get("title"),
+                        "content": tool_info["result"]
+                    })
+
+            async def on_branch_created_callback(branch_name: str):
+                """Send branch_created and branch_switched messages immediately"""
+                await self.send_message(client_id, {
+                    "type": "branch_created",
+                    "branch": branch_name
+                })
+                await self.send_message(client_id, {
+                    "type": "branch_switched",
+                    "branch": branch_name
+                })
 
             session_result = await self.executors[client_id].start_session(
                 agent_class=agent_class,
                 on_message=on_message_callback,
-                on_tool_call=on_tool_call_callback
+                on_tool_call=on_tool_call_callback,
+                on_branch_created=on_branch_created_callback
             )
 
             if session_result["success"]:
@@ -233,19 +265,30 @@ class WebSocketManager:
 
             print(f"🔄 Agent execution result: {result.status}")
 
-            # Get branch created from executor state
+            # Note: branch_created/switched messages are now sent immediately via on_branch_created callback
             branch_created = executor.branch_created
+
+            # Clean up - call on_finish lifecycle hook (handles branch cleanup)
+            cleanup_info = executor.end_session(call_on_finish=True)
+
+            # Send branch cleanup notifications if branch was deleted (no changes made)
+            if cleanup_info.get("branch_deleted"):
+                await self.send_message(client_id, {
+                    "type": "branch_deleted",
+                    "branch": cleanup_info["branch_deleted"]
+                })
+                await self.send_message(client_id, {
+                    "type": "branch_switched",
+                    "branch": cleanup_info["switched_to_branch"]
+                })
 
             # Send completion message
             await self.send_message(client_id, {
                 "type": "agent_complete",
                 "status": result.status,
                 "iterations": result.iterations,
-                "branch_created": branch_created
+                "branch_created": branch_created if not cleanup_info.get("branch_deleted") else None
             })
-
-            # Clean up - call on_finish lifecycle hook (handles branch cleanup)
-            executor.end_session(call_on_finish=True)
 
             return {"type": "success", "result": result.to_dict()}
 
@@ -280,11 +323,30 @@ class WebSocketManager:
                     "result": tool_info["result"],
                     "iteration": tool_info["iteration"]
                 })
+                # Send page_updated for live page updates in center panel
+                if tool_info["tool_name"] == "edit_page":
+                    await self.send_message(client_id, {
+                        "type": "page_updated",
+                        "title": tool_info["arguments"].get("title"),
+                        "content": tool_info["result"]
+                    })
+
+            async def on_branch_created_callback(branch_name: str):
+                """Send branch_created and branch_switched messages immediately"""
+                await self.send_message(client_id, {
+                    "type": "branch_created",
+                    "branch": branch_name
+                })
+                await self.send_message(client_id, {
+                    "type": "branch_switched",
+                    "branch": branch_name
+                })
 
             session_result = await self.executors[client_id].start_session(
                 agent_class=ChatAgent,
                 on_message=on_message_callback,
-                on_tool_call=on_tool_call_callback
+                on_tool_call=on_tool_call_callback,
+                on_branch_created=on_branch_created_callback
             )
 
             if session_result["success"]:

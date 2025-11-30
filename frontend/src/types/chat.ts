@@ -1,6 +1,6 @@
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'assistant' | 'system';
+  type: 'user' | 'assistant' | 'system' | 'system_prompt';
   content: string;
   timestamp: string;
   tool_calls?: ToolCall[];

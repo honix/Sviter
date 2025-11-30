@@ -46,7 +46,10 @@ type AppAction =
   | { type: 'SET_PAGE_TREE'; payload: TreeItem[] }
   | { type: 'TOGGLE_FOLDER'; payload: string }
   | { type: 'SET_BRANCHES'; payload: string[] }
-  | { type: 'SET_CURRENT_BRANCH'; payload: string };
+  | { type: 'SET_CURRENT_BRANCH'; payload: string }
+  | { type: 'ADD_BRANCH'; payload: string }
+  | { type: 'REMOVE_BRANCH'; payload: string }
+  | { type: 'UPDATE_CURRENT_PAGE_CONTENT'; payload: string };
 
 const initialState: AppState = {
   pages: [],
@@ -157,6 +160,24 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_CURRENT_BRANCH':
       return { ...state, currentBranch: action.payload };
 
+    case 'ADD_BRANCH':
+      // Add branch if not already in list
+      if (state.branches.includes(action.payload)) {
+        return state;
+      }
+      return { ...state, branches: [...state.branches, action.payload] };
+
+    case 'REMOVE_BRANCH':
+      // Remove branch from list
+      return { ...state, branches: state.branches.filter(b => b !== action.payload) };
+
+    case 'UPDATE_CURRENT_PAGE_CONTENT':
+      if (!state.currentPage) return state;
+      return {
+        ...state,
+        currentPage: { ...state.currentPage, content: action.payload }
+      };
+
     default:
       return state;
   }
@@ -208,6 +229,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const wsService = useRef<WebSocketService | null>(null);
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
   const messageHandlers = useRef<Set<(message: WebSocketMessage) => void>>(new Set());
+  // Ref to hold reload functions for use in WebSocket callback
+  const reloadFunctionsRef = useRef<{ loadPages: () => void; loadTree: () => void } | null>(null);
 
   // Initialize WebSocket service
   useEffect(() => {
@@ -220,9 +243,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const messageUnsubscribe = wsService.current.onMessage((message) => {
       setLastMessage(message);
 
-      // Handle agent_complete directly to reset running state
+      // Handle messages directly in callback to avoid React 18 batching issues
+      // (multiple rapid messages could cause useEffect to miss some)
       if (message.type === 'agent_complete') {
         dispatch({ type: 'SET_AGENT_RUNNING', payload: false });
+      } else if (message.type === 'branch_created') {
+        dispatch({ type: 'ADD_BRANCH', payload: message.branch });
+      } else if (message.type === 'branch_switched') {
+        dispatch({ type: 'SET_CURRENT_BRANCH', payload: message.branch });
+      } else if (message.type === 'branch_deleted') {
+        dispatch({ type: 'REMOVE_BRANCH', payload: message.branch });
+      } else if (message.type === 'page_updated') {
+        // Reload pages and tree when agent creates/edits a page
+        if (reloadFunctionsRef.current) {
+          reloadFunctionsRef.current.loadPages();
+          reloadFunctionsRef.current.loadTree();
+        }
       }
 
       // Notify all registered handlers
@@ -303,6 +339,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [state.currentPage]);
 
+  // Update ref with reload functions for use in WebSocket callback
+  // (needed because WebSocket callback has empty deps and can't access loadPages directly)
+  useEffect(() => {
+    reloadFunctionsRef.current = {
+      loadPages,
+      loadTree: async () => {
+        const tree = await treeApi.getTree();
+        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
+      }
+    };
+  }, [loadPages]);
+
   // Load branches callback (defined before use)
   const loadBranches = useCallback(async () => {
     try {
@@ -317,20 +365,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  // Handle incoming WebSocket messages for page updates
+  // Handle incoming WebSocket messages for page updates and real-time branch changes
   useEffect(() => {
     if (!lastMessage) return;
 
     if (lastMessage.type === 'page_update') {
       // Reload all pages when AI modifies them to ensure synchronization
       loadPages();
-    } else if (lastMessage.type === 'agent_complete') {
-      // Refresh branches if agent created a new branch
-      if (lastMessage.branch_created) {
-        loadBranches();
+    } else if (lastMessage.type === 'branch_switched') {
+      // Reload pages when branch changes (dispatch is handled in callback to avoid batching issues)
+      loadPages();
+    } else if (lastMessage.type === 'page_updated') {
+      // Real-time: Agent created/edited a page
+      // Reload pages list and page tree to show new/updated pages
+      loadPages();
+      // Also reload page tree
+      treeApi.getTree().then(tree => {
+        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
+      }).catch(err => console.error('Failed to reload page tree:', err));
+
+      // Update current page content if we're viewing that page
+      if (state.currentPage?.title === lastMessage.title) {
+        dispatch({ type: 'UPDATE_CURRENT_PAGE_CONTENT', payload: lastMessage.content });
       }
     }
-  }, [lastMessage, loadPages, loadBranches]);
+  }, [lastMessage, loadPages, state.currentPage?.title]);
 
 
   // Load pages from backend API on initialization

@@ -9,7 +9,7 @@ interface BranchSwitcherProps {
 
 const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
   const { state, actions } = useAppContext();
-  const { branches, currentBranch, isLoading } = state;
+  const { branches, currentBranch, isLoading, isAgentRunning } = state;
   const [isOpen, setIsOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
@@ -106,8 +106,9 @@ const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onBranchChange }) => {
         variant="outline"
         size="sm"
         onClick={handleToggleDropdown}
-        disabled={isLoading}
+        disabled={isLoading || isAgentRunning}
         className="w-full justify-start gap-2"
+        title={isAgentRunning ? 'Cannot switch branches while agent is running' : undefined}
       >
         <GitBranch className={`h-4 w-4 ${getBranchColor(currentBranch)}`} />
         <span className="flex-1 text-left truncate">{currentBranch}</span>

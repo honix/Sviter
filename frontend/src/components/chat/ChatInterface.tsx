@@ -65,22 +65,33 @@ const ChatInterface: React.FC = () => {
             </div>
           )}
           {messages.map((message) => (
-            <Message
-              key={message.id}
-              className={`mb-4 ${message.type === 'user' ? 'flex-row-reverse' : ''}`}
-            >
-              <MessageAvatar
-                src={message.type === 'user' ? '/user-avatar.png' : '/ai-avatar.png'}
-                alt={message.type === 'user' ? 'User' : 'AI'}
-                fallback={message.type === 'user' ? 'U' : 'AI'}
-              />
-              <MessageContent
-                markdown={message.type === 'assistant'}
-                className={message.type === 'user' ? 'bg-primary text-primary-foreground' : ''}
+            message.type === 'system_prompt' ? (
+              // System prompt - distinct styling, full width
+              <div
+                key={message.id}
+                className="mb-4 p-3 rounded-lg border border-border bg-muted/50 text-sm text-muted-foreground"
               >
-                {message.content}
-              </MessageContent>
-            </Message>
+                <div className="text-xs font-medium text-muted-foreground/70 mb-2">System Prompt</div>
+                <div className="whitespace-pre-wrap">{message.content}</div>
+              </div>
+            ) : (
+              <Message
+                key={message.id}
+                className={`mb-4 ${message.type === 'user' ? 'flex-row-reverse' : ''}`}
+              >
+                <MessageAvatar
+                  src={message.type === 'user' ? '/user-avatar.png' : '/ai-avatar.png'}
+                  alt={message.type === 'user' ? 'User' : 'AI'}
+                  fallback={message.type === 'user' ? 'U' : 'AI'}
+                />
+                <MessageContent
+                  markdown={message.type === 'assistant'}
+                  className={message.type === 'user' ? 'bg-primary text-primary-foreground' : ''}
+                >
+                  {message.content}
+                </MessageContent>
+              </Message>
+            )
           ))}
           <ChatContainerScrollAnchor />
         </ChatContainerContent>

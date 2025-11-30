@@ -68,8 +68,8 @@ export const useChat = (): UseChatReturn => {
         console.log('useChat: Creating system_prompt message');
         const systemPromptMessage: ChatMessage = {
           id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
-          type: 'system',
-          content: `🤖 Agent Initialized\n\n${message.message || message.content || ''}`,
+          type: 'system_prompt',
+          content: message.message || message.content || '',
           timestamp: new Date().toISOString()
         };
 

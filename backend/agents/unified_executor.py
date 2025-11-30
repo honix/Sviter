@@ -102,7 +102,8 @@ class UnifiedAgentExecutor:
                            agent_class: type[BaseAgent],
                            system_prompt: str = None,
                            on_message: Union[Callable[[str, str], None], Callable[[str, str], Awaitable[None]]] = None,
-                           on_tool_call: Union[Callable[[Dict], None], Callable[[Dict], Awaitable[None]]] = None) -> Dict[str, Any]:
+                           on_tool_call: Union[Callable[[Dict], None], Callable[[Dict], Awaitable[None]]] = None,
+                           on_branch_created: Union[Callable[[str], None], Callable[[str], Awaitable[None]]] = None) -> Dict[str, Any]:
         """
         Start a new agent session.
 
@@ -123,6 +124,7 @@ class UnifiedAgentExecutor:
         self.iteration_count = 0
         self.on_message = on_message
         self.on_tool_call = on_tool_call
+        self.on_branch_created = on_branch_created
         self.current_agent_class = agent_class
         self.branch_created = None
 
@@ -207,6 +209,8 @@ class UnifiedAgentExecutor:
                 self.branch_created = self.current_agent_class.on_start(self.wiki)
                 if self.branch_created:
                     logs.append(f"Created branch: {self.branch_created}")
+                    # Immediately notify about branch creation
+                    await self._call_callback(self.on_branch_created, self.branch_created)
 
             # Add user message to conversation if provided
             if user_message:
@@ -369,7 +373,7 @@ class UnifiedAgentExecutor:
         self.human_in_loop = True
         self.on_start_called = False
 
-    def end_session(self, call_on_finish: bool = True):
+    def end_session(self, call_on_finish: bool = True) -> Dict[str, Any]:
         """
         End the session and clean up.
 
@@ -379,7 +383,17 @@ class UnifiedAgentExecutor:
 
         Args:
             call_on_finish: If True, call agent's on_finish hook
+
+        Returns:
+            Dict with cleanup info:
+            - branch_deleted: Name of deleted branch (if any)
+            - switched_to_branch: Branch switched to after cleanup (if any)
         """
+        cleanup_info = {
+            "branch_deleted": None,
+            "switched_to_branch": None
+        }
+
         if call_on_finish and self.current_agent_class:
             try:
                 # Get number of changes made
@@ -387,6 +401,11 @@ class UnifiedAgentExecutor:
                 if self.loop_controller:
                     stats = self.loop_controller.get_stats()
                     changes_made = stats.get('changes_made', 0)
+
+                # Track if branch will be deleted (no changes made)
+                if changes_made == 0 and self.branch_created:
+                    cleanup_info["branch_deleted"] = self.branch_created
+                    cleanup_info["switched_to_branch"] = GlobalAgentConfig.default_base_branch
 
                 # Call agent's on_finish lifecycle hook
                 self.current_agent_class.on_finish(
@@ -396,3 +415,5 @@ class UnifiedAgentExecutor:
                 )
             except Exception as e:
                 print(f"Warning: on_finish failed: {e}")
+
+        return cleanup_info
