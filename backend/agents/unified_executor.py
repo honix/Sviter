@@ -55,12 +55,15 @@ class UnifiedAgentExecutor:
     """
     Unified execution engine for both chat (human-in-the-loop) and autonomous agents.
 
-    Modes:
-    - human_in_loop=True: Interactive chat mode, waits for user input
-    - human_in_loop=False: Autonomous agent mode, runs to completion
+    Execution mode is determined by agent class properties:
+    - agent.human_in_loop: If True, waits for user input between iterations
+    - agent.create_branch: If True, creates a PR branch for changes
+
+    Lifecycle hooks:
+    - agent.on_start(wiki): Called before execution, can create branch
+    - agent.on_finish(wiki, branch, changes_made): Called after execution
 
     Features:
-    - Optional branch creation (for PR workflow)
     - WebSocket streaming support via callbacks
     - Loop control for all modes
     - Conversation history management
@@ -81,6 +84,10 @@ class UnifiedAgentExecutor:
         self.start_time: float = 0
         self.iteration_count: int = 0
         self.current_model: str = BaseAgent.get_model()
+        self.current_agent_class: Optional[type[BaseAgent]] = None
+        self.branch_created: Optional[str] = None
+        self.human_in_loop: bool = True
+        self.on_start_called: bool = False
 
     async def _call_callback(self, callback: Optional[Callable], *args, **kwargs):
         """Helper to call sync or async callbacks"""
@@ -94,18 +101,18 @@ class UnifiedAgentExecutor:
     async def start_session(self,
                            agent_class: type[BaseAgent],
                            system_prompt: str = None,
-                           human_in_loop: bool = False,
-                           create_branch: bool = True,
                            on_message: Union[Callable[[str, str], None], Callable[[str, str], Awaitable[None]]] = None,
                            on_tool_call: Union[Callable[[Dict], None], Callable[[Dict], Awaitable[None]]] = None) -> Dict[str, Any]:
         """
         Start a new agent session.
 
+        Execution mode is determined by agent class properties:
+        - agent_class.human_in_loop: If True, waits for user input
+        - agent_class.create_branch: If True, creates a PR branch
+
         Args:
             agent_class: Agent class to execute (required - use ChatAgent for chat mode)
             system_prompt: Custom system prompt (optional, overrides agent prompt)
-            human_in_loop: If True, waits for user input between iterations
-            create_branch: If True, creates a PR branch for changes
             on_message: Callback for streaming messages (type, content)
             on_tool_call: Callback for streaming tool calls
 
@@ -116,9 +123,13 @@ class UnifiedAgentExecutor:
         self.iteration_count = 0
         self.on_message = on_message
         self.on_tool_call = on_tool_call
+        self.current_agent_class = agent_class
+        self.branch_created = None
+
+        # Get execution mode from agent class
+        self.human_in_loop = agent_class.human_in_loop
 
         logs = []
-        branch_created = None
 
         try:
             # Get agent configuration
@@ -135,15 +146,10 @@ class UnifiedAgentExecutor:
                 }
 
             logs.append(f"Starting session: {agent_name}")
+            logs.append(f"Mode: {'interactive' if self.human_in_loop else 'autonomous'}")
 
-            # Create branch if requested (and not human-in-loop)
-            if create_branch and not human_in_loop:
-                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                branch_name = f"{agent_class.get_branch_prefix()}{timestamp}"
-
-                logs.append(f"Creating branch: {branch_name}")
-                self.wiki.create_branch(branch_name, from_branch=GlobalAgentConfig.default_base_branch, checkout=True)
-                branch_created = branch_name
+            # Reset on_start flag - will be called on first process_turn
+            self.on_start_called = False
 
             # Initialize conversation with system prompt
             self.conversation_history = [{
@@ -162,7 +168,7 @@ class UnifiedAgentExecutor:
             await self._call_callback(self.on_message, "system_prompt", agent_prompt)
 
             # For autonomous agents, add initial "Begin" message
-            if not human_in_loop:
+            if not self.human_in_loop:
                 self.conversation_history.append({
                     "role": "user",
                     "content": "Begin your analysis."
@@ -171,8 +177,7 @@ class UnifiedAgentExecutor:
             return {
                 "success": True,
                 "agent_name": agent_name,
-                "branch_created": branch_created,
-                "human_in_loop": human_in_loop,
+                "human_in_loop": self.human_in_loop,
                 "logs": logs
             }
 
@@ -196,6 +201,13 @@ class UnifiedAgentExecutor:
         logs = []
 
         try:
+            # Call on_start on first turn (creates branch for AgentOnBranch)
+            if not self.on_start_called and self.current_agent_class:
+                self.on_start_called = True
+                self.branch_created = self.current_agent_class.on_start(self.wiki)
+                if self.branch_created:
+                    logs.append(f"Created branch: {self.branch_created}")
+
             # Add user message to conversation if provided
             if user_message:
                 self.conversation_history.append({
@@ -352,20 +364,35 @@ class UnifiedAgentExecutor:
         self.loop_controller = None
         self.iteration_count = 0
         self.current_model = BaseAgent.get_model()  # Reset to default
+        self.current_agent_class = None
+        self.branch_created = None
+        self.human_in_loop = True
+        self.on_start_called = False
 
-    def end_session(self, reset_branch: bool = False):
+    def end_session(self, call_on_finish: bool = True):
         """
         End the session and clean up.
 
+        Calls the agent's on_finish lifecycle hook which handles:
+        - Deleting empty branches (no changes made)
+        - Keeping branches with changes for PR review
+
         Args:
-            reset_branch: If True, switch back to main branch. Default is False to preserve
-                         user's branch selection. Only set to True after agent execution.
+            call_on_finish: If True, call agent's on_finish hook
         """
-        if reset_branch:
+        if call_on_finish and self.current_agent_class:
             try:
-                # Switch back to main branch if we're not already on it
-                current_branch = self.wiki.get_current_branch()
-                if current_branch != GlobalAgentConfig.default_base_branch:
-                    self.wiki.checkout_branch(GlobalAgentConfig.default_base_branch)
+                # Get number of changes made
+                changes_made = 0
+                if self.loop_controller:
+                    stats = self.loop_controller.get_stats()
+                    changes_made = stats.get('changes_made', 0)
+
+                # Call agent's on_finish lifecycle hook
+                self.current_agent_class.on_finish(
+                    self.wiki,
+                    self.branch_created,
+                    changes_made
+                )
             except Exception as e:
-                print(f"Warning: Failed to switch back to main branch: {e}")
+                print(f"Warning: on_finish failed: {e}")

@@ -4,6 +4,7 @@ Autonomous wiki agents package.
 Agents are registered here and can be executed manually or on schedule.
 """
 from .base import BaseAgent
+from .agent_on_branch import AgentOnBranch
 from .config import GlobalAgentConfig
 from .loop_controller import AgentLoopController
 from .executor import AgentExecutor, ExecutionResult
@@ -64,11 +65,14 @@ def list_available_agents() -> list:
         "enabled": agent.is_enabled(),
         "schedule": agent.schedule,
         "model": agent.get_model(),
+        "human_in_loop": agent.human_in_loop,
+        "create_branch": agent.create_branch,
     } for agent in REGISTERED_AGENTS]
 
 
 __all__ = [
     'BaseAgent',
+    'AgentOnBranch',
     'GlobalAgentConfig',
     'AgentLoopController',
     'AgentExecutor',

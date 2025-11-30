@@ -1,10 +1,10 @@
 """
 Wiki Overview Agent Grok - analyzes and summarizes the entire wiki.
 """
-from .base import BaseAgent
+from .agent_on_branch import AgentOnBranch
 
 
-class WikiOverviewAgentGrok(BaseAgent):
+class WikiOverviewAgentGrok(AgentOnBranch):
     """
     Wiki overview agent that reads and analyzes all wiki pages to create a summary.
     Uses Grok model for analysis.

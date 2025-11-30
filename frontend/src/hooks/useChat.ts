@@ -79,11 +79,15 @@ export const useChat = (): UseChatReturn => {
         const agentCompleteMessage: ChatMessage = {
           id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
           type: 'system',
-          content: `✅ Agent Execution Complete\nStatus: ${message.status || 'completed'}\nIterations: ${message.iterations || 0}`,
+          content: `✅ Agent Execution Complete\nStatus: ${message.status || 'completed'}\nIterations: ${message.iterations || 0}${message.branch_created ? `\nBranch: ${message.branch_created}` : ''}`,
           timestamp: new Date().toISOString()
         };
 
         setMessages(prev => [...prev, agentCompleteMessage]);
+      } else if (message.type === 'agent_selected') {
+        // Agent changed - clear messages and show welcome
+        console.log('useChat: Agent selected, clearing messages');
+        setMessages([]);
       }
     });
 

@@ -62,8 +62,6 @@ class WebSocketManager:
 
         session_result = await self.executors[client_id].start_session(
             agent_class=ChatAgent,
-            human_in_loop=True,
-            create_branch=False,  # Chat mode - no PR branches
             on_message=on_message_callback,
             on_tool_call=on_tool_call_callback
         )
@@ -161,24 +159,32 @@ class WebSocketManager:
             else:
                 return {"type": "error", "message": f"Unexpected status: {result.status}"}
 
-        elif message_type == "run_agent":
-            # Run an autonomous agent and stream execution to chat
+        elif message_type == "select_agent":
+            # Switch to a different agent (clears conversation)
             agent_name = message_data.get("agent_name", "")
             if not agent_name:
                 return {"type": "error", "message": "Agent name is required"}
 
-            print(f"🤖 Running agent: {agent_name}")
+            print(f"🔄 Switching to agent: {agent_name}")
 
             # Import agent classes
             from agents import get_agent_by_name
 
             # Get the agent class
-            agent_class = get_agent_by_name(agent_name)
-            if not agent_class:
+            try:
+                agent_class = get_agent_by_name(agent_name)
+            except ValueError:
                 return {"type": "error", "message": f"Agent '{agent_name}' not found"}
 
-            # Reset executor and start new session with autonomous agent
+            # Reset conversation
             self.executors[client_id].reset_conversation()
+
+            # Send agent_selected FIRST so frontend clears messages before receiving new prompt
+            await self.send_message(client_id, {
+                "type": "agent_selected",
+                "agent_name": agent_name,
+                "human_in_loop": agent_class.human_in_loop
+            })
 
             # Setup streaming callbacks
             async def on_message_callback(msg_type: str, content: str):
@@ -204,33 +210,42 @@ class WebSocketManager:
                     "iteration": tool_info["iteration"]
                 })
 
-            # Start autonomous agent session
             session_result = await self.executors[client_id].start_session(
                 agent_class=agent_class,
-                human_in_loop=False,  # Autonomous mode
-                create_branch=True,   # Create PR branch
                 on_message=on_message_callback,
                 on_tool_call=on_tool_call_callback
             )
 
-            if not session_result["success"]:
-                return {"type": "error", "message": f"Failed to start agent: {session_result.get('error')}"}
+            if session_result["success"]:
+                self.session_info[client_id] = session_result
+                return {"type": "success"}
+            else:
+                return {"type": "error", "message": f"Failed to select agent: {session_result.get('error')}"}
+
+        elif message_type == "run_agent":
+            # Run the current agent (for AgentOnBranch agents that need explicit "Run" trigger)
+            print(f"🤖 Running current agent")
+
+            executor = self.executors[client_id]
 
             # Run agent execution (without user input)
-            result = await self.executors[client_id].process_turn()
+            result = await executor.process_turn()
 
             print(f"🔄 Agent execution result: {result.status}")
+
+            # Get branch created from executor state
+            branch_created = executor.branch_created
 
             # Send completion message
             await self.send_message(client_id, {
                 "type": "agent_complete",
                 "status": result.status,
                 "iterations": result.iterations,
-                "branch_created": result.branch_created
+                "branch_created": branch_created
             })
 
-            # Clean up - end session and return to main branch after agent execution
-            self.executors[client_id].end_session(reset_branch=True)
+            # Clean up - call on_finish lifecycle hook (handles branch cleanup)
+            executor.end_session(call_on_finish=True)
 
             return {"type": "success", "result": result.to_dict()}
 
@@ -268,8 +283,6 @@ class WebSocketManager:
 
             session_result = await self.executors[client_id].start_session(
                 agent_class=ChatAgent,
-                human_in_loop=True,
-                create_branch=False,
                 on_message=on_message_callback,
                 on_tool_call=on_tool_call_callback
             )
@@ -329,8 +342,8 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = "default"):
             response = await websocket_manager.handle_message(client_id, message_data)
             print(f"📤 Handler response: {response}")
             
-            # Send response if it's an error or immediate response
-            if response.get("type") in ["error", "success"]:
+            # Send response if it's an error, success, or agent_selected
+            if response.get("type") in ["error", "success", "agent_selected"]:
                 await websocket_manager.send_message(client_id, response)
                 
     except WebSocketDisconnect:

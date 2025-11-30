@@ -1,10 +1,10 @@
 """
 Test Agent - creates a simple test page to demonstrate PR workflow.
 """
-from .base import BaseAgent
+from .agent_on_branch import AgentOnBranch
 
 
-class TestAgent(BaseAgent):
+class TestAgent(AgentOnBranch):
     """
     Test agent that creates a test page to demonstrate the PR workflow.
     """

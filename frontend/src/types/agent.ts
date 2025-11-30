@@ -7,6 +7,8 @@ export interface Agent {
   enabled: boolean;
   schedule: string | null;
   model: string;
+  human_in_loop: boolean;
+  create_branch: boolean;
 }
 
 export interface AgentExecutionResult {

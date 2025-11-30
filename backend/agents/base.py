@@ -1,7 +1,10 @@
 """
 Base class for autonomous wiki agents.
 """
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from storage.git_wiki import GitWiki
 
 
 class BaseAgent:
@@ -13,6 +16,10 @@ class BaseAgent:
     - enabled: Boolean flag
     - prompt: System prompt for the AI agent
     - model: AI model to use (defaults to "openai/gpt-oss-20b")
+
+    Execution mode properties:
+    - human_in_loop: Whether agent waits for user input between turns
+    - create_branch: Whether agent creates a PR branch for its work
     """
 
     # These should be overridden by subclasses
@@ -20,6 +27,10 @@ class BaseAgent:
     enabled: bool = True
     prompt: str = ""
     model: str = "openai/gpt-oss-20b"  # Default AI model
+
+    # Execution mode - defaults for interactive chat
+    human_in_loop: bool = True   # Wait for user input between turns
+    create_branch: bool = False  # Don't create PR branches
 
     @classmethod
     def get_name(cls) -> str:
@@ -48,3 +59,32 @@ class BaseAgent:
     def get_model(cls) -> str:
         """Get the AI model for this agent"""
         return cls.model
+
+    @classmethod
+    def on_start(cls, wiki: 'GitWiki') -> Optional[str]:
+        """
+        Called before agent execution begins.
+
+        Override in subclasses to perform setup (e.g., create branch).
+
+        Args:
+            wiki: GitWiki instance for git operations
+
+        Returns:
+            Branch name if one was created, None otherwise
+        """
+        return None
+
+    @classmethod
+    def on_finish(cls, wiki: 'GitWiki', branch: Optional[str], changes_made: int) -> None:
+        """
+        Called after agent execution completes.
+
+        Override in subclasses to perform cleanup (e.g., delete empty branches).
+
+        Args:
+            wiki: GitWiki instance for git operations
+            branch: Branch name if one was created during on_start
+            changes_made: Number of changes made during execution
+        """
+        pass

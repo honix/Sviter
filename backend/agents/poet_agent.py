@@ -1,10 +1,10 @@
 """
 Poet Agent - creates poetry pages in the wiki.
 """
-from .base import BaseAgent
+from .agent_on_branch import AgentOnBranch
 
 
-class PoetAgent(BaseAgent):
+class PoetAgent(AgentOnBranch):
     """
     Poet agent that creates three poems with two paragraphs each.
     """

@@ -24,14 +24,14 @@ const MainLayout: React.FC = () => {
         <ResizableHandle withHandle />
 
         {/* Center Panel - Page Content */}
-        <ResizablePanel defaultSize={55} minSize={30}>
+        <ResizablePanel defaultSize={40} minSize={30}>
           <CenterPanel />
         </ResizablePanel>
 
         <ResizableHandle withHandle />
 
         {/* Right Panel - AI Chat */}
-        <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <ResizablePanel defaultSize={40} minSize={20} maxSize={40}>
           <RightPanel />
         </ResizablePanel>
       </ResizablePanelGroup>

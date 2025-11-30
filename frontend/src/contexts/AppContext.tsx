@@ -3,6 +3,8 @@ import { Page, ViewMode, TreeItem } from '../types/page';
 import { createWebSocketService, WebSocketService } from '../services/websocket';
 import { WebSocketMessage } from '../types/chat';
 import { treeApi } from '../services/tree-api';
+import { GitAPI } from '../services/git-api';
+import type { Agent } from '../types/agent';
 
 interface AppState {
   pages: Page[];
@@ -12,17 +14,18 @@ interface AppState {
   error: string | null;
   isConnected: boolean;
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
-  // Agent state
-  rightPanelMode: 'chat' | 'agents';
+  // Agent state (unified - no more chat/agents tabs)
   centerPanelMode: 'page' | 'branch-diff';
   selectedBranchForDiff: string | null;
-  // Chat mode state
-  chatMode: 'interactive' | 'agent-viewing';
-  currentAgent: string | null; // null = ChatAgent (interactive), else agent name
-  currentAgentModel: string | null; // Model being used by current agent
+  // Current agent
+  selectedAgent: Agent | null; // Currently selected agent (ChatAgent is default)
+  isAgentRunning: boolean; // For autonomous agents: is the agent currently running?
   // Page tree state
   pageTree: TreeItem[];
   expandedFolders: string[];
+  // Branch state
+  branches: string[];
+  currentBranch: string;
 }
 
 type AppAction =
@@ -36,14 +39,14 @@ type AppAction =
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'SET_CONNECTED'; payload: boolean }
   | { type: 'SET_CONNECTION_STATUS'; payload: 'connecting' | 'connected' | 'disconnected' | 'error' }
-  | { type: 'SET_RIGHT_PANEL_MODE'; payload: 'chat' | 'agents' }
   | { type: 'SET_CENTER_PANEL_MODE'; payload: 'page' | 'branch-diff' }
   | { type: 'SET_SELECTED_BRANCH_FOR_DIFF'; payload: string | null }
-  | { type: 'SET_CHAT_MODE'; payload: 'interactive' | 'agent-viewing' }
-  | { type: 'SET_CURRENT_AGENT'; payload: string | null }
-  | { type: 'SET_CURRENT_AGENT_MODEL'; payload: string | null }
+  | { type: 'SET_SELECTED_AGENT'; payload: Agent | null }
+  | { type: 'SET_AGENT_RUNNING'; payload: boolean }
   | { type: 'SET_PAGE_TREE'; payload: TreeItem[] }
-  | { type: 'TOGGLE_FOLDER'; payload: string };
+  | { type: 'TOGGLE_FOLDER'; payload: string }
+  | { type: 'SET_BRANCHES'; payload: string[] }
+  | { type: 'SET_CURRENT_BRANCH'; payload: string };
 
 const initialState: AppState = {
   pages: [],
@@ -53,14 +56,14 @@ const initialState: AppState = {
   error: null,
   isConnected: false,
   connectionStatus: 'disconnected',
-  rightPanelMode: 'chat',
   centerPanelMode: 'page',
   selectedBranchForDiff: null,
-  chatMode: 'interactive',
-  currentAgent: null,
-  currentAgentModel: null, // Will be fetched from backend
+  selectedAgent: null, // Will be set to ChatAgent on first load
+  isAgentRunning: false,
   pageTree: [],
-  expandedFolders: []
+  expandedFolders: [],
+  branches: [],
+  currentBranch: 'main'
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -123,23 +126,17 @@ function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
-    case 'SET_RIGHT_PANEL_MODE':
-      return { ...state, rightPanelMode: action.payload };
-
     case 'SET_CENTER_PANEL_MODE':
       return { ...state, centerPanelMode: action.payload };
 
     case 'SET_SELECTED_BRANCH_FOR_DIFF':
       return { ...state, selectedBranchForDiff: action.payload };
 
-    case 'SET_CHAT_MODE':
-      return { ...state, chatMode: action.payload };
+    case 'SET_SELECTED_AGENT':
+      return { ...state, selectedAgent: action.payload };
 
-    case 'SET_CURRENT_AGENT':
-      return { ...state, currentAgent: action.payload };
-
-    case 'SET_CURRENT_AGENT_MODEL':
-      return { ...state, currentAgentModel: action.payload };
+    case 'SET_AGENT_RUNNING':
+      return { ...state, isAgentRunning: action.payload };
 
     case 'SET_PAGE_TREE':
       return { ...state, pageTree: action.payload };
@@ -153,6 +150,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
           : [...state.expandedFolders, action.payload]
       };
     }
+
+    case 'SET_BRANCHES':
+      return { ...state, branches: action.payload };
+
+    case 'SET_CURRENT_BRANCH':
+      return { ...state, currentBranch: action.payload };
 
     default:
       return state;
@@ -171,22 +174,24 @@ interface AppContextType {
     setLoading: (loading: boolean) => void;
     setError: (error: string | null) => void;
     createPage: (title: string, content?: string) => Promise<void>;
-    setRightPanelMode: (mode: 'chat' | 'agents') => void;
     setCenterPanelMode: (mode: 'page' | 'branch-diff') => void;
     setSelectedBranchForDiff: (branch: string | null) => void;
     viewBranchDiff: (branch: string) => void;
     closeBranchDiff: () => void;
-    setChatMode: (mode: 'interactive' | 'agent-viewing') => void;
-    setCurrentAgent: (agent: string | null) => void;
-    setCurrentAgentModel: (model: string | null) => void;
-    startNewChat: () => Promise<void>;
-    viewAgentExecution: (agentName: string, agentModel?: string) => void;
+    // Agent actions
+    selectAgent: (agent: Agent) => void;
+    runAgent: () => void;
     // Tree actions
     loadPageTree: () => Promise<void>;
     toggleFolder: (folderId: string) => void;
     moveItem: (sourcePath: string, targetParentPath: string | null, newOrder: number) => Promise<void>;
     createFolder: (name: string, parentPath?: string) => Promise<void>;
     deleteFolder: (path: string) => Promise<void>;
+    // Branch actions
+    refreshBranches: () => Promise<void>;
+    checkoutBranch: (branch: string) => Promise<void>;
+    createBranch: (name: string) => Promise<void>;
+    deleteBranch: (name: string) => Promise<void>;
   };
   websocket: {
     sendMessage: (message: any) => void;
@@ -215,6 +220,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const messageUnsubscribe = wsService.current.onMessage((message) => {
       setLastMessage(message);
 
+      // Handle agent_complete directly to reset running state
+      if (message.type === 'agent_complete') {
+        dispatch({ type: 'SET_AGENT_RUNNING', payload: false });
+      }
+
       // Notify all registered handlers
       messageHandlers.current.forEach(handler => {
         try {
@@ -235,23 +245,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // Helper function to fetch and set ChatAgent model
-  const fetchChatAgentModel = useCallback(async () => {
+  // Auto-select ChatAgent on initialization
+  const selectDefaultAgent = useCallback(async () => {
     try {
       const response = await fetch('http://localhost:8000/api/agents');
       const data = await response.json();
-      const chatAgent = data.agents.find((a: any) => a.name === 'ChatAgent');
-      dispatch({ type: 'SET_CURRENT_AGENT_MODEL', payload: chatAgent?.model || null });
+      const chatAgent = data.agents.find((a: Agent) => a.name === 'ChatAgent');
+      if (chatAgent) {
+        dispatch({ type: 'SET_SELECTED_AGENT', payload: chatAgent });
+      }
     } catch (error) {
-      console.error('Failed to fetch ChatAgent model:', error);
-      dispatch({ type: 'SET_CURRENT_AGENT_MODEL', payload: null });
+      console.error('Failed to fetch ChatAgent:', error);
     }
   }, []);
 
-  // Fetch ChatAgent model on initialization
+  // Auto-select ChatAgent on first load
   useEffect(() => {
-    fetchChatAgentModel();
-  }, [fetchChatAgentModel]);
+    selectDefaultAgent();
+  }, [selectDefaultAgent]);
 
   const loadPages = React.useCallback(async () => {
     dispatch({ type: 'SET_LOADING', payload: true });
@@ -292,19 +303,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [state.currentPage]);
 
+  // Load branches callback (defined before use)
+  const loadBranches = useCallback(async () => {
+    try {
+      const [branchList, currentBranch] = await Promise.all([
+        GitAPI.listBranches(),
+        GitAPI.getCurrentBranch()
+      ]);
+      dispatch({ type: 'SET_BRANCHES', payload: branchList });
+      dispatch({ type: 'SET_CURRENT_BRANCH', payload: currentBranch });
+    } catch (err) {
+      console.error('Failed to load branches:', err);
+    }
+  }, []);
+
   // Handle incoming WebSocket messages for page updates
   useEffect(() => {
-    if (lastMessage && lastMessage.type === 'page_update') {
+    if (!lastMessage) return;
+
+    if (lastMessage.type === 'page_update') {
       // Reload all pages when AI modifies them to ensure synchronization
       loadPages();
+    } else if (lastMessage.type === 'agent_complete') {
+      // Refresh branches if agent created a new branch
+      if (lastMessage.branch_created) {
+        loadBranches();
+      }
     }
-  }, [lastMessage, loadPages]);
+  }, [lastMessage, loadPages, loadBranches]);
 
 
   // Load pages from backend API on initialization
   useEffect(() => {
     loadPages();
   }, [loadPages]);
+
+  // Load branches on initialization
+  useEffect(() => {
+    loadBranches();
+  }, [loadBranches]);
 
   // WebSocket functions
   const sendMessage = useCallback((message: any) => {
@@ -441,8 +478,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     },
 
-    // Agent actions
-    setRightPanelMode: (mode: 'chat' | 'agents') => dispatch({ type: 'SET_RIGHT_PANEL_MODE', payload: mode }),
+    // Panel actions
     setCenterPanelMode: (mode: 'page' | 'branch-diff') => dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: mode }),
     setSelectedBranchForDiff: (branch: string | null) => dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: branch }),
     viewBranchDiff: (branch: string) => {
@@ -453,27 +489,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'page' });
       dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: null });
     },
-    setChatMode: (mode: 'interactive' | 'agent-viewing') => dispatch({ type: 'SET_CHAT_MODE', payload: mode }),
-    setCurrentAgent: (agent: string | null) => dispatch({ type: 'SET_CURRENT_AGENT', payload: agent }),
-    setCurrentAgentModel: (model: string | null) => dispatch({ type: 'SET_CURRENT_AGENT_MODEL', payload: model }),
-    startNewChat: async () => {
-      // Reset to interactive chat mode
-      dispatch({ type: 'SET_CHAT_MODE', payload: 'interactive' });
-      dispatch({ type: 'SET_CURRENT_AGENT', payload: null });
 
-      // Fetch ChatAgent model from backend
-      await fetchChatAgentModel();
-
-      dispatch({ type: 'SET_RIGHT_PANEL_MODE', payload: 'chat' });
-      // Send reset message to backend
-      wsService.current?.send({ type: 'reset' });
+    // Agent actions
+    selectAgent: (agent: Agent) => {
+      dispatch({ type: 'SET_SELECTED_AGENT', payload: agent });
+      // Send select_agent message to backend (switches agent and clears chat)
+      wsService.current?.send({
+        type: 'select_agent',
+        agent_name: agent.name
+      });
     },
-    viewAgentExecution: (agentName: string, agentModel?: string) => {
-      // Switch to chat tab in agent-viewing mode
-      dispatch({ type: 'SET_CHAT_MODE', payload: 'agent-viewing' });
-      dispatch({ type: 'SET_CURRENT_AGENT', payload: agentName });
-      dispatch({ type: 'SET_CURRENT_AGENT_MODEL', payload: agentModel || null });
-      dispatch({ type: 'SET_RIGHT_PANEL_MODE', payload: 'chat' });
+    runAgent: () => {
+      // For autonomous agents - trigger execution
+      dispatch({ type: 'SET_AGENT_RUNNING', payload: true });
+      wsService.current?.send({ type: 'run_agent' });
     },
 
     // Tree actions
@@ -535,6 +564,72 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (err) {
         console.error('Failed to delete folder:', err);
         dispatch({ type: 'SET_ERROR', payload: 'Failed to delete folder' });
+      }
+    },
+
+    // Branch actions
+    refreshBranches: loadBranches,
+
+    checkoutBranch: async (branch: string) => {
+      if (branch === state.currentBranch) return;
+
+      dispatch({ type: 'SET_LOADING', payload: true });
+      try {
+        await GitAPI.checkoutBranch(branch);
+        dispatch({ type: 'SET_CURRENT_BRANCH', payload: branch });
+
+        // Refresh pages for new branch
+        await loadPages();
+
+        // Reload page tree for new branch
+        const tree = await treeApi.getTree();
+        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
+      } catch (err) {
+        console.error('Failed to checkout branch:', err);
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to switch branch' });
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    },
+
+    createBranch: async (name: string) => {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      try {
+        const newBranch = await GitAPI.createBranch(name, state.currentBranch);
+        // Refresh branches list
+        const branchList = await GitAPI.listBranches();
+        dispatch({ type: 'SET_BRANCHES', payload: branchList });
+        dispatch({ type: 'SET_CURRENT_BRANCH', payload: newBranch });
+      } catch (err: any) {
+        console.error('Failed to create branch:', err);
+        dispatch({ type: 'SET_ERROR', payload: err.message || 'Failed to create branch' });
+        throw err;
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    },
+
+    deleteBranch: async (name: string) => {
+      if (name === state.currentBranch) {
+        dispatch({ type: 'SET_ERROR', payload: 'Cannot delete current branch' });
+        return;
+      }
+      if (name === 'main') {
+        dispatch({ type: 'SET_ERROR', payload: 'Cannot delete main branch' });
+        return;
+      }
+
+      dispatch({ type: 'SET_LOADING', payload: true });
+      try {
+        await GitAPI.deleteBranch(name, true);
+        // Refresh branches list
+        const branchList = await GitAPI.listBranches();
+        dispatch({ type: 'SET_BRANCHES', payload: branchList });
+      } catch (err: any) {
+        console.error('Failed to delete branch:', err);
+        dispatch({ type: 'SET_ERROR', payload: err.message || 'Failed to delete branch' });
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
       }
     }
   };

@@ -1,10 +1,10 @@
 """
 Wiki Overview Agent - analyzes and summarizes the entire wiki using OSS model.
 """
-from .base import BaseAgent
+from .agent_on_branch import AgentOnBranch
 
 
-class WikiOverviewAgent(BaseAgent):
+class WikiOverviewAgent(AgentOnBranch):
     """
     Wiki overview agent that reads and analyzes all wiki pages to create a summary.
     Uses default OSS 20B model.

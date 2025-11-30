@@ -4,10 +4,10 @@ Example Agent - demonstrates the agent system.
 This is a simple agent that lists all pages in the wiki.
 You can customize the prompt to create different agent behaviors.
 """
-from .base import BaseAgent
+from .agent_on_branch import AgentOnBranch
 
 
-class ExampleAgent(BaseAgent):
+class ExampleAgent(AgentOnBranch):
     """
     Example agent that demonstrates the agent framework.
 

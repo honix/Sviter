@@ -197,9 +197,18 @@ class AgentExecutor:
             # After loop: check if changes were made
             stats = loop_controller.get_stats()
 
-            # Switch back to main branch
-            logs.append("Switching back to main branch")
-            self.wiki.checkout_branch(GlobalAgentConfig.default_base_branch)
+            # If no changes were made, delete the empty branch
+            # If changes were made, stay on the agent branch for review
+            if stats['changes_made'] == 0 and branch_created:
+                logs.append(f"No changes made, cleaning up branch: {branch_created}")
+                try:
+                    # Must checkout main first - can't delete current branch
+                    self.wiki.checkout_branch(GlobalAgentConfig.default_base_branch)
+                    self.wiki.delete_branch(branch_created)
+                except Exception as e:
+                    logs.append(f"Warning: Failed to delete empty branch: {e}")
+            else:
+                logs.append(f"Changes made, staying on branch: {branch_created}")
 
             # Success
             execution_time = time.time() - start_time
@@ -221,11 +230,13 @@ class AgentExecutor:
             error = str(e)
             logs.append(f"ERROR: {error}")
 
-            # Try to switch back to main
-            try:
-                self.wiki.checkout_branch(GlobalAgentConfig.default_base_branch)
-            except:
-                pass
+            # Clean up the branch on error
+            if branch_created:
+                try:
+                    self.wiki.delete_branch(branch_created)
+                    logs.append(f"Cleaned up branch after error: {branch_created}")
+                except:
+                    pass
 
             return ExecutionResult(
                 agent_name=agent_class.get_name() if agent_class else "unknown",

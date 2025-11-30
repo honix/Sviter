@@ -59,6 +59,9 @@ export function BranchDiffPanel({ branch, currentBranch }: BranchDiffPanelProps)
       // Delete the branch after successful merge
       await GitAPI.deleteBranch(branch);
 
+      // Refresh branches list
+      await actions.refreshBranches();
+
       // Close diff view and return to page view
       actions.closeBranchDiff();
     } catch (err) {
@@ -80,6 +83,9 @@ export function BranchDiffPanel({ branch, currentBranch }: BranchDiffPanelProps)
 
       await GitAPI.deleteBranch(branch, true);
 
+      // Refresh branches list
+      await actions.refreshBranches();
+
       // Close diff view and return to page view
       actions.closeBranchDiff();
     } catch (err) {
@@ -95,11 +101,10 @@ export function BranchDiffPanel({ branch, currentBranch }: BranchDiffPanelProps)
       setProcessing(true);
       setError(null);
 
-      await GitAPI.checkoutBranch(branch);
+      await actions.checkoutBranch(branch);
 
-      // Close diff view and reload to show new branch content
+      // Close diff view and return to page view
       actions.closeBranchDiff();
-      window.location.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to checkout branch');
       setProcessing(false);

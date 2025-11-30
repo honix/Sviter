@@ -18,86 +18,52 @@ import {
   PromptInputAction,
 } from '@/components/ui/prompt-input';
 import { Button } from '@/components/ui/button';
-import { ArrowUp, Trash2, Plus } from 'lucide-react';
+import { ArrowUp, Play } from 'lucide-react';
 
 const ChatInterface: React.FC = () => {
-  const { state, actions } = useAppContext();
-  const { chatMode, currentAgent, currentAgentModel } = state;
-  const { messages, isConnected, connectionStatus, sendMessage, clearMessages } = useChat();
+  const { state, websocket, actions } = useAppContext();
+  const { selectedAgent, isAgentRunning, connectionStatus } = state;
+  const { messages, sendMessage, clearMessages } = useChat();
   const [inputValue, setInputValue] = useState('');
 
-  const isAgentViewing = chatMode === 'agent-viewing';
+  const isConnected = connectionStatus === 'connected';
+  const isInteractive = selectedAgent?.human_in_loop ?? true;
+
+  const handleRunAgent = () => {
+    if (!isConnected || isAgentRunning) return;
+    actions.runAgent();
+  };
 
   const handleSend = () => {
-    if (inputValue.trim() && isConnected) {
-      sendMessage(inputValue.trim());
+    if (!inputValue.trim() || !isConnected) return;
+
+    const trimmedInput = inputValue.trim();
+
+    // Handle /restart command
+    if (trimmedInput === '/restart') {
+      clearMessages();
+      // Send reset to backend to restart the agent session
+      websocket.sendMessage({ type: 'reset' });
       setInputValue('');
+      return;
     }
-  };
 
-  const getStatusColor = () => {
-    switch (connectionStatus) {
-      case 'connected': return 'bg-green-500';
-      case 'connecting': return 'bg-yellow-500';
-      case 'error': return 'bg-red-500';
-      default: return 'bg-gray-500';
-    }
-  };
-
-  const getStatusText = () => {
-    switch (connectionStatus) {
-      case 'connected': return 'Connected';
-      case 'connecting': return 'Connecting...';
-      case 'error': return 'Connection Error';
-      default: return 'Disconnected';
-    }
+    sendMessage(trimmedInput);
+    setInputValue('');
   };
 
   return (
     <div className="h-full bg-background flex flex-col">
-      {/* Header */}
-      <div className="p-4 border-b border-border flex-shrink-0">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">
-              {isAgentViewing ? `Agent: ${currentAgent}` : 'AI Assistant'}
-            </h2>
-            <p className="text-xs text-muted-foreground mt-1">
-              {currentAgentModel && `Model: ${currentAgentModel}`}
-              {isAgentViewing && currentAgentModel && ' • '}
-              {isAgentViewing && 'Viewing agent execution (read-only)'}
-              {!isAgentViewing && !currentAgentModel && 'Interactive chat mode'}
-            </p>
-          </div>
-          <Button
-            onClick={isAgentViewing ? actions.startNewChat : clearMessages}
-            variant="ghost"
-            size="sm"
-          >
-            {isAgentViewing ? (
-              <>
-                <Plus className="h-4 w-4 mr-2" />
-                Start New Chat
-              </>
-            ) : (
-              <>
-                <Trash2 className="h-4 w-4 mr-2" />
-                Clear
-              </>
-            )}
-          </Button>
-        </div>
-        <div className="flex items-center mt-2">
-          <div className={`w-2 h-2 rounded-full mr-2 ${getStatusColor()}`}></div>
-          <span className="text-sm text-muted-foreground">
-            {getStatusText()}
-          </span>
-        </div>
-      </div>
-
       {/* Chat Messages */}
-      <ChatContainerRoot className="flex-1 min-h-0 p-4">
-        <ChatContainerContent>
+      <ChatContainerRoot className="flex-1 min-h-0">
+        <ChatContainerContent className="px-4 pt-4 pb-1">
+          {messages.length === 0 && (
+            <div className="text-center text-muted-foreground text-sm py-8">
+              {isInteractive
+                ? 'Ask a question about your wiki...'
+                : 'Click "Run Agent" to start the agent'}
+            </div>
+          )}
           {messages.map((message) => (
             <Message
               key={message.id}
@@ -120,9 +86,9 @@ const ChatInterface: React.FC = () => {
         </ChatContainerContent>
       </ChatContainerRoot>
 
-      {/* Message Input */}
-      {!isAgentViewing && (
-        <div className="p-4 border-t border-border flex-shrink-0">
+      {/* Bottom section - Input for interactive, Run button for autonomous */}
+      <div className="p-4 border-t border-border flex-shrink-0">
+        {isInteractive ? (
           <PromptInput
             value={inputValue}
             onValueChange={setInputValue}
@@ -130,7 +96,7 @@ const ChatInterface: React.FC = () => {
             isLoading={!isConnected}
           >
             <PromptInputTextarea
-              placeholder={isConnected ? "Ask the AI about your wiki..." : "Connecting..."}
+              placeholder={isConnected ? "Type /restart to reset • Ask about your wiki..." : "Connecting..."}
               disabled={!isConnected}
             />
             <PromptInputActions>
@@ -146,8 +112,18 @@ const ChatInterface: React.FC = () => {
               </PromptInputAction>
             </PromptInputActions>
           </PromptInput>
-        </div>
-      )}
+        ) : (
+          <Button
+            onClick={handleRunAgent}
+            disabled={!isConnected || isAgentRunning}
+            className="w-full"
+            size="lg"
+          >
+            <Play className="h-4 w-4 mr-2" />
+            {isAgentRunning ? 'Agent Running...' : 'Run Agent'}
+          </Button>
+        )}
+      </div>
     </div>
   );
 };
