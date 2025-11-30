@@ -192,3 +192,19 @@ npm run dev             # Start Vite dev server on port 5173
 - **No Routing**: Application uses context-based state, NOT react-router-dom
 - **Flexbox Scrolling**: Use `min-h-0` on flex children to enable proper scrolling
 - **Real-time Features**: Full bidirectional communication between frontend and backend
+
+## Real-time Agent Updates
+
+### Branch & Page Lifecycle
+- **Branch switching**: Agent branches appear immediately when "Run Agent" is pressed
+- **Live page creation**: Pages appear in tree as agents create them (via `page_updated` WebSocket messages)
+- **Branch cleanup**: Empty branches (no changes) are auto-deleted, reverting to main
+
+### WebSocket Message Types
+- `branch_created` / `branch_switched` / `branch_deleted` - Branch lifecycle
+- `page_updated` - Real-time page tree updates during agent execution
+- `agent_complete` - Agent finished execution
+
+### Implementation Notes
+- React 18 batching workaround: Use refs (`reloadFunctionsRef` in AppContext) to call reload functions from WebSocket callbacks with empty deps
+- System prompt bubble: Full width styling in ChatInterface
