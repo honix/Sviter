@@ -3,16 +3,13 @@ Unified execution engine for both chat and autonomous agents.
 Merges ChatHandler and AgentExecutor into a single, flexible system.
 """
 import time
-import json
 import asyncio
-from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable, Union, Awaitable
 from storage.git_wiki import GitWiki
-from ai.client import OpenRouterClient
-from ai.tools import get_wiki_tools, WikiTools
+from ai.tools import get_wiki_tools, WikiTool
+from ai.adapters import OpenRouterAdapter, LLMAdapter
+from ai.adapters.claude_sdk import ClaudeSDKAdapter, CLAUDE_SDK_AVAILABLE
 from .base import BaseAgent
-from .chat_agent import ChatAgent
-from .loop_controller import AgentLoopController
 from .config import GlobalAgentConfig
 
 
@@ -80,10 +77,11 @@ class UnifiedAgentExecutor:
         self.wiki = wiki
         self.api_key = api_key
         self.conversation_history: List[Dict[str, Any]] = []
-        self.loop_controller: Optional[AgentLoopController] = None
+        self.adapter: Optional[LLMAdapter] = None
         self.start_time: float = 0
         self.iteration_count: int = 0
         self.current_model: str = BaseAgent.get_model()
+        self.current_provider: str = "openrouter"  # "openrouter" or "claude"
         self.current_agent_class: Optional[type[BaseAgent]] = None
         self.branch_created: Optional[str] = None
         self.human_in_loop: bool = True
@@ -138,6 +136,7 @@ class UnifiedAgentExecutor:
             agent_name = agent_class.get_name()
             agent_prompt = system_prompt or agent_class.get_prompt()
             self.current_model = agent_class.get_model()
+            self.current_provider = agent_class.get_provider()
 
             # Check if agent is enabled
             if not agent_class.is_enabled():
@@ -149,6 +148,7 @@ class UnifiedAgentExecutor:
 
             logs.append(f"Starting session: {agent_name}")
             logs.append(f"Mode: {'interactive' if self.human_in_loop else 'autonomous'}")
+            logs.append(f"Provider: {self.current_provider}, Model: {self.current_model}")
 
             # Reset on_start flag - will be called on first process_turn
             self.on_start_called = False
@@ -159,12 +159,23 @@ class UnifiedAgentExecutor:
                 "content": agent_prompt
             }]
 
-            # Initialize loop controller
-            self.loop_controller = AgentLoopController({
-                'max_iterations': GlobalAgentConfig.max_iterations,
-                'max_tools_per_iteration': GlobalAgentConfig.max_tools_per_iteration,
-                'timeout_seconds': GlobalAgentConfig.timeout_seconds,
-            })
+            # Create adapter based on provider
+            if self.current_provider == "claude":
+                if not CLAUDE_SDK_AVAILABLE:
+                    return {
+                        "success": False,
+                        "error": "Claude SDK not available. Install with: pip install claude-agent-sdk",
+                        "agent_name": agent_name
+                    }
+                self.adapter = ClaudeSDKAdapter(
+                    system_prompt=agent_prompt,
+                    model=self.current_model
+                )
+            else:
+                self.adapter = OpenRouterAdapter(
+                    api_key=self.api_key,
+                    model=self.current_model
+                )
 
             # Stream system prompt if callback provided
             await self._call_callback(self.on_message, "system_prompt", agent_prompt)
@@ -192,7 +203,11 @@ class UnifiedAgentExecutor:
 
     async def process_turn(self, user_message: str = None) -> ExecutionResult:
         """
-        Process one turn of conversation (one or more AI iterations until stopped or waiting for input).
+        Process one turn of conversation.
+
+        The adapter handles the conversation loop internally:
+        - OpenRouter: Loops until no tool calls or max_turns
+        - Claude SDK: SDK manages the loop internally
 
         Args:
             user_message: User's message (required for human_in_loop mode)
@@ -209,116 +224,36 @@ class UnifiedAgentExecutor:
                 self.branch_created = self.current_agent_class.on_start(self.wiki)
                 if self.branch_created:
                     logs.append(f"Created branch: {self.branch_created}")
-                    # Immediately notify about branch creation
                     await self._call_callback(self.on_branch_created, self.branch_created)
-
-            # Add user message to conversation if provided
-            if user_message:
-                self.conversation_history.append({
-                    "role": "user",
-                    "content": user_message
-                })
-                logs.append(f"User: {user_message[:100]}...")
-
-            # Initialize AI client with current session's model
-            client = OpenRouterClient(api_key=self.api_key, model=self.current_model)
 
             # Get wiki tools
             wiki_tools = get_wiki_tools(self.wiki)
-            openai_tools = self._convert_tools_to_openai_format(wiki_tools)
 
-            # Process loop - continue until stopped by loop control
-            while True:
-                self.iteration_count += 1
-                logs.append(f"Iteration {self.iteration_count}")
+            logs.append(f"Processing with {self.current_provider} adapter")
 
-                # Get AI response
-                completion = client.create_completion(
-                    messages=self.conversation_history,
-                    tools=openai_tools
-                )
+            # Use adapter's process_conversation - handles loop internally
+            result = await self.adapter.process_conversation(
+                user_message=user_message or "Begin.",
+                conversation_history=self.conversation_history,
+                tools=wiki_tools,
+                max_turns=GlobalAgentConfig.max_iterations,
+                on_message=lambda t, c: self._call_callback(self.on_message, t, c),
+                on_tool_call=lambda d: self._call_callback(self.on_tool_call, d),
+            )
 
-                message = completion.choices[0].message
-                message_content = message.content or ""
-                tool_calls_raw = message.tool_calls if message.tool_calls else []
+            self.iteration_count += result.iterations
+            logs.append(f"Completed: {result.stop_reason} after {result.iterations} iterations")
 
-                # Add assistant message to conversation
-                self.conversation_history.append(message)
-
-                # Stream AI message if callback provided
-                if message_content:
-                    await self._call_callback(self.on_message, "assistant", message_content)
-
-                logs.append(f"AI: {message_content[:100]}...")
-
-                # Convert tool calls for loop control
-                tool_calls_for_control = [
-                    {"name": tc.function.name, "arguments": json.loads(tc.function.arguments) if tc.function.arguments else {}}
-                    for tc in tool_calls_raw
-                ] if tool_calls_raw else []
-
-                # Check loop control
-                should_continue, stop_reason = self.loop_controller.should_continue(
-                    self.iteration_count, tool_calls_for_control, message_content
-                )
-
-                if not should_continue:
-                    logs.append(f"Stopping: {stop_reason}")
-
-                    # Get stats
-                    stats = self.loop_controller.get_stats()
-
-                    return ExecutionResult(
-                        agent_name="agent",  # Will be set by caller
-                        status='completed',
-                        stop_reason=stop_reason,
-                        iterations=self.iteration_count,
-                        pages_analyzed=stats['pages_analyzed'],
-                        execution_time=time.time() - self.start_time,
-                        logs=logs,
-                        final_response=message_content
-                    )
-
-                # Process tool calls
-                if tool_calls_raw:
-                    logs.append(f"Executing {len(tool_calls_raw)} tool calls")
-
-                    for tool_call in tool_calls_raw:
-                        tool_name = tool_call.function.name
-
-                        # Sanitize tool name
-                        if '<' in tool_name:
-                            tool_name = tool_name.split('<')[0]
-                        tool_name = tool_name.strip()
-
-                        tool_args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-
-                        # Execute tool
-                        result = self._execute_tool(tool_name, tool_args, wiki_tools)
-
-                        # Stream tool call if callback provided
-                        await self._call_callback(self.on_tool_call, {
-                            "tool_name": tool_name,
-                            "arguments": tool_args,
-                            "result": result,
-                            "iteration": self.iteration_count
-                        })
-
-                        # Track in loop controller
-                        if tool_name == 'read_page':
-                            self.loop_controller.record_page_analyzed(tool_args.get('title', ''))
-                        elif tool_name == 'edit_page':
-                            self.loop_controller.record_change(tool_args)
-
-                        # Add tool result to conversation
-                        self.conversation_history.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": str(result)
-                        })
-
-                    # Continue loop to let AI respond to tool results
-                    continue
+            return ExecutionResult(
+                agent_name=self.current_agent_class.get_name() if self.current_agent_class else "agent",
+                status=result.status,
+                stop_reason=result.stop_reason,
+                iterations=result.iterations,
+                execution_time=time.time() - self.start_time,
+                logs=logs,
+                final_response=result.final_response,
+                error=result.error
+            )
 
         except Exception as e:
             return ExecutionResult(
@@ -331,33 +266,6 @@ class UnifiedAgentExecutor:
                 error=str(e)
             )
 
-    def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any], tools: List[Dict]) -> Any:
-        """Execute a tool by name"""
-        tool_def = next((t for t in tools if t['name'] == tool_name), None)
-
-        if not tool_def:
-            raise ValueError(f"Tool '{tool_name}' not found")
-
-        tool_function = tool_def.get('function')
-        if not tool_function:
-            raise ValueError(f"Tool '{tool_name}' has no function")
-
-        return tool_function(**tool_args)
-
-    def _convert_tools_to_openai_format(self, wiki_tools: List[Dict]) -> List[Dict]:
-        """Convert wiki tools to OpenAI function calling format"""
-        openai_tools = []
-        for tool in wiki_tools:
-            openai_tools.append({
-                "type": "function",
-                "function": {
-                    "name": tool['name'],
-                    "description": tool['description'],
-                    "parameters": tool['parameters']
-                }
-            })
-        return openai_tools
-
     def get_conversation_history(self) -> List[Dict[str, Any]]:
         """Get current conversation history"""
         return self.conversation_history.copy()
@@ -365,9 +273,10 @@ class UnifiedAgentExecutor:
     def reset_conversation(self):
         """Reset conversation to initial state"""
         self.conversation_history = []
-        self.loop_controller = None
+        self.adapter = None
         self.iteration_count = 0
         self.current_model = BaseAgent.get_model()  # Reset to default
+        self.current_provider = "openrouter"
         self.current_agent_class = None
         self.branch_created = None
         self.human_in_loop = True
@@ -396,11 +305,14 @@ class UnifiedAgentExecutor:
 
         if call_on_finish and self.current_agent_class:
             try:
-                # Get number of changes made
+                # Check if changes were made by looking at git diff
                 changes_made = 0
-                if self.loop_controller:
-                    stats = self.loop_controller.get_stats()
-                    changes_made = stats.get('changes_made', 0)
+                if self.branch_created:
+                    try:
+                        diff = self.wiki.get_diff(GlobalAgentConfig.default_base_branch, self.branch_created)
+                        changes_made = 1 if diff.strip() else 0
+                    except Exception:
+                        changes_made = 0
 
                 # Track if branch will be deleted (no changes made)
                 if changes_made == 0 and self.branch_created:

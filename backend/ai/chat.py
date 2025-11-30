@@ -1,20 +1,31 @@
 from typing import List, Dict, Any, Optional
 from ai.client import OpenRouterClient
 from ai.tools import WikiTools
+from ai.prompts import WikiPromptBuilder
 from openai.types.chat import ChatCompletionMessage
 import json
 
+
 class ChatHandler:
-    """Handles chat interactions with AI and tool calling"""
-    
+    """
+    Handles chat interactions with AI and tool calling.
+
+    Note: This is a legacy handler. For new code, use UnifiedAgentExecutor
+    with ChatAgent instead.
+    """
+
     def __init__(self):
         self.client = OpenRouterClient()
         self.conversation_history: List[Dict[str, str]] = []
         self._initialize_conversation()
-    
+
     def _initialize_conversation(self):
-        """Initialize conversation with system message"""
-        self.conversation_history = [self.client.get_system_message()]
+        """Initialize conversation with system message from WikiPromptBuilder"""
+        system_prompt = WikiPromptBuilder.build(
+            "You are a helpful wiki assistant. Help users with reading, "
+            "searching, and editing wiki content."
+        )
+        self.conversation_history = [{"role": "system", "content": system_prompt}]
     
     def process_message(self, user_message: str, max_iterations: int = 10) -> Dict[str, Any]:
         """Process user message and return response with any tool calls.

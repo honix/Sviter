@@ -48,8 +48,9 @@ export const useChat = (): UseChatReturn => {
         console.log('useChat: Creating tool_call message');
         const toolCallMessage: ChatMessage = {
           id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
-          type: 'system',
-          content: `🔧 Executed ${message.tool_name || 'tool'}: ${message.result || 'Success'}`,
+          type: 'tool_call',
+          content: message.result || '',
+          tool_name: message.tool_name || 'tool',
           timestamp: new Date().toISOString()
         };
 

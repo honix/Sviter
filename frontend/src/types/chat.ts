@@ -1,11 +1,12 @@
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'assistant' | 'system' | 'system_prompt';
+  type: 'user' | 'assistant' | 'system' | 'system_prompt' | 'tool_call';
   content: string;
   timestamp: string;
   tool_calls?: ToolCall[];
   tool_count?: number;
   iterations?: number;
+  tool_name?: string;
 }
 
 export interface ToolCall {

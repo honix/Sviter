@@ -56,6 +56,18 @@ interface MessageItemProps {
 const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
+  const isToolCall = message.type === 'tool_call';
+
+  // Tool calls: subtle thin text
+  if (isToolCall) {
+    return (
+      <div className="flex justify-start px-2 py-0.5">
+        <span className="text-xs text-gray-400 dark:text-gray-500 font-mono">
+          Tool: {message.tool_name}...
+        </span>
+      </div>
+    );
+  }
 
   if (isSystem) {
     return (

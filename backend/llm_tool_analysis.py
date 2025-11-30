@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from ai.client import OpenRouterClient
 from ai.tools import WikiTools
+from ai.prompts import WikiPromptBuilder
 from typing import List, Dict, Any, Optional
 import json
 import time
@@ -49,7 +50,8 @@ class LLMTestFramework:
         print(f"🤖 Model: {self.model_name}")
 
         start_time = time.time()
-        conversation_history = [self.client.get_system_message()]
+        system_prompt = WikiPromptBuilder.build("You are a test assistant for wiki tool analysis.")
+        conversation_history = [{"role": "system", "content": system_prompt}]
         conversation_history.append({"role": "user", "content": initial_message})
 
         iteration_count = 0

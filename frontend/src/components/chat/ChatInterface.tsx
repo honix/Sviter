@@ -74,6 +74,14 @@ const ChatInterface: React.FC = () => {
                 <div className="text-xs font-medium text-muted-foreground/70 mb-2">System Prompt</div>
                 <div className="whitespace-pre-wrap">{message.content}</div>
               </div>
+            ) : message.type === 'tool_call' ? (
+              // Tool call - subtle indicator with animated dot
+              <div key={message.id} className="my-2 py-2 px-4 flex items-center gap-2 opacity-60">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-pulse" />
+                <span className="text-xs text-muted-foreground font-mono tracking-wide">
+                  Tool: {message.tool_name}
+                </span>
+              </div>
             ) : (
               <Message
                 key={message.id}

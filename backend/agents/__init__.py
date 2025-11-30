@@ -11,9 +11,11 @@ from .executor import AgentExecutor, ExecutionResult
 
 # Import agent classes
 from .chat_agent import ChatAgent
+from .chat_agent_claude import ChatAgentClaude
 from .example_agent import ExampleAgent
 from .test_agent import TestAgent
 from .poet_agent import PoetAgent
+from .poet_agent_claude import PoetAgentClaude
 from .poet_agent_grok import PoetAgentGrok
 from .wiki_overview_agent_grok import WikiOverviewAgentGrok
 from .wiki_overview_agent import WikiOverviewAgent
@@ -24,9 +26,11 @@ from .wiki_overview_agent import WikiOverviewAgent
 # Register all enabled agents
 REGISTERED_AGENTS = [
     ChatAgent,
+    ChatAgentClaude,  # Claude Haiku via Claude Agent SDK
     ExampleAgent,
     TestAgent,
     PoetAgent,
+    PoetAgentClaude,
     PoetAgentGrok,
     WikiOverviewAgentGrok,
     WikiOverviewAgent,
@@ -65,6 +69,7 @@ def list_available_agents() -> list:
         "enabled": agent.is_enabled(),
         "schedule": agent.schedule,
         "model": agent.get_model(),
+        "provider": agent.get_provider(),
         "human_in_loop": agent.human_in_loop,
         "create_branch": agent.create_branch,
     } for agent in REGISTERED_AGENTS]

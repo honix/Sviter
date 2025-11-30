@@ -1,8 +1,26 @@
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Callable, TYPE_CHECKING
+from dataclasses import dataclass
 from storage import GitWiki, PageNotFoundException
 from config import WIKI_REPO_PATH
 import json
 from datetime import datetime
+
+if TYPE_CHECKING:
+    from storage.git_wiki import GitWiki
+
+
+@dataclass
+class WikiTool:
+    """
+    Provider-agnostic tool definition.
+
+    This class represents a wiki tool that can be converted to
+    different formats for various LLM providers (OpenRouter, Claude SDK, etc.)
+    """
+    name: str
+    description: str
+    parameters: Dict[str, Any]  # JSON Schema format
+    function: Callable[[Dict[str, Any]], str]  # Takes args dict, returns result string
 
 class WikiTools:
     """Wiki-specific AI tools for page operations"""
@@ -179,6 +197,9 @@ class WikiTools:
         """Search for wiki pages"""
         query = arguments.get("query")
         limit = arguments.get("limit", 10)
+        # Convert limit to int (Claude SDK may pass strings)
+        if isinstance(limit, str):
+            limit = int(limit)
 
         if not query:
             return "Error: Search query is required"
@@ -215,6 +236,9 @@ class WikiTools:
     def _list_all_pages(wiki: GitWiki, arguments: Dict[str, Any]) -> str:
         """List all wiki pages"""
         limit = arguments.get("limit", 50)
+        # Convert limit to int (Claude SDK may pass strings)
+        if isinstance(limit, str):
+            limit = int(limit)
 
         pages = wiki.list_pages(limit=limit)
 
@@ -255,43 +279,33 @@ class WikiTools:
         return result_text
 
 
-def get_wiki_tools(wiki: GitWiki) -> List[Dict[str, Any]]:
+def get_wiki_tools(wiki: GitWiki) -> List[WikiTool]:
     """
-    Get tool definitions with bound wiki instance for use in agents.
+    Get unified tool definitions with bound wiki instance.
 
     Args:
         wiki: GitWiki instance to bind to tools
 
     Returns:
-        List of tool definitions with executable functions
+        List of WikiTool objects that can be converted to any provider format
     """
-    def read_page_func(title: str) -> str:
-        return WikiTools._read_page(wiki, title)
+    def read_page_func(args: Dict[str, Any]) -> str:
+        return WikiTools._read_page(wiki, args.get("title"))
 
-    def edit_page_func(title: str, content: str, author: str = "AI Agent", tags: Optional[List[str]] = None) -> str:
-        arguments = {
-            "title": title,
-            "content": content,
-            "author": author,
-            "tags": tags or []
-        }
-        return WikiTools._edit_page(wiki, arguments)
+    def edit_page_func(args: Dict[str, Any]) -> str:
+        return WikiTools._edit_page(wiki, args)
 
-    def find_pages_func(query: str, limit: int = 10) -> str:
-        arguments = {"query": query, "limit": limit}
-        return WikiTools._find_pages(wiki, arguments)
+    def find_pages_func(args: Dict[str, Any]) -> str:
+        return WikiTools._find_pages(wiki, args)
 
-    def list_all_pages_func(limit: int = 50) -> str:
-        arguments = {"limit": limit}
-        return WikiTools._list_all_pages(wiki, arguments)
+    def list_all_pages_func(args: Dict[str, Any]) -> str:
+        return WikiTools._list_all_pages(wiki, args)
 
-    # Return tool definitions with bound functions
     return [
-        {
-            "name": "read_page",
-            "description": "Read the content of a wiki page by title. Returns the page content, metadata, and status.",
-            "function": read_page_func,
-            "parameters": {
+        WikiTool(
+            name="read_page",
+            description="Read the content of a wiki page by title. Returns the page content, metadata, and status.",
+            parameters={
                 "type": "object",
                 "properties": {
                     "title": {
@@ -300,13 +314,13 @@ def get_wiki_tools(wiki: GitWiki) -> List[Dict[str, Any]]:
                     }
                 },
                 "required": ["title"]
-            }
-        },
-        {
-            "name": "edit_page",
-            "description": "Create or update a wiki page with new content. If the page doesn't exist, it will be created.",
-            "function": edit_page_func,
-            "parameters": {
+            },
+            function=read_page_func
+        ),
+        WikiTool(
+            name="edit_page",
+            description="Create or update a wiki page with new content. If the page doesn't exist, it will be created.",
+            parameters={
                 "type": "object",
                 "properties": {
                     "title": {
@@ -328,13 +342,13 @@ def get_wiki_tools(wiki: GitWiki) -> List[Dict[str, Any]]:
                     }
                 },
                 "required": ["title", "content"]
-            }
-        },
-        {
-            "name": "find_pages",
-            "description": "Search for wiki pages by title or content. Returns a list of matching pages with their titles and excerpts.",
-            "function": find_pages_func,
-            "parameters": {
+            },
+            function=edit_page_func
+        ),
+        WikiTool(
+            name="find_pages",
+            description="Search for wiki pages by title or content. Returns a list of matching pages with their titles and excerpts.",
+            parameters={
                 "type": "object",
                 "properties": {
                     "query": {
@@ -347,13 +361,13 @@ def get_wiki_tools(wiki: GitWiki) -> List[Dict[str, Any]]:
                     }
                 },
                 "required": ["query"]
-            }
-        },
-        {
-            "name": "list_all_pages",
-            "description": "Get a list of all wiki pages with their titles and basic metadata.",
-            "function": list_all_pages_func,
-            "parameters": {
+            },
+            function=find_pages_func
+        ),
+        WikiTool(
+            name="list_all_pages",
+            description="Get a list of all wiki pages with their titles and basic metadata.",
+            parameters={
                 "type": "object",
                 "properties": {
                     "limit": {
@@ -362,6 +376,25 @@ def get_wiki_tools(wiki: GitWiki) -> List[Dict[str, Any]]:
                     }
                 },
                 "required": []
-            }
+            },
+            function=list_all_pages_func
+        )
+    ]
+
+
+def get_wiki_tools_legacy(wiki: GitWiki) -> List[Dict[str, Any]]:
+    """
+    Legacy function for backward compatibility with unified_executor.
+
+    Returns tools in the old dict format. Will be removed after migration.
+    """
+    tools = get_wiki_tools(wiki)
+    return [
+        {
+            "name": t.name,
+            "description": t.description,
+            "parameters": t.parameters,
+            "function": t.function
         }
+        for t in tools
     ]

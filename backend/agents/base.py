@@ -14,19 +14,27 @@ class BaseAgent:
     Each agent must define:
     - schedule: Cron expression (not used in MVP, manual only)
     - enabled: Boolean flag
-    - prompt: System prompt for the AI agent
+    - prompt: Full system prompt (legacy, use 'role' instead)
+    - role: Agent-specific role description (combined with wiki context)
     - model: AI model to use (defaults to "openai/gpt-oss-20b")
+    - provider: LLM provider ("openrouter" or "claude")
 
     Execution mode properties:
     - human_in_loop: Whether agent waits for user input between turns
     - create_branch: Whether agent creates a PR branch for its work
+
+    Prompt construction:
+    - If 'prompt' is set: use it directly (backward compatibility)
+    - If 'role' is set: combine with wiki context via WikiPromptBuilder
     """
 
     # These should be overridden by subclasses
     schedule: str = None  # Not used in Phase 1 (manual only)
     enabled: bool = True
-    prompt: str = ""
+    prompt: str = ""  # Full prompt (legacy, for backward compat)
+    role: str = ""  # Agent role (preferred, combined with wiki context)
     model: str = "openai/gpt-oss-20b"  # Default AI model
+    provider: str = "openrouter"  # LLM provider: "openrouter" or "claude"
 
     # Execution mode - defaults for interactive chat
     human_in_loop: bool = True   # Wait for user input between turns
@@ -52,8 +60,26 @@ class BaseAgent:
 
     @classmethod
     def get_prompt(cls) -> str:
-        """Get the system prompt for this agent"""
-        return cls.prompt
+        """
+        Get the system prompt for this agent.
+
+        Prompt construction:
+        - If 'prompt' is set: use it directly (backward compatibility)
+        - If 'role' is set: combine with wiki context via WikiPromptBuilder
+        - If neither: return just the wiki context
+        """
+        # If prompt is explicitly set, use it (backward compat)
+        if cls.prompt:
+            return cls.prompt
+
+        # Otherwise, build composite prompt from role
+        from ai.prompts import WikiPromptBuilder
+        return WikiPromptBuilder.build(cls.role)
+
+    @classmethod
+    def get_provider(cls) -> str:
+        """Get the LLM provider for this agent"""
+        return cls.provider
 
     @classmethod
     def get_model(cls) -> str:

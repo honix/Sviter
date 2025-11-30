@@ -1,46 +1,61 @@
+"""
+OpenRouter API client for LLM interactions.
+
+This is a pure API wrapper - system prompts are now handled by
+WikiPromptBuilder in ai/prompts.py and passed via messages.
+"""
 from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
-import json
 from typing import List, Dict, Any
 
-class OpenRouterClient:
-    """OpenRouter API client for LLM interactions with configurable model"""
 
-    def __init__(self, api_key: str = "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",
-                 model: str = "openai/gpt-oss-20b"):
+class OpenRouterClient:
+    """
+    OpenRouter API client for LLM interactions.
+
+    Pure API wrapper - no prompt handling. System prompts should be
+    passed as the first message in the messages list.
+    """
+
+    DEFAULT_API_KEY = "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"
+    DEFAULT_MODEL = "openai/gpt-oss-20b"
+
+    def __init__(self, api_key: str = None, model: str = None):
+        """
+        Initialize OpenRouter client.
+
+        Args:
+            api_key: OpenRouter API key (optional, uses default)
+            model: Model name (optional, uses default)
+        """
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=api_key,
+            api_key=api_key or self.DEFAULT_API_KEY,
         )
+        self.model_name = model or self.DEFAULT_MODEL
 
-        # Model configuration - configurable via constructor parameter
-        self.model_name = model
-        
-        # System message for wiki context
-        self.system_message = """You are a helpful AI assistant for a wiki system. You can read, edit, and search wiki pages using the provided tools.
+    def create_completion(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict] = None
+    ) -> ChatCompletion:
+        """
+        Create chat completion with optional tools.
 
-When users ask questions, you can use these tools to find relevant information and provide helpful responses. You can perform multiple sequential tool calls to complete complex tasks - the system will continue processing until you stop calling tools.
+        Args:
+            messages: List of message dicts (role, content)
+            tools: Optional list of tool definitions in OpenAI format
 
-For example, if asked to "find secret A and secret B", you should:
-1. Use find_pages to search for secret A
-2. Use find_pages to search for secret B
-3. Provide a summary response without tool calls
-
-Keep responses concise and focused on the user's request. Use multiple tool calls when needed to gather all required information."""
-    
-    def create_completion(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> ChatCompletion:
-        """Create chat completion with optional tools"""
+        Returns:
+            ChatCompletion response
+        """
         completion_params = {
             "model": self.model_name,
             "messages": messages,
         }
-        
+
         if tools:
             completion_params["tools"] = tools
             completion_params["tool_choice"] = "auto"
-        
+
         return self.client.chat.completions.create(**completion_params)
-    
-    def get_system_message(self) -> Dict[str, str]:
-        """Get the system message for wiki context"""
-        return {"role": "system", "content": self.system_message}
