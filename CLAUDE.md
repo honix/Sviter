@@ -193,6 +193,15 @@ npm run dev             # Start Vite dev server on port 5173
 - **Flexbox Scrolling**: Use `min-h-0` on flex children to enable proper scrolling
 - **Real-time Features**: Full bidirectional communication between frontend and backend
 
+## Claude Code Web Workflow
+
+When running in **Claude Code on the web** (not CLI):
+
+- **DO NOT push directly to `main`** — use session branch only
+- Push all changes to the assigned session branch (e.g., `claude/feature-name-<session-id>`)
+- Create a PR for merging to main instead of direct push
+- The wiki submodule (`etoneto-wiki/`) can be pushed to main directly since it's a separate repo
+
 ## Real-time Agent Updates
 
 ### Branch & Page Lifecycle
