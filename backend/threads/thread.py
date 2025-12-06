@@ -1,7 +1,5 @@
 """
-Thread models for the wiki agent system.
-
-A Thread represents an autonomous agent working on a git branch.
+Thread: Agent + Branch + Conversation + Status
 """
 
 from dataclasses import dataclass, field
@@ -139,10 +137,3 @@ class Thread:
         """Set error message."""
         self.error = error
         self.updated_at = datetime.now()
-
-
-class AcceptResult(Enum):
-    """Result of accepting thread changes."""
-    SUCCESS = "success"           # Merged successfully
-    CONFLICT = "conflict"         # Merge conflict, agent will resolve
-    ERROR = "error"               # Unexpected error

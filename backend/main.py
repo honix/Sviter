@@ -1,7 +1,7 @@
 from fastapi import FastAPI, WebSocket, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from storage import GitWiki, PageNotFoundException, GitWikiException
-from api.websocket_chat import websocket_endpoint, initialize_chat_manager
+from api.session_manager import websocket_endpoint, initialize_session_manager
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uvicorn
@@ -56,8 +56,8 @@ async def startup_event():
         print(f"✅ Wiki repository loaded successfully ({WIKI_REPO_PATH})")
         print(f"📚 Found {len(wiki.list_pages())} pages")
 
-        # Initialize chat manager with wiki instance
-        initialize_chat_manager(wiki, OPENROUTER_API_KEY)
+        # Initialize session manager with wiki instance
+        initialize_session_manager(wiki, OPENROUTER_API_KEY)
     except Exception as e:
         print(f"❌ Error loading wiki repository: {e}")
 
