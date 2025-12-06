@@ -8,7 +8,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from '@/components/ui/select';
-import { MessageCircle, AlertCircle, CheckCircle, Loader2, GitBranch } from 'lucide-react';
+import { MessageCircle, AlertCircle, CheckCircle, Loader2, GitBranch, Check, XCircle } from 'lucide-react';
 import type { Thread, ThreadStatus } from '../../types/thread';
 
 interface ThreadSelectorProps {
@@ -27,13 +27,19 @@ const StatusIcon: React.FC<{ status: ThreadStatus }> = ({ status }) => {
       return <AlertCircle className="h-3 w-3 text-yellow-500" />;
     case 'review':
       return <CheckCircle className="h-3 w-3 text-green-500" />;
+    case 'accepted':
+      return <Check className="h-3 w-3 text-green-600" />;
+    case 'rejected':
+      return <XCircle className="h-3 w-3 text-red-500" />;
   }
 };
 
 const statusLabel: Record<ThreadStatus, string> = {
   'working': 'Working',
   'need_help': 'Needs help',
-  'review': 'Ready for review'
+  'review': 'Ready for review',
+  'accepted': 'Accepted',
+  'rejected': 'Rejected'
 };
 
 export function ThreadSelector({
@@ -105,7 +111,7 @@ export function ThreadSelector({
         )}
 
         {/* Thread options grouped by status */}
-        {['review', 'need_help', 'working'].map(status => {
+        {(['review', 'need_help', 'working', 'accepted', 'rejected'] as ThreadStatus[]).map(status => {
           const statusThreads = threads.filter(t => t.status === status);
           if (statusThreads.length === 0) return null;
 

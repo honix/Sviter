@@ -4,7 +4,7 @@
  * A Thread represents an autonomous agent working on a git branch.
  */
 
-export type ThreadStatus = 'working' | 'need_help' | 'review';
+export type ThreadStatus = 'working' | 'need_help' | 'review' | 'accepted' | 'rejected';
 
 export interface Thread {
   id: string;
@@ -21,7 +21,8 @@ export interface Thread {
 
 export interface ThreadMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system' | 'tool_call';
+  /** Role from backend: user, assistant, system, system_prompt, or tool_call */
+  role: 'user' | 'assistant' | 'system' | 'system_prompt' | 'tool_call';
   content: string;
   timestamp: string;
   tool_name?: string;

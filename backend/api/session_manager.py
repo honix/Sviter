@@ -87,20 +87,16 @@ class SessionManager:
         await self._start_main_session(client_id)
 
     def disconnect(self, client_id: str):
-        """Clean up connection and all sessions."""
+        """Clean up connection and main session, but keep threads."""
         # End main session
         if client_id in self.main_sessions:
             session_id = self.main_sessions.pop(client_id)
             self._cleanup_session(session_id)
 
-        # Cleanup threads (keep review threads)
-        if client_id in self.client_threads:
-            for thread_id in list(self.client_threads[client_id]):
-                thread = self._get_thread(thread_id)
-                if thread and thread.status != ThreadStatus.REVIEW:
-                    self._cleanup_thread(thread_id)
+        # Keep all threads on disconnect - user might reconnect
+        # Threads persist until explicitly accepted/rejected or server restart
 
-        # Clear client state
+        # Clear client state (but keep client_threads mapping for reconnection)
         self.client_view.pop(client_id, None)
         self.connections.pop(client_id, None)
 
@@ -293,6 +289,8 @@ class SessionManager:
         async def on_message(msg_type: str, content: str):
             if msg_type == "assistant":
                 thread.add_message("assistant", content)
+            elif msg_type == "system_prompt":
+                thread.add_message("system", content)
             await self.send_message(client_id, {
                 "type": "thread_message",
                 "thread_id": thread.id,
@@ -360,6 +358,13 @@ class SessionManager:
             # Initial turn
             initial = f"Your goal: {thread.goal}\n\nBegin working on this task."
             thread.add_message("user", initial)
+            # Send user message to frontend
+            await self.send_message(client_id, {
+                "type": "thread_message",
+                "thread_id": thread.id,
+                "role": "user",
+                "content": initial
+            })
             result = await session.executor.process_turn(initial, custom_tools=tools)
 
             # Continue until status changes
@@ -417,7 +422,7 @@ class SessionManager:
             client_threads.discard(thread_id)
 
     async def _accept_thread(self, thread_id: str) -> AcceptResult:
-        """Accept thread changes - merge to main."""
+        """Accept thread changes - merge to main, keep thread with accepted status."""
         thread = self._get_thread(thread_id)
         if not thread or thread.status != ThreadStatus.REVIEW:
             return AcceptResult.ERROR
@@ -425,13 +430,8 @@ class SessionManager:
         result = git_ops.merge_thread(self.wiki, thread.branch)
 
         if result["success"]:
-            git_ops.delete_thread_branch(self.wiki, thread.branch)
-            session_id = self.thread_sessions.pop(thread_id, None)
-            if session_id:
-                self._cleanup_session(session_id)
-            # Remove from client tracking
-            for client_threads in self.client_threads.values():
-                client_threads.discard(thread_id)
+            # Mark as accepted but keep the thread (don't delete branch or cleanup)
+            thread.set_status(ThreadStatus.ACCEPTED)
             return AcceptResult.SUCCESS
 
         if result["conflict"]:
@@ -442,12 +442,13 @@ class SessionManager:
         return AcceptResult.ERROR
 
     async def _reject_thread(self, thread_id: str) -> bool:
-        """Reject thread changes - delete branch."""
+        """Reject thread changes - mark as rejected, keep branch."""
         thread = self._get_thread(thread_id)
         if not thread:
             return False
 
-        self._cleanup_thread(thread_id)
+        # Mark as rejected but keep the thread and branch
+        thread.set_status(ThreadStatus.REJECTED)
         return True
 
     async def _resolve_conflicts(self, thread_id: str):
@@ -600,7 +601,7 @@ There are merge conflicts with the main branch. Please:
         if not session:
             return {"type": "error", "message": "Thread session not found"}
 
-        # Resume if waiting
+        # Resume if waiting for input
         if thread.status in (ThreadStatus.NEED_HELP, ThreadStatus.REVIEW):
             thread.set_status(ThreadStatus.WORKING)
             await self.send_message(client_id, {
@@ -610,8 +611,17 @@ There are merge conflicts with the main branch. Please:
                 "message": "Resuming work"
             })
 
+        # Process message if thread is working
+        if thread.status == ThreadStatus.WORKING:
             git_ops.checkout_thread(self.wiki, thread.branch)
             thread.add_message("user", user_message)
+            # Send user message to frontend
+            await self.send_message(client_id, {
+                "type": "thread_message",
+                "thread_id": thread_id,
+                "role": "user",
+                "content": user_message
+            })
             result = await session.executor.process_turn(user_message, custom_tools=session.tools)
 
             if result.status == 'error':
@@ -660,9 +670,10 @@ There are merge conflicts with the main branch. Please:
 
         if result == AcceptResult.SUCCESS:
             await self.send_message(client_id, {
-                "type": "thread_deleted",
+                "type": "thread_status",
                 "thread_id": thread_id,
-                "reason": "accepted"
+                "status": "accepted",
+                "message": "Changes merged to main"
             })
             self.client_view[client_id] = "main"
             threads = self._list_threads(client_id)
@@ -689,9 +700,10 @@ There are merge conflicts with the main branch. Please:
 
         if success:
             await self.send_message(client_id, {
-                "type": "thread_deleted",
+                "type": "thread_status",
                 "thread_id": thread_id,
-                "reason": "rejected"
+                "status": "rejected",
+                "message": "Changes rejected"
             })
             self.client_view[client_id] = "main"
             threads = self._list_threads(client_id)

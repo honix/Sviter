@@ -19,7 +19,14 @@ export interface ToolCall {
 }
 
 export interface WebSocketMessage {
-  type: 'chat' | 'chat_response' | 'tool_call' | 'system' | 'page_update' | 'error' | 'status' | 'success';
+  type:
+    | 'chat' | 'chat_response' | 'tool_call' | 'system' | 'page_update' | 'error' | 'status' | 'success'
+    // Thread messages
+    | 'thread_created' | 'thread_status' | 'thread_deleted' | 'thread_list' | 'thread_selected' | 'thread_message'
+    // Branch messages
+    | 'branch_created' | 'branch_switched' | 'branch_deleted'
+    // Page messages
+    | 'page_updated' | 'pages_changed';
   data?: any;
   message?: string;
   tool_name?: string;
@@ -29,4 +36,17 @@ export interface WebSocketMessage {
   tool_count?: number;
   iterations?: number;
   page_modified?: boolean;
+  // Thread fields
+  thread?: any;
+  thread_id?: string;
+  threads?: any[];
+  history?: any[];
+  role?: string;
+  content?: string;
+  tool_args?: any;
+  status?: string;  // Thread status (working, need_help, review, accepted, rejected)
+  // Branch fields
+  branch?: string;
+  // Page fields
+  title?: string;
 }

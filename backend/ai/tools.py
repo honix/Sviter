@@ -195,19 +195,21 @@ def _list_threads(
     list_callback: Callable[[], List[Dict[str, Any]]],
     args: Dict[str, Any]
 ) -> str:
-    """List all active threads"""
+    """List all threads"""
     try:
         threads = list_callback()
 
         if not threads:
-            return "No active threads."
+            return "No threads."
 
-        lines = ["Active threads:"]
+        lines = ["Threads:"]
         for t in threads:
             status_emoji = {
                 "working": "🔄",
                 "need_help": "⚠️",
-                "review": "✅"
+                "review": "📋",
+                "accepted": "✅",
+                "rejected": "❌"
             }.get(t['status'], "❓")
 
             lines.append(f"- {status_emoji} [{t['name']}](thread:{t['id']}) - {t['status']}")
@@ -354,7 +356,7 @@ class ToolBuilder:
             ),
             WikiTool(
                 name="list_threads",
-                description="List all active threads and their current status.",
+                description="List all threads and their current status (working, need_help, review, accepted, rejected).",
                 parameters={
                     "type": "object",
                     "properties": {},

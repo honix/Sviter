@@ -15,6 +15,8 @@ class ThreadStatus(Enum):
     WORKING = "working"      # Agent actively processing
     NEED_HELP = "need_help"  # Agent stuck, needs user input
     REVIEW = "review"        # Agent done, changes ready for review
+    ACCEPTED = "accepted"    # Changes merged to main
+    REJECTED = "rejected"    # Changes rejected
 
 
 @dataclass

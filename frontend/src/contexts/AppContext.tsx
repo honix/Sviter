@@ -306,6 +306,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const currentPageRef = useRef<Page | null>(null);
   const pagesRef = useRef<Page[]>([]);
   const pageTreeRef = useRef<TreeItem[]>([]);
+  const threadsRef = useRef<Thread[]>([]);
+  const currentBranchRef = useRef<string>('main');
+  const branchesRef = useRef<string[]>([]);
 
   // Guards to prevent concurrent loads
   const isLoadingPagesRef = useRef(false);
@@ -323,6 +326,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     pageTreeRef.current = state.pageTree;
   }, [state.pageTree]);
+
+  useEffect(() => {
+    threadsRef.current = state.threads;
+  }, [state.threads]);
+
+  useEffect(() => {
+    currentBranchRef.current = state.currentBranch;
+  }, [state.currentBranch]);
+
+  useEffect(() => {
+    branchesRef.current = state.branches;
+  }, [state.branches]);
 
   // Initialize WebSocket service
   useEffect(() => {
@@ -584,6 +599,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
+  // Shared helper: switch to a branch with loading indicator
+  const switchToBranch = useCallback(async (targetBranch: string) => {
+    const currentBranch = currentBranchRef.current;
+    if (targetBranch === currentBranch) return;
+
+    dispatch({ type: 'SET_LOADING', payload: true });
+    try {
+      await GitAPI.checkoutBranch(targetBranch);
+      dispatch({ type: 'SET_CURRENT_BRANCH', payload: targetBranch });
+      await loadPages();
+      const tree = await treeApi.getTree();
+      dispatch({ type: 'SET_PAGE_TREE', payload: tree });
+      // Refresh current page content from the new branch
+      const currentPage = currentPageRef.current;
+      if (currentPage?.title) {
+        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(currentPage.title)}`);
+        if (response.ok) {
+          const fullPage = await response.json();
+          dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to switch branch:', err);
+      dispatch({ type: 'SET_ERROR', payload: 'Failed to switch branch' });
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  }, [loadPages]);
+
   // Handle page updates from lastMessage
   // Note: page_updated and pages_changed are handled directly in the WebSocket handler above
   // to avoid duplicate loadPages() calls. Only handle other message types here.
@@ -749,11 +793,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
 
     // Thread actions
-    selectThread: (threadId: string | null) => {
+    selectThread: async (threadId: string | null) => {
       wsService.current?.send({
         type: 'select_thread',
         thread_id: threadId
       });
+
+      // Determine target branch and switch if needed
+      if (threadId) {
+        const thread = threadsRef.current.find(t => t.id === threadId);
+        if (thread?.branch) {
+          // Add branch to list if not present
+          if (!branchesRef.current.includes(thread.branch)) {
+            dispatch({ type: 'ADD_BRANCH', payload: thread.branch });
+          }
+          await switchToBranch(thread.branch);
+        }
+      } else {
+        // Deselecting thread - go back to main
+        await switchToBranch('main');
+      }
     },
     acceptThread: (threadId: string) => {
       wsService.current?.send({
@@ -831,21 +890,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshBranches: loadBranches,
 
     checkoutBranch: async (branch: string) => {
-      if (branch === state.currentBranch) return;
-
-      dispatch({ type: 'SET_LOADING', payload: true });
-      try {
-        await GitAPI.checkoutBranch(branch);
-        dispatch({ type: 'SET_CURRENT_BRANCH', payload: branch });
-        await loadPages();
-        const tree = await treeApi.getTree();
-        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
-      } catch (err) {
-        console.error('Failed to checkout branch:', err);
-        dispatch({ type: 'SET_ERROR', payload: 'Failed to switch branch' });
-      } finally {
-        dispatch({ type: 'SET_LOADING', payload: false });
-      }
+      await switchToBranch(branch);
     },
 
     createBranch: async (name: string) => {

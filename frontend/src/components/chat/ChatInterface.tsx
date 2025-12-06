@@ -18,7 +18,7 @@ import {
   PromptInputAction,
 } from '@/components/ui/prompt-input';
 import { Button } from '@/components/ui/button';
-import { ArrowUp, GitBranch, Loader2, AlertCircle, CheckCircle, Check } from 'lucide-react';
+import { ArrowUp, GitBranch, Loader2, AlertCircle, CheckCircle, Check, XCircle } from 'lucide-react';
 import type { Thread, ThreadMessage } from '../../types/thread';
 import type { ChatMessage } from '../../types/chat';
 import type { MarkdownLinkHandler } from '@/components/ui/markdown';
@@ -52,7 +52,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
       id: msg.id,
       type: msg.role === 'user' ? 'user'
           : msg.role === 'tool_call' ? 'tool_call'
-          : msg.role === 'system' ? 'system_prompt'
+          : msg.role.includes('system') ? 'system_prompt'
           : 'assistant',
       content: msg.content,
       timestamp: msg.timestamp,
@@ -107,13 +107,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
         return <AlertCircle className="h-4 w-4 text-yellow-500" />;
       case 'review':
         return <CheckCircle className="h-4 w-4 text-green-500" />;
+      case 'accepted':
+        return <Check className="h-4 w-4 text-green-600" />;
+      case 'rejected':
+        return <XCircle className="h-4 w-4 text-red-500" />;
     }
   };
 
   const statusLabel: Record<string, string> = {
     'working': 'Working...',
     'need_help': 'Needs your help',
-    'review': 'Ready for review'
+    'review': 'Ready for review',
+    'accepted': 'Accepted',
+    'rejected': 'Rejected'
   };
 
   // Link handlers for markdown links
