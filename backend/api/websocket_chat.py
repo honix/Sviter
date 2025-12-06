@@ -2,23 +2,25 @@
 WebSocket API for thread-based wiki agents.
 
 Handles:
-- Scout chat (main chat, read-only)
+- Main chat (assistant, read-only)
 - Thread chats (worker agents on branches)
 - Thread lifecycle (create, status changes, accept/reject)
 """
 
 from fastapi import WebSocket, WebSocketDisconnect
-from agents.unified_executor import UnifiedAgentExecutor
+from agents.executor import AgentExecutor
 from storage import GitWiki
-from threads import ThreadManager, ScoutAgent, get_scout_tools, AcceptResult
+from threads import ThreadManager, AcceptResult
+from threads.prompts import ASSISTANT_PROMPT
+from ai.tools import ToolBuilder
 import json
 from typing import Dict, Any, Optional
 import asyncio
 import os
 
 
-class WebSocketManager:
-    """Manages WebSocket connections and thread-based agent sessions."""
+class ChatManager:
+    """Manages chat sessions (main assistant + worker threads)."""
 
     def __init__(self, wiki: GitWiki, api_key: str = None):
         self.wiki = wiki
@@ -27,33 +29,33 @@ class WebSocketManager:
         # Connection tracking
         self.active_connections: Dict[str, WebSocket] = {}
 
-        # Scout executor per client (for main chat)
-        self.scout_executors: Dict[str, UnifiedAgentExecutor] = {}
+        # Main executor per client (for main chat)
+        self.main_executors: Dict[str, AgentExecutor] = {}
 
         # Thread manager (shared across all clients)
         self.thread_manager = ThreadManager(wiki, self.api_key)
 
-        # Current view per client: "scout" or thread_id
+        # Current view per client: "main" or thread_id
         self.client_view: Dict[str, str] = {}
 
     async def connect(self, websocket: WebSocket, client_id: str):
-        """Accept WebSocket connection and initialize scout session."""
+        """Accept WebSocket connection and initialize main session."""
         print(f"🔌 WebSocketManager.connect() called for client: {client_id}")
         await websocket.accept()
         print(f"✅ WebSocket accepted for client: {client_id}")
 
         self.active_connections[client_id] = websocket
-        self.client_view[client_id] = "scout"
+        self.client_view[client_id] = "main"
         print(f"📝 Added {client_id} to active_connections. Total: {len(self.active_connections)}")
 
-        # Initialize scout session
-        await self._start_scout_session(client_id)
+        # Initialize main session
+        await self._start_main_session(client_id)
 
-    async def _start_scout_session(self, client_id: str):
-        """Initialize scout agent session for client."""
-        # Create scout executor
-        executor = UnifiedAgentExecutor(wiki=self.wiki, api_key=self.api_key)
-        self.scout_executors[client_id] = executor
+    async def _start_main_session(self, client_id: str):
+        """Initialize main agent session for client."""
+        # Create main executor
+        executor = AgentExecutor(wiki=self.wiki, api_key=self.api_key)
+        self.main_executors[client_id] = executor
 
         # Define callbacks
         async def on_message_callback(msg_type: str, content: str):
@@ -77,21 +79,19 @@ class WebSocketManager:
                 "iteration": tool_info["iteration"]
             })
 
-            # Check if spawn_thread was called
-            if tool_info["tool_name"] == "spawn_thread":
-                # Thread was created - notify frontend
-                # (The thread is auto-started in the spawn callback)
-                pass
-
-        # Start scout session
+        # Start scout session with config dict (no agent class needed)
         session_result = await executor.start_session(
-            agent_class=ScoutAgent,
+            system_prompt=ASSISTANT_PROMPT,
+            model="claude-sonnet-4-5",
+            provider="claude",
+            human_in_loop=True,
+            agent_name="Assistant",
             on_message=on_message_callback,
             on_tool_call=on_tool_call_callback,
         )
 
         if session_result["success"]:
-            print(f"✅ Scout session started for {client_id}")
+            print(f"Main session started for {client_id}")
 
             # Send thread list on connect
             threads = self.thread_manager.list_threads(client_id)
@@ -101,7 +101,7 @@ class WebSocketManager:
                     "threads": [t.to_dict() for t in threads]
                 })
         else:
-            print(f"❌ Failed to start scout session: {session_result.get('error')}")
+            print(f"❌ Failed to start main session: {session_result.get('error')}")
             await self.send_message(client_id, {
                 "type": "error",
                 "message": f"Failed to start session: {session_result.get('error')}"
@@ -111,13 +111,13 @@ class WebSocketManager:
         """Clean up connection and resources."""
         print(f"🔌❌ WebSocketManager.disconnect() called for client: {client_id}")
 
-        # End scout session
-        if client_id in self.scout_executors:
+        # End main session
+        if client_id in self.main_executors:
             try:
-                self.scout_executors[client_id].end_session(call_on_finish=False)
+                self.main_executors[client_id].end_session(call_on_finish=False)
             except Exception as e:
-                print(f"⚠️ Error ending scout session: {e}")
-            del self.scout_executors[client_id]
+                print(f"⚠️ Error ending main session: {e}")
+            del self.main_executors[client_id]
 
         # Cleanup threads (but keep review threads)
         self.thread_manager.cleanup_client(client_id)
@@ -149,11 +149,11 @@ class WebSocketManager:
         message_type = message_data.get("type")
 
         if message_type == "chat":
-            # Route to current view (scout or thread)
-            current_view = self.client_view.get(client_id, "scout")
+            # Route to current view (main or thread)
+            current_view = self.client_view.get(client_id, "main")
 
-            if current_view == "scout":
-                return await self._handle_scout_chat(client_id, message_data)
+            if current_view == "main":
+                return await self._handle_main_chat(client_id, message_data)
             else:
                 # Viewing a thread - send message to thread
                 return await self._handle_thread_chat(client_id, current_view, message_data)
@@ -184,29 +184,29 @@ class WebSocketManager:
             return await self._handle_get_thread_diff(client_id, thread_id)
 
         elif message_type == "reset":
-            # Reset scout conversation
-            if client_id in self.scout_executors:
-                self.scout_executors[client_id].reset_conversation()
+            # Reset main conversation
+            if client_id in self.main_executors:
+                self.main_executors[client_id].reset_conversation()
 
-            # Switch to scout view
-            self.client_view[client_id] = "scout"
+            # Switch to main view
+            self.client_view[client_id] = "main"
 
-            # Restart scout session
-            await self._start_scout_session(client_id)
+            # Restart main session
+            await self._start_main_session(client_id)
             return {"type": "success", "message": "Conversation reset"}
 
         else:
             return {"type": "error", "message": f"Unknown message type: {message_type}"}
 
-    async def _handle_scout_chat(self, client_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle chat message in scout mode."""
+    async def _handle_main_chat(self, client_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle chat message in main mode."""
         user_message = message_data.get("message", "")
         if not user_message:
             return {"type": "error", "message": "Empty message"}
 
-        executor = self.scout_executors.get(client_id)
+        executor = self.main_executors.get(client_id)
         if not executor:
-            return {"type": "error", "message": "Scout session not found"}
+            return {"type": "error", "message": "Main session not found"}
 
         # Setup spawn_thread callback to create and start threads
         def spawn_thread_callback(name: str, goal: str) -> Dict[str, Any]:
@@ -221,15 +221,15 @@ class WebSocketManager:
             threads = self.thread_manager.list_threads(client_id)
             return [t.to_dict() for t in threads]
 
-        # Get scout tools with callbacks
-        scout_tools = get_scout_tools(
+        # Get main tools using ToolBuilder
+        main_tools = ToolBuilder.for_main(
             self.wiki,
             spawn_thread_callback,
             list_threads_callback
         )
 
-        # Process the message with custom scout tools
-        result = await executor.process_turn(user_message, custom_tools=scout_tools)
+        # Process the message with custom main tools
+        result = await executor.process_turn(user_message, custom_tools=main_tools)
 
         if result.status in ['completed', 'stopped']:
             return {"type": "success"}
@@ -338,13 +338,13 @@ class WebSocketManager:
             return {"type": "error", "message": "Failed to send message to thread"}
 
     async def _handle_select_thread(self, client_id: str, thread_id: Optional[str]) -> Dict[str, Any]:
-        """Handle switching to thread view or back to scout."""
+        """Handle switching to thread view or back to main."""
         if thread_id is None:
-            # Switch to scout
-            self.client_view[client_id] = "scout"
+            # Switch to main
+            self.client_view[client_id] = "main"
 
-            # Send scout conversation history
-            executor = self.scout_executors.get(client_id)
+            # Send main conversation history
+            executor = self.main_executors.get(client_id)
             if executor:
                 history = executor.get_conversation_history()
                 await self.send_message(client_id, {
@@ -388,8 +388,8 @@ class WebSocketManager:
                 "reason": "accepted"
             })
 
-            # Switch back to scout
-            self.client_view[client_id] = "scout"
+            # Switch back to main
+            self.client_view[client_id] = "main"
 
             # Send updated thread list
             threads = self.thread_manager.list_threads(client_id)
@@ -429,8 +429,8 @@ class WebSocketManager:
                 "reason": "rejected"
             })
 
-            # Switch back to scout
-            self.client_view[client_id] = "scout"
+            # Switch back to main
+            self.client_view[client_id] = "main"
 
             # Send updated thread list
             threads = self.thread_manager.list_threads(client_id)
@@ -458,25 +458,25 @@ class WebSocketManager:
             return {"type": "error", "message": "Failed to get diff stats"}
 
 
-# Global WebSocket manager instance
-websocket_manager: Optional[WebSocketManager] = None
+# Global chat manager instance
+chat_manager: Optional[ChatManager] = None
 
 
-def initialize_websocket_manager(wiki: GitWiki, api_key: str = None):
-    """Initialize the global WebSocket manager with wiki instance."""
-    global websocket_manager
-    websocket_manager = WebSocketManager(wiki, api_key)
-    print(f"✅ WebSocket manager initialized")
+def initialize_chat_manager(wiki: GitWiki, api_key: str = None):
+    """Initialize the global chat manager with wiki instance."""
+    global chat_manager
+    chat_manager = ChatManager(wiki, api_key)
+    print(f"✅ Chat manager initialized")
 
 
 async def websocket_endpoint(websocket: WebSocket, client_id: str = "default"):
     """WebSocket endpoint handler."""
-    if websocket_manager is None:
-        print("❌ WebSocket manager not initialized!")
+    if chat_manager is None:
+        print("❌ Chat manager not initialized!")
         await websocket.close(code=1011, reason="Server not ready")
         return
 
-    await websocket_manager.connect(websocket, client_id)
+    await chat_manager.connect(websocket, client_id)
 
     try:
         while True:
@@ -488,22 +488,22 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = "default"):
                 message_data = json.loads(data)
             except json.JSONDecodeError as e:
                 print(f"❌ JSON decode error: {e}")
-                await websocket_manager.send_message(client_id, {
+                await chat_manager.send_message(client_id, {
                     "type": "error",
                     "message": "Invalid JSON format"
                 })
                 continue
 
             # Handle the message
-            response = await websocket_manager.handle_message(client_id, message_data)
+            response = await chat_manager.handle_message(client_id, message_data)
 
             # Send response if needed
             if response.get("type") in ["error", "success"]:
-                await websocket_manager.send_message(client_id, response)
+                await chat_manager.send_message(client_id, response)
 
     except WebSocketDisconnect:
         print(f"🔌💔 WebSocketDisconnect for {client_id}")
-        websocket_manager.disconnect(client_id)
+        chat_manager.disconnect(client_id)
     except Exception as e:
         print(f"🔌⚠️ WebSocket error for client {client_id}: {e}")
-        websocket_manager.disconnect(client_id)
+        chat_manager.disconnect(client_id)

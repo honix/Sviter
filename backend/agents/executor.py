@@ -1,27 +1,28 @@
 """
-Agent executor - runs autonomous agents with loop control.
+Execution engine for chat and autonomous agents.
+
+Pass system_prompt, model, provider, human_in_loop to start_session.
 """
 import time
-import json
-from datetime import datetime
-from typing import Dict, Any, List, Optional
-from storage.git_wiki import GitWiki, GitWikiException
-from ai.client import OpenRouterClient
-from ai.tools import get_wiki_tools
-from .base import BaseAgent
-from .loop_controller import AgentLoopController
+import asyncio
+from typing import Dict, Any, List, Optional, Callable, Union, Awaitable
+from storage.git_wiki import GitWiki
+from ai.tools import WikiTool, ToolBuilder
+from ai.adapters import OpenRouterAdapter, LLMAdapter
+from ai.adapters.claude_sdk import ClaudeSDKAdapter, CLAUDE_SDK_AVAILABLE
 from .config import GlobalAgentConfig
 
 
 class ExecutionResult:
-    """Result of an agent execution"""
+    """Result of an agent execution (both chat and autonomous)"""
 
     def __init__(self, agent_name: str, status: str, stop_reason: str,
                  iterations: int, branch_created: Optional[str] = None,
                  pages_analyzed: int = 0, execution_time: float = 0,
-                 logs: List[str] = None, error: Optional[str] = None):
+                 logs: List[str] = None, error: Optional[str] = None,
+                 final_response: str = ""):
         self.agent_name = agent_name
-        self.status = status  # 'completed', 'stopped', 'error'
+        self.status = status  # 'completed', 'stopped', 'error', 'waiting_for_input'
         self.stop_reason = stop_reason
         self.iterations = iterations
         self.branch_created = branch_created
@@ -29,6 +30,7 @@ class ExecutionResult:
         self.execution_time = execution_time
         self.logs = logs or []
         self.error = error
+        self.final_response = final_response
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -41,257 +43,309 @@ class ExecutionResult:
             "pages_analyzed": self.pages_analyzed,
             "execution_time": self.execution_time,
             "logs": self.logs,
-            "error": self.error
+            "error": self.error,
+            "final_response": self.final_response
         }
 
 
 class AgentExecutor:
     """
-    Executes individual agent runs with proper isolation and control.
+    Execution engine for chat and autonomous agents.
+
+    Features:
+    - WebSocket streaming support via callbacks
+    - Loop control for all modes
+    - Conversation history management
     """
 
-    def __init__(self, wiki: GitWiki, api_key: str):
+    def __init__(self, wiki: GitWiki, api_key: str = None):
         """
-        Initialize agent executor.
+        Initialize unified executor.
 
         Args:
             wiki: GitWiki instance
-            api_key: OpenRouter API key
+            api_key: OpenRouter API key (optional, uses default if not provided)
         """
         self.wiki = wiki
         self.api_key = api_key
+        self.conversation_history: List[Dict[str, Any]] = []
+        self.adapter: Optional[LLMAdapter] = None
+        self.start_time: float = 0
+        self.iteration_count: int = 0
+        self.current_model: str = "anthropic/claude-sonnet-4"
+        self.current_provider: str = "openrouter"  # "openrouter" or "claude"
+        self.current_agent_class: Optional[type] = None  # Legacy: agent class
+        self.current_agent_name: str = "agent"  # Name for results
+        self.branch_created: Optional[str] = None
+        self.human_in_loop: bool = True
+        self.on_start_called: bool = False
 
-    def execute(self, agent_class: type[BaseAgent]) -> ExecutionResult:
+    async def _call_callback(self, callback: Optional[Callable], *args, **kwargs):
+        """Helper to call sync or async callbacks"""
+        if callback is None:
+            return
+        if asyncio.iscoroutinefunction(callback):
+            await callback(*args, **kwargs)
+        else:
+            callback(*args, **kwargs)
+
+    async def start_session(self,
+                           agent_class: Optional[type] = None,  # Deprecated: use config dict instead
+                           system_prompt: str = None,
+                           on_message: Union[Callable[[str, str], None], Callable[[str, str], Awaitable[None]]] = None,
+                           on_tool_call: Union[Callable[[Dict], None], Callable[[Dict], Awaitable[None]]] = None,
+                           on_branch_created: Union[Callable[[str], None], Callable[[str], Awaitable[None]]] = None,
+                           # Config dict parameters (preferred over agent_class)
+                           model: str = None,
+                           provider: str = None,
+                           human_in_loop: bool = None,
+                           agent_name: str = None) -> Dict[str, Any]:
         """
-        Execute an agent class with full loop control.
+        Start a new agent session.
+
+        Two configuration modes:
+        1. Config dict (preferred): Pass model, provider, human_in_loop, system_prompt directly
+        2. Legacy agent class: Pass agent_class for backward compatibility
 
         Args:
-            agent_class: Agent class to execute
+            agent_class: (Legacy) Agent class to execute
+            system_prompt: System prompt for the agent (required if no agent_class)
+            on_message: Callback for streaming messages (type, content)
+            on_tool_call: Callback for streaming tool calls
+            on_branch_created: Callback when branch is created
+            model: Model to use (e.g., 'claude-sonnet-4-5')
+            provider: Provider ('claude' or 'openrouter')
+            human_in_loop: If True, waits for user input between turns
+            agent_name: Name for logging/results
 
         Returns:
-            ExecutionResult
+            Session info dict
         """
-        start_time = time.time()
+        self.start_time = time.time()
+        self.iteration_count = 0
+        self.on_message = on_message
+        self.on_tool_call = on_tool_call
+        self.on_branch_created = on_branch_created
+        self.current_agent_class = agent_class
+        self.branch_created = None
+
         logs = []
-        branch_created = None
-        error = None
 
         try:
-            # Verify agent is enabled
-            if not agent_class.is_enabled():
-                return ExecutionResult(
-                    agent_name=agent_class.get_name(),
-                    status='skipped',
-                    stop_reason='agent_disabled',
-                    iterations=0,
-                    execution_time=0,
-                    logs=["Agent is disabled"]
-                )
+            # Determine configuration source
+            if agent_class is not None:
+                # Legacy mode: extract from agent class
+                self.current_agent_name = agent_class.get_name()
+                agent_prompt = system_prompt or agent_class.get_prompt()
+                self.current_model = agent_class.get_model()
+                self.current_provider = agent_class.get_provider()
+                self.human_in_loop = agent_class.human_in_loop
 
-            logs.append(f"Starting agent: {agent_class.get_name()}")
+                # Check if agent is enabled
+                if not agent_class.is_enabled():
+                    return {
+                        "success": False,
+                        "error": "Agent is disabled",
+                        "agent_name": self.current_agent_name
+                    }
+            else:
+                # Config dict mode: use direct parameters
+                if not system_prompt:
+                    return {
+                        "success": False,
+                        "error": "system_prompt is required when not using agent_class"
+                    }
 
-            # Create branch for agent work
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            branch_name = f"{agent_class.get_branch_prefix()}{timestamp}"
+                self.current_agent_name = agent_name or "agent"
+                agent_prompt = system_prompt
+                self.current_model = model or "claude-sonnet-4-5"
+                self.current_provider = provider or "claude"
+                self.human_in_loop = human_in_loop if human_in_loop is not None else True
 
-            logs.append(f"Creating branch: {branch_name}")
-            self.wiki.create_branch(branch_name, from_branch=GlobalAgentConfig.default_base_branch, checkout=True)
-            branch_created = branch_name
+            logs.append(f"Starting session: {self.current_agent_name}")
+            logs.append(f"Mode: {'interactive' if self.human_in_loop else 'autonomous'}")
+            logs.append(f"Provider: {self.current_provider}, Model: {self.current_model}")
 
-            # Initialize AI client with agent's model
-            client = OpenRouterClient(api_key=self.api_key, model=agent_class.get_model())
+            # Reset on_start flag - will be called on first process_turn
+            self.on_start_called = False
 
-            # Get wiki tools - convert to OpenAI format
-            wiki_tools = get_wiki_tools(self.wiki)
-            openai_tools = self._convert_tools_to_openai_format(wiki_tools)
-
-            # Initialize loop controller
-            loop_controller = AgentLoopController({
-                'max_iterations': GlobalAgentConfig.max_iterations,
-                'max_tools_per_iteration': GlobalAgentConfig.max_tools_per_iteration,
-                'timeout_seconds': GlobalAgentConfig.timeout_seconds,
-            })
-
-            # Build conversation history
-            conversation_history = [{
+            # Initialize conversation with system prompt
+            self.conversation_history = [{
                 "role": "system",
-                "content": agent_class.get_prompt()
-            }, {
-                "role": "user",
-                "content": "Begin your analysis."
+                "content": agent_prompt
             }]
 
-            # Execute agent loop
-            iteration = 0
-            stop_reason = "unknown"
-
-            logs.append("Entering agent loop")
-
-            while True:
-                iteration += 1
-                logs.append(f"Iteration {iteration}")
-
-                # Get AI response using OpenRouterClient
-                completion = client.create_completion(
-                    messages=conversation_history,
-                    tools=openai_tools
+            # Create adapter based on provider
+            if self.current_provider == "claude":
+                if not CLAUDE_SDK_AVAILABLE:
+                    return {
+                        "success": False,
+                        "error": "Claude SDK not available. Install with: pip install claude-agent-sdk",
+                        "agent_name": agent_name
+                    }
+                self.adapter = ClaudeSDKAdapter(
+                    system_prompt=agent_prompt,
+                    model=self.current_model
                 )
-
-                message = completion.choices[0].message
-
-                # Extract tool calls and content
-                tool_calls_raw = message.tool_calls if message.tool_calls else []
-                message_content = message.content or ""
-
-                # Add assistant response to history
-                conversation_history.append(message)
-
-                logs.append(f"AI response: {message_content[:100]}...")
-                if tool_calls_raw:
-                    logs.append(f"Tool calls: {len(tool_calls_raw)}")
-
-                # Convert tool calls to format for loop control
-                tool_calls_for_control = [
-                    {"name": tc.function.name, "arguments": json.loads(tc.function.arguments) if tc.function.arguments else {}}
-                    for tc in tool_calls_raw
-                ] if tool_calls_raw else []
-
-                # Check loop control
-                should_continue, stop_reason = loop_controller.should_continue(
-                    iteration, tool_calls_for_control, message_content
-                )
-
-                if not should_continue:
-                    logs.append(f"Stopping: {stop_reason}")
-                    break
-
-                # Process tool calls
-                if tool_calls_raw:
-                    for tool_call in tool_calls_raw:
-                        tool_name = tool_call.function.name
-                        # Sanitize tool name (remove any garbage after the actual name)
-                        if '<' in tool_name:
-                            tool_name = tool_name.split('<')[0]
-                        tool_name = tool_name.strip()
-
-                        tool_args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-
-                        logs.append(f"Executing tool: {tool_name}({tool_args})")
-
-                        # Execute tool
-                        result = self._execute_tool(tool_name, tool_args, wiki_tools)
-
-                        # Track in loop controller
-                        if tool_name == 'read_page':
-                            loop_controller.record_page_analyzed(tool_args.get('title', ''))
-                        elif tool_name == 'edit_page':
-                            loop_controller.record_change(tool_args)
-
-                        # Add tool result to conversation
-                        conversation_history.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": str(result)
-                        })
-
-            # After loop: check if changes were made
-            stats = loop_controller.get_stats()
-
-            # If no changes were made, delete the empty branch
-            # If changes were made, stay on the agent branch for review
-            if stats['changes_made'] == 0 and branch_created:
-                logs.append(f"No changes made, cleaning up branch: {branch_created}")
-                try:
-                    # Must checkout main first - can't delete current branch
-                    self.wiki.checkout_branch(GlobalAgentConfig.default_base_branch)
-                    self.wiki.delete_branch(branch_created)
-                except Exception as e:
-                    logs.append(f"Warning: Failed to delete empty branch: {e}")
             else:
-                logs.append(f"Changes made, staying on branch: {branch_created}")
+                self.adapter = OpenRouterAdapter(
+                    api_key=self.api_key,
+                    model=self.current_model
+                )
 
-            # Success
-            execution_time = time.time() - start_time
-            logs.append(f"Completed in {execution_time:.2f}s")
+            # Stream system prompt if callback provided
+            await self._call_callback(self.on_message, "system_prompt", agent_prompt)
+
+            # For autonomous agents, add initial "Begin" message
+            if not self.human_in_loop:
+                self.conversation_history.append({
+                    "role": "user",
+                    "content": "Begin your analysis."
+                })
+
+            return {
+                "success": True,
+                "agent_name": self.current_agent_name,
+                "human_in_loop": self.human_in_loop,
+                "logs": logs
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "logs": logs
+            }
+
+    async def process_turn(self, user_message: str = None, custom_tools: List[WikiTool] = None) -> ExecutionResult:
+        """
+        Process one turn of conversation.
+
+        The adapter handles the conversation loop internally:
+        - OpenRouter: Loops until no tool calls or max_turns
+        - Claude SDK: SDK manages the loop internally
+
+        Args:
+            user_message: User's message (required for human_in_loop mode)
+            custom_tools: Optional list of custom tools to use instead of default wiki tools
+
+        Returns:
+            ExecutionResult with status
+        """
+        logs = []
+
+        try:
+            # Call on_start on first turn (creates branch for AgentOnBranch)
+            if not self.on_start_called and self.current_agent_class:
+                self.on_start_called = True
+                self.branch_created = self.current_agent_class.on_start(self.wiki)
+                if self.branch_created:
+                    logs.append(f"Created branch: {self.branch_created}")
+                    await self._call_callback(self.on_branch_created, self.branch_created)
+
+            # Get tools - use custom tools if provided, otherwise default read+edit tools
+            wiki_tools = custom_tools if custom_tools is not None else (
+                ToolBuilder.wiki_read_tools(self.wiki) + ToolBuilder.wiki_edit_tools(self.wiki)
+            )
+
+            logs.append(f"Processing with {self.current_provider} adapter")
+
+            # Use adapter's process_conversation - handles loop internally
+            result = await self.adapter.process_conversation(
+                user_message=user_message or "Begin.",
+                conversation_history=self.conversation_history,
+                tools=wiki_tools,
+                max_turns=GlobalAgentConfig.max_iterations,
+                on_message=lambda t, c: self._call_callback(self.on_message, t, c),
+                on_tool_call=lambda d: self._call_callback(self.on_tool_call, d),
+            )
+
+            self.iteration_count += result.iterations
+            logs.append(f"Completed: {result.stop_reason} after {result.iterations} iterations")
 
             return ExecutionResult(
-                agent_name=agent_class.get_name(),
-                status='completed' if stop_reason in ['natural_completion', 'explicit_completion_signal'] else 'stopped',
-                stop_reason=stop_reason,
-                iterations=iteration,
-                branch_created=branch_created if stats['changes_made'] > 0 else None,
-                pages_analyzed=stats['pages_analyzed'],
-                execution_time=execution_time,
-                logs=logs
+                agent_name=self.current_agent_name,
+                status=result.status,
+                stop_reason=result.stop_reason,
+                iterations=result.iterations,
+                execution_time=time.time() - self.start_time,
+                logs=logs,
+                final_response=result.final_response,
+                error=result.error
             )
 
         except Exception as e:
-            # Error occurred
-            error = str(e)
-            logs.append(f"ERROR: {error}")
-
-            # Clean up the branch on error
-            if branch_created:
-                try:
-                    self.wiki.delete_branch(branch_created)
-                    logs.append(f"Cleaned up branch after error: {branch_created}")
-                except:
-                    pass
-
             return ExecutionResult(
-                agent_name=agent_class.get_name() if agent_class else "unknown",
+                agent_name=self.current_agent_name,
                 status='error',
                 stop_reason='exception',
-                iterations=iteration if 'iteration' in locals() else 0,
-                branch_created=branch_created,
-                execution_time=time.time() - start_time,
+                iterations=self.iteration_count,
+                execution_time=time.time() - self.start_time,
                 logs=logs,
-                error=error
+                error=str(e)
             )
 
-    def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any], tools: List[Dict]) -> Any:
+    def get_conversation_history(self) -> List[Dict[str, Any]]:
+        """Get current conversation history"""
+        return self.conversation_history.copy()
+
+    def reset_conversation(self):
+        """Reset conversation to initial state"""
+        self.conversation_history = []
+        self.adapter = None
+        self.iteration_count = 0
+        self.current_model = "anthropic/claude-sonnet-4"
+        self.current_provider = "openrouter"
+        self.current_agent_class = None
+        self.current_agent_name = "agent"
+        self.branch_created = None
+        self.human_in_loop = True
+        self.on_start_called = False
+
+    def end_session(self, call_on_finish: bool = True) -> Dict[str, Any]:
         """
-        Execute a tool by name.
+        End the session and clean up.
+
+        Calls the agent's on_finish lifecycle hook which handles:
+        - Deleting empty branches (no changes made)
+        - Keeping branches with changes for PR review
 
         Args:
-            tool_name: Name of the tool
-            tool_args: Tool arguments
-            tools: List of available tools
+            call_on_finish: If True, call agent's on_finish hook
 
         Returns:
-            Tool result
+            Dict with cleanup info:
+            - branch_deleted: Name of deleted branch (if any)
+            - switched_to_branch: Branch switched to after cleanup (if any)
         """
-        # Find tool definition
-        tool_def = next((t for t in tools if t['name'] == tool_name), None)
+        cleanup_info = {
+            "branch_deleted": None,
+            "switched_to_branch": None
+        }
 
-        if not tool_def:
-            raise ValueError(f"Tool '{tool_name}' not found")
+        if call_on_finish and self.current_agent_class:
+            try:
+                # Check if changes were made by looking at git diff
+                changes_made = 0
+                if self.branch_created:
+                    try:
+                        diff = self.wiki.get_diff(GlobalAgentConfig.default_base_branch, self.branch_created)
+                        changes_made = 1 if diff.strip() else 0
+                    except Exception:
+                        changes_made = 0
 
-        # Execute tool function
-        tool_function = tool_def.get('function')
-        if not tool_function:
-            raise ValueError(f"Tool '{tool_name}' has no function")
+                # Track if branch will be deleted (no changes made)
+                if changes_made == 0 and self.branch_created:
+                    cleanup_info["branch_deleted"] = self.branch_created
+                    cleanup_info["switched_to_branch"] = GlobalAgentConfig.default_base_branch
 
-        return tool_function(**tool_args)
+                # Call agent's on_finish lifecycle hook
+                self.current_agent_class.on_finish(
+                    self.wiki,
+                    self.branch_created,
+                    changes_made
+                )
+            except Exception as e:
+                print(f"Warning: on_finish failed: {e}")
 
-    def _convert_tools_to_openai_format(self, wiki_tools: List[Dict]) -> List[Dict]:
-        """
-        Convert wiki tools to OpenAI function calling format.
-
-        Args:
-            wiki_tools: List of wiki tool definitions
-
-        Returns:
-            List of OpenAI-formatted tool definitions
-        """
-        openai_tools = []
-        for tool in wiki_tools:
-            openai_tools.append({
-                "type": "function",
-                "function": {
-                    "name": tool['name'],
-                    "description": tool['description'],
-                    "parameters": tool['parameters']
-                }
-            })
-        return openai_tools
+        return cleanup_info

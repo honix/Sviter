@@ -1,11 +1,7 @@
 from fastapi import FastAPI, WebSocket, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from storage import GitWiki, PageNotFoundException, GitWikiException
-from api.websocket import websocket_endpoint, initialize_websocket_manager
-from agents import (
-    AgentExecutor, get_agent_by_name,
-    list_available_agents
-)
+from api.websocket_chat import websocket_endpoint, initialize_chat_manager
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uvicorn
@@ -32,9 +28,8 @@ class MoveRequest(BaseModel):
     target_parent_path: Optional[str] = None
     new_order: int
 
-# Initialize GitWiki and Agent System
+# Initialize GitWiki
 wiki = GitWiki(WIKI_REPO_PATH)
-agent_executor = AgentExecutor(wiki, OPENROUTER_API_KEY)
 
 # Create FastAPI app
 app = FastAPI(
@@ -55,14 +50,14 @@ app.add_middleware(
 # Startup event
 @app.on_event("startup")
 async def startup_event():
-    """Verify wiki repository and initialize WebSocket manager on startup"""
+    """Verify wiki repository and initialize chat manager on startup"""
     try:
         pages = wiki.list_pages(limit=1)
         print(f"✅ Wiki repository loaded successfully ({WIKI_REPO_PATH})")
         print(f"📚 Found {len(wiki.list_pages())} pages")
 
-        # Initialize WebSocket manager with wiki instance
-        initialize_websocket_manager(wiki, OPENROUTER_API_KEY)
+        # Initialize chat manager with wiki instance
+        initialize_chat_manager(wiki, OPENROUTER_API_KEY)
     except Exception as e:
         print(f"❌ Error loading wiki repository: {e}")
 
@@ -343,34 +338,6 @@ async def merge_branches(data: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Agent Management API endpoints
-@app.get("/api/agents")
-async def get_agents():
-    """Get list of all available agents"""
-    try:
-        agents = list_available_agents()
-        return {"agents": agents}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/agents/{agent_name}/run")
-async def run_agent(agent_name: str, background_tasks: BackgroundTasks):
-    """Manually trigger an agent execution"""
-    try:
-        # Get agent class
-        agent_class = get_agent_by_name(agent_name)
-
-        # Execute agent in background
-        result = agent_executor.execute(agent_class)
-
-        return {
-            "message": f"Agent '{agent_name}' executed",
-            "result": result.to_dict()
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Root endpoint with API info
@@ -390,15 +357,7 @@ async def root():
             "git_branches": "/api/git/branches",
             "git_current_branch": "/api/git/current-branch",
             "git_checkout": "POST /api/git/checkout",
-            "git_create_branch": "POST /api/git/create-branch",
-            "agents": "/api/agents",
-            "run_agent": "POST /api/agents/{agent_name}/run",
-            "pending_prs": "/api/prs/pending",
-            "recent_prs": "/api/prs/recent",
-            "pr_diff": "/api/prs/{branch}/diff",
-            "pr_stats": "/api/prs/{branch}/stats",
-            "approve_pr": "POST /api/prs/{branch}/approve",
-            "reject_pr": "POST /api/prs/{branch}/reject"
+            "git_create_branch": "POST /api/git/create-branch"
         },
         "documentation": "/docs"
     }
