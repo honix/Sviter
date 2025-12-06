@@ -4,60 +4,57 @@ import LoadingSpinner from '../common/LoadingSpinner';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
-import { AlertCircle, FileText } from 'lucide-react';
+import { AlertCircle, FileText, GitBranch, Code, Eye } from 'lucide-react';
 import { RevisionHistory } from '../revisions/RevisionHistory';
 import type { PageRevision } from '../../types/page';
 import { ProseMirrorEditor, type ProseMirrorEditorHandle } from '../editor/ProseMirrorEditor';
 import { EditorToolbar } from '../editor/EditorToolbar';
-import { BranchDiffPanel } from '../agents/BranchDiffPanel';
+import { CodeMirrorEditor } from '../editor/CodeMirrorEditor';
+import { CodeMirrorDiffView } from '../editor/CodeMirrorDiffView';
 
 const CenterPanel: React.FC = () => {
   const { state, actions } = useAppContext();
-  const { currentPage, viewMode, isLoading, error, centerPanelMode, selectedBranchForDiff } = state;
+  const { currentPage, viewMode, isLoading, error, currentBranch } = state;
   const { setViewMode, updatePage } = actions;
 
-  // All hooks must be declared before any conditional returns
-  const [currentBranch, setCurrentBranch] = useState<string>('main');
   const [editContent, setEditContent] = useState('');
   const [editContentJson, setEditContentJson] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'view' | 'edit' | 'history'>('view');
   const [viewingRevision, setViewingRevision] = useState<PageRevision | null>(null);
+  const [viewingRevisionContent, setViewingRevisionContent] = useState<string | null>(null);
   const editorRef = useRef<ProseMirrorEditorHandle>(null);
   const [editorView, setEditorView] = useState<any>(null);
 
-  // Fetch current branch on mount
-  useEffect(() => {
-    const fetchCurrentBranch = async () => {
-      try {
-        const response = await fetch('http://localhost:8000/api/git/current-branch');
-        const data = await response.json();
-        setCurrentBranch(data.branch);
-      } catch (error) {
-        console.error('Failed to fetch current branch:', error);
-      }
-    };
-    fetchCurrentBranch();
-  }, []);
+  // For main branch: 'view' | 'edit' | 'history'
+  // For other branches: 'diff' | 'history'
+  const [mainTab, setMainTab] = useState<'view' | 'edit' | 'history'>('view');
+  const [branchTab, setBranchTab] = useState<'diff' | 'history'>('diff');
+
+  // Format toggle only for main branch: 'formatted' | 'raw'
+  const [formatMode, setFormatMode] = useState<'formatted' | 'raw'>('formatted');
+
+  const isMainBranch = currentBranch === 'main';
 
   // Sync edit content when page changes
   useEffect(() => {
     if (currentPage) {
       setEditContent(currentPage.content);
       setEditContentJson(currentPage.content_json);
-      setViewingRevision(null); // Reset revision view when page changes
+      setViewingRevision(null);
+      setViewingRevisionContent(null);
     }
   }, [currentPage]);
 
-  // Sync activeTab with viewMode for backward compatibility
+  // Sync mainTab with viewMode for backward compatibility
   useEffect(() => {
-    if (viewMode === 'edit' && activeTab !== 'edit') {
-      setActiveTab('edit');
-    } else if (viewMode === 'view' && activeTab === 'edit') {
-      setActiveTab('view');
+    if (isMainBranch) {
+      if (viewMode === 'edit' && mainTab !== 'edit') {
+        setMainTab('edit');
+      } else if (viewMode === 'view' && mainTab === 'edit') {
+        setMainTab('view');
+      }
     }
-  }, [viewMode]);
+  }, [viewMode, isMainBranch]);
 
-  // Handle editor view ready
   const handleEditorViewReady = (view: any) => {
     setEditorView(view);
   };
@@ -70,7 +67,7 @@ const CenterPanel: React.FC = () => {
       });
     }
     setViewMode('view');
-    setActiveTab('view');
+    setMainTab('view');
   };
 
   const handleCancel = () => {
@@ -79,7 +76,7 @@ const CenterPanel: React.FC = () => {
       setEditContentJson(currentPage.content_json);
     }
     setViewMode('view');
-    setActiveTab('view');
+    setMainTab('view');
   };
 
   const handleEditorChange = (docJson: any, markdown: string) => {
@@ -87,13 +84,35 @@ const CenterPanel: React.FC = () => {
     setEditContent(markdown);
   };
 
-  const handleRevisionSelect = (revision: PageRevision) => {
-    setViewingRevision(revision);
-    setActiveTab('view');
+  const handleCodeMirrorChange = (content: string) => {
+    setEditContent(content);
+    setEditContentJson(null);
   };
 
-  const handleTabChange = (value: string) => {
-    setActiveTab(value as 'view' | 'edit' | 'history');
+  const handleRevisionSelect = async (revision: PageRevision) => {
+    setViewingRevision(revision);
+    setViewingRevisionContent(null); // Clear while loading
+    if (isMainBranch) {
+      setMainTab('view');
+    }
+    // Fetch revision content
+    if (currentPage) {
+      try {
+        const response = await fetch(
+          `http://localhost:8000/api/pages/${encodeURIComponent(currentPage.path)}/at-ref?ref=${revision.sha}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          setViewingRevisionContent(data.content || '');
+        }
+      } catch (err) {
+        console.error('Failed to fetch revision content:', err);
+      }
+    }
+  };
+
+  const handleMainTabChange = (value: string) => {
+    setMainTab(value as 'view' | 'edit' | 'history');
     if (value === 'edit') {
       setViewMode('edit');
       setViewingRevision(null);
@@ -107,10 +126,9 @@ const CenterPanel: React.FC = () => {
     }
   };
 
-  // If in branch diff mode, show branch diff panel
-  if (centerPanelMode === 'branch-diff' && selectedBranchForDiff) {
-    return <BranchDiffPanel branch={selectedBranchForDiff} currentBranch={currentBranch} />;
-  }
+  const handleBranchTabChange = (value: string) => {
+    setBranchTab(value as 'diff' | 'history');
+  };
 
   if (isLoading) {
     return (
@@ -156,6 +174,142 @@ const CenterPanel: React.FC = () => {
     );
   }
 
+  // Main branch: View | Edit | History with Formatted/Raw toggle
+  if (isMainBranch) {
+    return (
+      <div className="h-full bg-background flex flex-col">
+        {/* Header */}
+        <div className="border-b border-border p-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold text-foreground">
+              {currentPage.title}
+            </h1>
+            {viewMode === 'edit' && (
+              <div className="flex gap-2">
+                <Button onClick={handleSave} size="sm">
+                  Save
+                </Button>
+                <Button onClick={handleCancel} variant="outline" size="sm">
+                  Cancel
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Content Area with Tabs */}
+        <div className="flex-1 overflow-hidden">
+          <Tabs
+            value={mainTab}
+            onValueChange={handleMainTabChange}
+            className="h-full flex flex-col"
+          >
+            <div className="flex items-center justify-between mx-4 mt-4">
+              <TabsList>
+                <TabsTrigger value="view">View</TabsTrigger>
+                <TabsTrigger value="edit">Edit</TabsTrigger>
+                <TabsTrigger value="history">History</TabsTrigger>
+              </TabsList>
+
+              {/* Format toggle for View and Edit tabs */}
+              {(mainTab === 'view' || mainTab === 'edit') && (
+                <Tabs value={formatMode} onValueChange={(v) => setFormatMode(v as 'formatted' | 'raw')}>
+                  <TabsList>
+                    <TabsTrigger value="formatted">
+                      <Eye className="h-4 w-4 mr-1.5" />
+                      Formatted
+                    </TabsTrigger>
+                    <TabsTrigger value="raw">
+                      <Code className="h-4 w-4 mr-1.5" />
+                      Raw
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              )}
+            </div>
+
+            <TabsContent value="view" className="flex-1 overflow-hidden mt-0 flex flex-col">
+              {viewingRevision && (
+                <div className="px-6 pt-4 pb-2">
+                  <div className="p-3 bg-accent rounded-lg border border-accent-foreground/20">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">
+                        Viewing Revision {viewingRevision.short_sha}
+                        {viewingRevision.message && ` - ${viewingRevision.message}`}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setViewingRevision(null);
+                          setViewingRevisionContent(null);
+                        }}
+                      >
+                        Back to current
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="flex-1 overflow-auto min-h-0">
+                {viewingRevision && viewingRevisionContent === null ? (
+                  <div className="p-4 text-muted-foreground">Loading revision...</div>
+                ) : formatMode === 'raw' ? (
+                  <CodeMirrorEditor
+                    content={viewingRevisionContent ?? currentPage.content ?? ''}
+                    editable={false}
+                    className="h-full"
+                  />
+                ) : (
+                  <ProseMirrorEditor
+                    key={`view-${currentPage.title}-${viewingRevision?.sha || 'current'}`}
+                    initialContent={viewingRevisionContent ?? currentPage.content ?? ''}
+                    editable={false}
+                    className="h-full"
+                  />
+                )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="edit" className="flex-1 overflow-hidden mt-0 flex flex-col">
+              {formatMode === 'formatted' && <EditorToolbar editorView={editorView} />}
+              <div className="flex-1 overflow-hidden min-h-0">
+                {formatMode === 'raw' ? (
+                  <CodeMirrorEditor
+                    content={editContent}
+                    editable={true}
+                    onChange={handleCodeMirrorChange}
+                    className="h-full"
+                  />
+                ) : (
+                  <ProseMirrorEditor
+                    key={`edit-${currentPage.title}`}
+                    ref={editorRef}
+                    initialContent={currentPage.content || ''}
+                    editable={true}
+                    onChange={handleEditorChange}
+                    onViewReady={handleEditorViewReady}
+                    className="h-full"
+                  />
+                )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="history" className="flex-1 overflow-hidden mt-0 flex flex-col">
+              <div className="flex-1 overflow-hidden">
+                <RevisionHistory
+                  pageTitle={currentPage.title}
+                  onRevisionSelect={handleRevisionSelect}
+                />
+              </div>
+            </TabsContent>
+          </Tabs>
+        </div>
+      </div>
+    );
+  }
+
+  // Other branches: Diff | History (no format toggle, always raw)
   return (
     <div className="h-full bg-background flex flex-col">
       {/* Header */}
@@ -164,73 +318,39 @@ const CenterPanel: React.FC = () => {
           <h1 className="text-2xl font-bold text-foreground">
             {currentPage.title}
           </h1>
-
-          {viewMode === 'edit' && (
-            <div className="flex gap-2">
-              <Button onClick={handleSave} size="sm">
-                Save
-              </Button>
-              <Button onClick={handleCancel} variant="outline" size="sm">
-                Cancel
-              </Button>
-            </div>
-          )}
         </div>
       </div>
 
       {/* Content Area with Tabs */}
       <div className="flex-1 overflow-hidden">
         <Tabs
-          value={activeTab}
-          onValueChange={handleTabChange}
+          value={branchTab}
+          onValueChange={handleBranchTabChange}
           className="h-full flex flex-col"
         >
-          <TabsList className="mx-4 mt-4">
-            <TabsTrigger value="view">View</TabsTrigger>
-            <TabsTrigger value="edit">Edit</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
-          </TabsList>
+          <div className="flex items-center justify-between mx-4 mt-4">
+            <TabsList>
+              <TabsTrigger value="diff">
+                <GitBranch className="h-4 w-4 mr-1.5" />
+                Diff
+              </TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="view" className="flex-1 overflow-hidden mt-0 flex flex-col">
-            {viewingRevision && (
-              <div className="px-6 pt-4 pb-2">
-                <div className="p-3 bg-accent rounded-lg border border-accent-foreground/20">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">
-                      Viewing Revision {viewingRevision.short_sha}
-                      {viewingRevision.message && ` - ${viewingRevision.message}`}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setViewingRevision(null)}
-                    >
-                      Back to current
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div className="flex-1 overflow-hidden">
-              <ProseMirrorEditor
-                key={`view-${currentPage.title}`}
-                initialContent={currentPage.content || ''}
-                editable={false}
-                className="h-full"
-              />
+            {/* Branch indicator */}
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 rounded-lg border border-blue-500/20">
+              <GitBranch className="h-4 w-4 text-blue-500" />
+              <span className="text-sm text-blue-600 dark:text-blue-400">
+                <code className="font-mono">{currentBranch}</code> vs main
+              </span>
             </div>
-          </TabsContent>
+          </div>
 
-          <TabsContent value="edit" className="flex-1 overflow-hidden mt-0 flex flex-col">
-            <EditorToolbar editorView={editorView} />
-            <div className="flex-1 overflow-hidden">
-              <ProseMirrorEditor
-                key={`edit-${currentPage.title}`}
-                ref={editorRef}
-                initialContent={currentPage.content || ''}
-                editable={true}
-                onChange={handleEditorChange}
-                onViewReady={handleEditorViewReady}
+          <TabsContent value="diff" className="flex-1 overflow-hidden mt-0 flex flex-col">
+            <div className="flex-1 overflow-auto min-h-0">
+              <CodeMirrorDiffView
+                currentContent={currentPage.content || ''}
+                pagePath={currentPage.path}
                 className="h-full"
               />
             </div>

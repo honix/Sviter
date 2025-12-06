@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -17,6 +17,14 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Plus, FileText, FolderPlus, GripVertical, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+// Type for diff stats per page
+interface DiffStats {
+  [pagePath: string]: {
+    additions: number;
+    deletions: number;
+  };
+}
 
 interface PageTreeProps {
   tree: TreeItem[];
@@ -111,6 +119,37 @@ const PageTree: React.FC<PageTreeProps> = ({
 }) => {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  const [currentBranch, setCurrentBranch] = useState<string>('main');
+  const [diffStats, setDiffStats] = useState<DiffStats>({});
+
+  // Fetch current branch and diff stats
+  useEffect(() => {
+    const fetchBranchAndStats = async () => {
+      try {
+        // Fetch current branch
+        const branchResponse = await fetch('http://localhost:8000/api/git/current-branch');
+        const branchData = await branchResponse.json();
+        setCurrentBranch(branchData.branch);
+
+        // If not on main, fetch diff stats
+        if (branchData.branch !== 'main') {
+          const statsResponse = await fetch('http://localhost:8000/api/git/diff-stats-by-page');
+          const statsData = await statsResponse.json();
+          setDiffStats(statsData.stats || {});
+        } else {
+          setDiffStats({});
+        }
+      } catch (error) {
+        console.error('Failed to fetch branch/diff stats:', error);
+      }
+    };
+
+    fetchBranchAndStats();
+
+    // Re-fetch when pages change (in case branch changed)
+    const interval = setInterval(fetchBranchAndStats, 5000);
+    return () => clearInterval(interval);
+  }, [pages]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -299,6 +338,10 @@ const PageTree: React.FC<PageTreeProps> = ({
     }
 
     // Page item
+    // Get diff stats for this page
+    const pageStats = diffStats[item.path];
+    const hasChanges = pageStats && (pageStats.additions > 0 || pageStats.deletions > 0);
+
     return (
       <div
         className={cn(
@@ -312,6 +355,27 @@ const PageTree: React.FC<PageTreeProps> = ({
         <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab flex-shrink-0" />
         <FileText className="h-4 w-4 flex-shrink-0" />
         <span className="text-sm flex-1 truncate">{item.title}</span>
+        {/* Diff stats badge */}
+        {hasChanges && (
+          <span className="text-xs flex gap-1 flex-shrink-0 mr-1">
+            {pageStats.additions > 0 && (
+              <span className={cn(
+                "text-green-600 dark:text-green-400",
+                isSelected && "text-green-300"
+              )}>
+                +{pageStats.additions}
+              </span>
+            )}
+            {pageStats.deletions > 0 && (
+              <span className={cn(
+                "text-red-500 dark:text-red-400",
+                isSelected && "text-red-300"
+              )}>
+                -{pageStats.deletions}
+              </span>
+            )}
+          </span>
+        )}
         <Button
           variant="ghost"
           size="icon"

@@ -116,6 +116,15 @@ async def get_page_at_revision(title: str, commit_sha: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/pages/{title:path}/at-ref")
+async def get_page_at_ref(title: str, ref: str = "main"):
+    """Get page content at specific git ref (branch/commit/tag)"""
+    try:
+        content = wiki.get_page_content_at_ref(title, ref)
+        return {"content": content, "exists": bool(content)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/pages/{title:path}")
 async def get_page(title: str):
     """Get a specific page by title"""
@@ -312,6 +321,18 @@ async def get_branch_diff_stats(branch1: str, branch2: str):
         return {"branch1": branch1, "branch2": branch2, "stats": stats}
     except GitWikiException as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/git/diff-stats-by-page")
+async def get_diff_stats_by_page(base: str = "main"):
+    """Get per-page diff stats vs base branch"""
+    try:
+        current = wiki.get_current_branch()
+        if current == base:
+            return {"stats": {}}
+        stats = wiki.get_diff_stats_by_page(base, current)
+        return {"stats": stats}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
