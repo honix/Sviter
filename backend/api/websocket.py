@@ -1,44 +1,62 @@
+"""
+WebSocket API for thread-based wiki agents.
+
+Handles:
+- Scout chat (main chat, read-only)
+- Thread chats (worker agents on branches)
+- Thread lifecycle (create, status changes, accept/reject)
+"""
+
 from fastapi import WebSocket, WebSocketDisconnect
 from agents.unified_executor import UnifiedAgentExecutor
-from agents.chat_agent import ChatAgent
 from storage import GitWiki
+from threads import ThreadManager, ScoutAgent, get_scout_tools, AcceptResult
 import json
 from typing import Dict, Any, Optional
 import asyncio
 import os
 
+
 class WebSocketManager:
-    """Manages WebSocket connections and unified agent sessions"""
+    """Manages WebSocket connections and thread-based agent sessions."""
 
     def __init__(self, wiki: GitWiki, api_key: str = None):
         self.wiki = wiki
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+
+        # Connection tracking
         self.active_connections: Dict[str, WebSocket] = {}
-        self.executors: Dict[str, UnifiedAgentExecutor] = {}
-        self.session_info: Dict[str, Dict[str, Any]] = {}  # Track session metadata
-    
-    async def connect(self, websocket: WebSocket, client_id: str, agent_name: str = None):
-        """Accept WebSocket connection and initialize unified executor session"""
-        print(f"🔌 WebSocketManager.connect() called for client: {client_id}, agent: {agent_name or 'ChatAgent'}")
+
+        # Scout executor per client (for main chat)
+        self.scout_executors: Dict[str, UnifiedAgentExecutor] = {}
+
+        # Thread manager (shared across all clients)
+        self.thread_manager = ThreadManager(wiki, self.api_key)
+
+        # Current view per client: "scout" or thread_id
+        self.client_view: Dict[str, str] = {}
+
+    async def connect(self, websocket: WebSocket, client_id: str):
+        """Accept WebSocket connection and initialize scout session."""
+        print(f"🔌 WebSocketManager.connect() called for client: {client_id}")
         await websocket.accept()
         print(f"✅ WebSocket accepted for client: {client_id}")
 
         self.active_connections[client_id] = websocket
-        print(f"📝 Added {client_id} to active_connections. Total connections: {len(self.active_connections)}")
+        self.client_view[client_id] = "scout"
+        print(f"📝 Added {client_id} to active_connections. Total: {len(self.active_connections)}")
 
-        # Initialize unified executor
-        self.executors[client_id] = UnifiedAgentExecutor(wiki=self.wiki, api_key=self.api_key)
-        print(f"🤖 Created executor for {client_id}. Total executors: {len(self.executors)}")
+        # Initialize scout session
+        await self._start_scout_session(client_id)
 
-        # Start session with ChatAgent (human-in-the-loop mode) unless specific agent requested
-        if agent_name:
-            # TODO: For future - support starting with specific agent
-            # For now, always use ChatAgent for WebSocket connections
-            agent_name = "ChatAgent"
+    async def _start_scout_session(self, client_id: str):
+        """Initialize scout agent session for client."""
+        # Create scout executor
+        executor = UnifiedAgentExecutor(wiki=self.wiki, api_key=self.api_key)
+        self.scout_executors[client_id] = executor
 
-        # Define callbacks for streaming
+        # Define callbacks
         async def on_message_callback(msg_type: str, content: str):
-            """Stream messages to client"""
             if msg_type == "system_prompt":
                 await self.send_message(client_id, {
                     "type": "system_prompt",
@@ -51,7 +69,6 @@ class WebSocketManager:
                 })
 
         async def on_tool_call_callback(tool_info: Dict[str, Any]):
-            """Stream tool calls to client"""
             await self.send_message(client_id, {
                 "type": "tool_call",
                 "tool_name": tool_info["tool_name"],
@@ -59,64 +76,62 @@ class WebSocketManager:
                 "result": tool_info["result"],
                 "iteration": tool_info["iteration"]
             })
-            # Send page_updated for live page updates in center panel
-            if tool_info["tool_name"] == "edit_page":
-                await self.send_message(client_id, {
-                    "type": "page_updated",
-                    "title": tool_info["arguments"].get("title"),
-                    "content": tool_info["result"]
-                })
 
-        async def on_branch_created_callback(branch_name: str):
-            """Send branch_created and branch_switched messages immediately"""
-            await self.send_message(client_id, {
-                "type": "branch_created",
-                "branch": branch_name
-            })
-            await self.send_message(client_id, {
-                "type": "branch_switched",
-                "branch": branch_name
-            })
+            # Check if spawn_thread was called
+            if tool_info["tool_name"] == "spawn_thread":
+                # Thread was created - notify frontend
+                # (The thread is auto-started in the spawn callback)
+                pass
 
-        session_result = await self.executors[client_id].start_session(
-            agent_class=ChatAgent,
+        # Start scout session
+        session_result = await executor.start_session(
+            agent_class=ScoutAgent,
             on_message=on_message_callback,
             on_tool_call=on_tool_call_callback,
-            on_branch_created=on_branch_created_callback
         )
 
         if session_result["success"]:
-            self.session_info[client_id] = session_result
-            print(f"✅ Session started for {client_id}: {session_result['agent_name']}")
+            print(f"✅ Scout session started for {client_id}")
+
+            # Send thread list on connect
+            threads = self.thread_manager.list_threads(client_id)
+            if threads:
+                await self.send_message(client_id, {
+                    "type": "thread_list",
+                    "threads": [t.to_dict() for t in threads]
+                })
         else:
-            print(f"❌ Failed to start session for {client_id}: {session_result.get('error')}")
+            print(f"❌ Failed to start scout session: {session_result.get('error')}")
             await self.send_message(client_id, {
                 "type": "error",
                 "message": f"Failed to start session: {session_result.get('error')}"
             })
-    
+
     def disconnect(self, client_id: str):
-        """Clean up connection and resources"""
+        """Clean up connection and resources."""
         print(f"🔌❌ WebSocketManager.disconnect() called for client: {client_id}")
 
-        # End session and cleanup
-        if client_id in self.executors:
+        # End scout session
+        if client_id in self.scout_executors:
             try:
-                self.executors[client_id].end_session()
+                self.scout_executors[client_id].end_session(call_on_finish=False)
             except Exception as e:
-                print(f"⚠️ Error ending session for {client_id}: {e}")
-            del self.executors[client_id]
-            print(f"🗑️ Removed executor for {client_id}. Remaining: {len(self.executors)}")
+                print(f"⚠️ Error ending scout session: {e}")
+            del self.scout_executors[client_id]
 
-        if client_id in self.session_info:
-            del self.session_info[client_id]
+        # Cleanup threads (but keep review threads)
+        self.thread_manager.cleanup_client(client_id)
+
+        # Remove connection
+        if client_id in self.client_view:
+            del self.client_view[client_id]
 
         if client_id in self.active_connections:
             del self.active_connections[client_id]
-            print(f"🗑️ Removed {client_id} from active_connections. Remaining: {len(self.active_connections)}")
-    
+            print(f"🗑️ Removed {client_id}. Remaining: {len(self.active_connections)}")
+
     async def send_message(self, client_id: str, message: Dict[str, Any]):
-        """Send message to specific client"""
+        """Send message to specific client."""
         if client_id in self.active_connections:
             try:
                 await self.active_connections[client_id].send_text(json.dumps(message))
@@ -124,273 +139,335 @@ class WebSocketManager:
             except Exception as e:
                 error_msg = str(e)
                 print(f"❌ Error sending message to {client_id}: {error_msg}")
-                print(f"❌ Failed message type: {message.get('type', 'unknown')}")
-                # Only disconnect if it's a serious error, not just Firefox close frame issues
                 if "no close frame" not in error_msg.lower() and "connection closed" in error_msg.lower():
-                    print(f"🔌 Disconnecting {client_id} due to serious send error")
                     self.disconnect(client_id)
-                else:
-                    print(f"⚠️ Ignoring minor WebSocket error for {client_id}")
-        else:
-            print(f"⚠️ Client {client_id} not in active connections, cannot send: {message.get('type', 'unknown')}")
-    
+
     async def handle_message(self, client_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle incoming message from client"""
-
+        """Handle incoming message from client."""
         print(f"📨 WebSocket received message from {client_id}: {message_data}")
-        print(f"🔍 Current active_connections: {list(self.active_connections.keys())}")
-        print(f"🔍 Current executors: {list(self.executors.keys())}")
-
-        if client_id not in self.executors:
-            print(f"❌ Executor not found for client {client_id}")
-            print(f"❌ Available executors: {list(self.executors.keys())}")
-            return {"type": "error", "message": "Executor not found"}
 
         message_type = message_data.get("type")
-        print(f"🔍 Processing message type: {message_type}")
 
         if message_type == "chat":
-            # Handle chat message
-            user_message = message_data.get("message", "")
-            print(f"💬 Chat message content: '{user_message}'")
-            if not user_message:
-                print("❌ Empty message received")
-                return {"type": "error", "message": "Empty message"}
+            # Route to current view (scout or thread)
+            current_view = self.client_view.get(client_id, "scout")
 
-            print(f"🤖 Processing chat message with unified executor...")
-
-            # Process turn through unified executor (runs until stopped or needs input)
-            result = await self.executors[client_id].process_turn(user_message)
-
-            print(f"🔄 Execution result status: {result.status}")
-
-            if result.status in ['completed', 'stopped']:
-                # Success - messages and tool calls were already streamed via callbacks
-                return {"type": "success"}
-            elif result.status == 'error':
-                return {"type": "error", "message": result.error}
+            if current_view == "scout":
+                return await self._handle_scout_chat(client_id, message_data)
             else:
-                return {"type": "error", "message": f"Unexpected status: {result.status}"}
+                # Viewing a thread - send message to thread
+                return await self._handle_thread_chat(client_id, current_view, message_data)
 
-        elif message_type == "select_agent":
-            # Switch to a different agent (clears conversation)
-            agent_name = message_data.get("agent_name", "")
-            if not agent_name:
-                return {"type": "error", "message": "Agent name is required"}
+        elif message_type == "select_thread":
+            # Switch view to thread or scout
+            thread_id = message_data.get("thread_id")
+            return await self._handle_select_thread(client_id, thread_id)
 
-            print(f"🔄 Switching to agent: {agent_name}")
+        elif message_type == "accept_thread":
+            thread_id = message_data.get("thread_id")
+            return await self._handle_accept_thread(client_id, thread_id)
 
-            # Import agent classes
-            from agents import get_agent_by_name
+        elif message_type == "reject_thread":
+            thread_id = message_data.get("thread_id")
+            return await self._handle_reject_thread(client_id, thread_id)
 
-            # Get the agent class
-            try:
-                agent_class = get_agent_by_name(agent_name)
-            except ValueError:
-                return {"type": "error", "message": f"Agent '{agent_name}' not found"}
-
-            # Reset conversation
-            self.executors[client_id].reset_conversation()
-
-            # Send agent_selected FIRST so frontend clears messages before receiving new prompt
+        elif message_type == "get_thread_list":
+            threads = self.thread_manager.list_threads(client_id)
             await self.send_message(client_id, {
-                "type": "agent_selected",
-                "agent_name": agent_name,
-                "human_in_loop": agent_class.human_in_loop
+                "type": "thread_list",
+                "threads": [t.to_dict() for t in threads]
             })
+            return {"type": "success"}
 
-            # Setup streaming callbacks
-            async def on_message_callback(msg_type: str, content: str):
-                """Stream messages to client"""
-                if msg_type == "system_prompt":
-                    await self.send_message(client_id, {
-                        "type": "system_prompt",
-                        "content": content
-                    })
-                elif msg_type == "assistant":
-                    await self.send_message(client_id, {
-                        "type": "chat_response",
-                        "message": content
-                    })
-
-            async def on_tool_call_callback(tool_info: Dict[str, Any]):
-                """Stream tool calls to client"""
-                await self.send_message(client_id, {
-                    "type": "tool_call",
-                    "tool_name": tool_info["tool_name"],
-                    "arguments": tool_info["arguments"],
-                    "result": tool_info["result"],
-                    "iteration": tool_info["iteration"]
-                })
-                # Send page_updated for live page updates in center panel
-                if tool_info["tool_name"] == "edit_page":
-                    await self.send_message(client_id, {
-                        "type": "page_updated",
-                        "title": tool_info["arguments"].get("title"),
-                        "content": tool_info["result"]
-                    })
-
-            async def on_branch_created_callback(branch_name: str):
-                """Send branch_created and branch_switched messages immediately"""
-                await self.send_message(client_id, {
-                    "type": "branch_created",
-                    "branch": branch_name
-                })
-                await self.send_message(client_id, {
-                    "type": "branch_switched",
-                    "branch": branch_name
-                })
-
-            session_result = await self.executors[client_id].start_session(
-                agent_class=agent_class,
-                on_message=on_message_callback,
-                on_tool_call=on_tool_call_callback,
-                on_branch_created=on_branch_created_callback
-            )
-
-            if session_result["success"]:
-                self.session_info[client_id] = session_result
-                return {"type": "success"}
-            else:
-                return {"type": "error", "message": f"Failed to select agent: {session_result.get('error')}"}
-
-        elif message_type == "run_agent":
-            # Run the current agent (for AgentOnBranch agents that need explicit "Run" trigger)
-            print(f"🤖 Running current agent")
-
-            executor = self.executors[client_id]
-
-            # Run agent execution (without user input)
-            result = await executor.process_turn()
-
-            print(f"🔄 Agent execution result: {result.status}")
-
-            # Note: branch_created/switched messages are now sent immediately via on_branch_created callback
-            branch_created = executor.branch_created
-
-            # Clean up - call on_finish lifecycle hook (handles branch cleanup)
-            cleanup_info = executor.end_session(call_on_finish=True)
-
-            # Send branch cleanup notifications if branch was deleted (no changes made)
-            if cleanup_info.get("branch_deleted"):
-                await self.send_message(client_id, {
-                    "type": "branch_deleted",
-                    "branch": cleanup_info["branch_deleted"]
-                })
-                await self.send_message(client_id, {
-                    "type": "branch_switched",
-                    "branch": cleanup_info["switched_to_branch"]
-                })
-
-            # Send completion message
-            await self.send_message(client_id, {
-                "type": "agent_complete",
-                "status": result.status,
-                "iterations": result.iterations,
-                "branch_created": branch_created if not cleanup_info.get("branch_deleted") else None
-            })
-
-            return {"type": "success", "result": result.to_dict()}
+        elif message_type == "get_thread_diff":
+            thread_id = message_data.get("thread_id")
+            return await self._handle_get_thread_diff(client_id, thread_id)
 
         elif message_type == "reset":
-            # Reset conversation - restart session
-            print(f"🔄 Resetting session for {client_id}")
-            self.executors[client_id].reset_conversation()
+            # Reset scout conversation
+            if client_id in self.scout_executors:
+                self.scout_executors[client_id].reset_conversation()
 
-            # Restart session with same configuration
-            session_info = self.session_info.get(client_id, {})
+            # Switch to scout view
+            self.client_view[client_id] = "scout"
 
-            # Re-setup callbacks
-            async def on_message_callback(msg_type: str, content: str):
-                """Stream messages to client"""
-                if msg_type == "system_prompt":
-                    await self.send_message(client_id, {
-                        "type": "system_prompt",
-                        "content": content
-                    })
-                elif msg_type == "assistant":
-                    await self.send_message(client_id, {
-                        "type": "chat_response",
-                        "message": content
-                    })
-
-            async def on_tool_call_callback(tool_info: Dict[str, Any]):
-                """Stream tool calls to client"""
-                await self.send_message(client_id, {
-                    "type": "tool_call",
-                    "tool_name": tool_info["tool_name"],
-                    "arguments": tool_info["arguments"],
-                    "result": tool_info["result"],
-                    "iteration": tool_info["iteration"]
-                })
-                # Send page_updated for live page updates in center panel
-                if tool_info["tool_name"] == "edit_page":
-                    await self.send_message(client_id, {
-                        "type": "page_updated",
-                        "title": tool_info["arguments"].get("title"),
-                        "content": tool_info["result"]
-                    })
-
-            async def on_branch_created_callback(branch_name: str):
-                """Send branch_created and branch_switched messages immediately"""
-                await self.send_message(client_id, {
-                    "type": "branch_created",
-                    "branch": branch_name
-                })
-                await self.send_message(client_id, {
-                    "type": "branch_switched",
-                    "branch": branch_name
-                })
-
-            session_result = await self.executors[client_id].start_session(
-                agent_class=ChatAgent,
-                on_message=on_message_callback,
-                on_tool_call=on_tool_call_callback,
-                on_branch_created=on_branch_created_callback
-            )
-
-            if session_result["success"]:
-                self.session_info[client_id] = session_result
-                return {"type": "success", "message": "Conversation reset"}
-            else:
-                return {"type": "error", "message": f"Failed to reset: {session_result.get('error')}"}
-
-        elif message_type == "get_history":
-            # Get conversation history
-            history = self.executors[client_id].get_conversation_history()
-            return {"type": "history", "data": history}
+            # Restart scout session
+            await self._start_scout_session(client_id)
+            return {"type": "success", "message": "Conversation reset"}
 
         else:
             return {"type": "error", "message": f"Unknown message type: {message_type}"}
 
-# Global WebSocket manager instance - will be initialized in main.py
+    async def _handle_scout_chat(self, client_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle chat message in scout mode."""
+        user_message = message_data.get("message", "")
+        if not user_message:
+            return {"type": "error", "message": "Empty message"}
+
+        executor = self.scout_executors.get(client_id)
+        if not executor:
+            return {"type": "error", "message": "Scout session not found"}
+
+        # Setup spawn_thread callback to create and start threads
+        def spawn_thread_callback(name: str, goal: str) -> Dict[str, Any]:
+            thread = self.thread_manager.create_thread(name, goal, client_id)
+
+            # Start thread in background
+            asyncio.create_task(self._start_thread_with_notifications(client_id, thread.id))
+
+            return thread.to_dict()
+
+        def list_threads_callback():
+            threads = self.thread_manager.list_threads(client_id)
+            return [t.to_dict() for t in threads]
+
+        # Get scout tools with callbacks
+        scout_tools = get_scout_tools(
+            self.wiki,
+            spawn_thread_callback,
+            list_threads_callback
+        )
+
+        # Process the message with custom scout tools
+        result = await executor.process_turn(user_message, custom_tools=scout_tools)
+
+        if result.status in ['completed', 'stopped']:
+            return {"type": "success"}
+        elif result.status == 'error':
+            return {"type": "error", "message": result.error}
+        else:
+            return {"type": "error", "message": f"Unexpected status: {result.status}"}
+
+    async def _start_thread_with_notifications(self, client_id: str, thread_id: str):
+        """Start thread and send WebSocket notifications."""
+        thread = self.thread_manager.get_thread(thread_id)
+        if not thread:
+            return
+
+        # Notify thread created
+        await self.send_message(client_id, {
+            "type": "thread_created",
+            "thread": thread.to_dict()
+        })
+
+        # Define callbacks for thread execution
+        async def on_message(msg_type: str, content: str):
+            await self.send_message(client_id, {
+                "type": "thread_message",
+                "thread_id": thread_id,
+                "role": msg_type,
+                "content": content
+            })
+
+        async def on_tool_call(tool_info: Dict[str, Any]):
+            await self.send_message(client_id, {
+                "type": "thread_message",
+                "thread_id": thread_id,
+                "role": "tool_call",
+                "content": tool_info.get("result", ""),
+                "tool_name": tool_info.get("tool_name"),
+                "tool_args": tool_info.get("arguments")
+            })
+
+            # Notify page updates
+            if tool_info.get("tool_name") == "edit_page":
+                await self.send_message(client_id, {
+                    "type": "page_updated",
+                    "title": tool_info["arguments"].get("title")
+                    # NOTE: Do NOT include "content" field here - it would contain the tool result
+                    # (e.g., "Page updated successfully...") which could be confused with page content
+                })
+
+        async def on_status_change(tid: str, status: str, message: str):
+            await self.send_message(client_id, {
+                "type": "thread_status",
+                "thread_id": tid,
+                "status": status,
+                "message": message
+            })
+
+            # Also send updated thread list
+            threads = self.thread_manager.list_threads(client_id)
+            await self.send_message(client_id, {
+                "type": "thread_list",
+                "threads": [t.to_dict() for t in threads]
+            })
+
+        # Start thread
+        await self.thread_manager.start_thread(
+            thread_id,
+            on_message=on_message,
+            on_tool_call=on_tool_call,
+            on_status_change=on_status_change
+        )
+
+    async def _handle_thread_chat(self, client_id: str, thread_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle chat message to a thread."""
+        user_message = message_data.get("message", "")
+        if not user_message:
+            return {"type": "error", "message": "Empty message"}
+
+        thread = self.thread_manager.get_thread(thread_id)
+        if not thread:
+            return {"type": "error", "message": "Thread not found"}
+
+        # Send message to thread
+        success = await self.thread_manager.send_to_thread(thread_id, user_message)
+
+        if success:
+            return {"type": "success"}
+        else:
+            return {"type": "error", "message": "Failed to send message to thread"}
+
+    async def _handle_select_thread(self, client_id: str, thread_id: Optional[str]) -> Dict[str, Any]:
+        """Handle switching to thread view or back to scout."""
+        if thread_id is None:
+            # Switch to scout
+            self.client_view[client_id] = "scout"
+
+            # Send scout conversation history
+            executor = self.scout_executors.get(client_id)
+            if executor:
+                history = executor.get_conversation_history()
+                await self.send_message(client_id, {
+                    "type": "thread_selected",
+                    "thread_id": None,
+                    "history": history
+                })
+
+            return {"type": "success"}
+
+        # Switch to thread
+        thread = self.thread_manager.get_thread(thread_id)
+        if not thread:
+            return {"type": "error", "message": "Thread not found"}
+
+        self.client_view[client_id] = thread_id
+
+        # Send thread conversation history
+        await self.send_message(client_id, {
+            "type": "thread_selected",
+            "thread_id": thread_id,
+            "thread": thread.to_dict(),
+            "history": [m.to_dict() for m in thread.conversation]
+        })
+
+        return {"type": "success"}
+
+    async def _handle_accept_thread(self, client_id: str, thread_id: str) -> Dict[str, Any]:
+        """Handle accepting thread changes (merge to main)."""
+        thread = self.thread_manager.get_thread(thread_id)
+        if not thread:
+            return {"type": "error", "message": "Thread not found"}
+
+        result = await self.thread_manager.accept_thread(thread_id)
+
+        if result == AcceptResult.SUCCESS:
+            # Thread merged and deleted
+            await self.send_message(client_id, {
+                "type": "thread_deleted",
+                "thread_id": thread_id,
+                "reason": "accepted"
+            })
+
+            # Switch back to scout
+            self.client_view[client_id] = "scout"
+
+            # Send updated thread list
+            threads = self.thread_manager.list_threads(client_id)
+            await self.send_message(client_id, {
+                "type": "thread_list",
+                "threads": [t.to_dict() for t in threads]
+            })
+
+            # Notify pages changed
+            await self.send_message(client_id, {
+                "type": "pages_changed"
+            })
+
+            return {"type": "success", "result": "accepted"}
+
+        elif result == AcceptResult.CONFLICT:
+            # Conflict - agent is resolving
+            await self.send_message(client_id, {
+                "type": "accept_conflict",
+                "thread_id": thread_id,
+                "message": "Merge conflict detected. Agent is resolving..."
+            })
+
+            return {"type": "success", "result": "conflict"}
+
+        else:
+            return {"type": "error", "message": "Failed to accept thread"}
+
+    async def _handle_reject_thread(self, client_id: str, thread_id: str) -> Dict[str, Any]:
+        """Handle rejecting thread changes (delete branch)."""
+        success = await self.thread_manager.reject_thread(thread_id)
+
+        if success:
+            await self.send_message(client_id, {
+                "type": "thread_deleted",
+                "thread_id": thread_id,
+                "reason": "rejected"
+            })
+
+            # Switch back to scout
+            self.client_view[client_id] = "scout"
+
+            # Send updated thread list
+            threads = self.thread_manager.list_threads(client_id)
+            await self.send_message(client_id, {
+                "type": "thread_list",
+                "threads": [t.to_dict() for t in threads]
+            })
+
+            return {"type": "success"}
+        else:
+            return {"type": "error", "message": "Failed to reject thread"}
+
+    async def _handle_get_thread_diff(self, client_id: str, thread_id: str) -> Dict[str, Any]:
+        """Get diff statistics for a thread."""
+        diff_stats = self.thread_manager.get_thread_diff_stats(thread_id)
+
+        if diff_stats:
+            await self.send_message(client_id, {
+                "type": "thread_diff",
+                "thread_id": thread_id,
+                "diff_stats": diff_stats
+            })
+            return {"type": "success"}
+        else:
+            return {"type": "error", "message": "Failed to get diff stats"}
+
+
+# Global WebSocket manager instance
 websocket_manager: Optional[WebSocketManager] = None
 
+
 def initialize_websocket_manager(wiki: GitWiki, api_key: str = None):
-    """Initialize the global WebSocket manager with wiki instance"""
+    """Initialize the global WebSocket manager with wiki instance."""
     global websocket_manager
     websocket_manager = WebSocketManager(wiki, api_key)
     print(f"✅ WebSocket manager initialized")
 
+
 async def websocket_endpoint(websocket: WebSocket, client_id: str = "default"):
-    """WebSocket endpoint handler"""
+    """WebSocket endpoint handler."""
     if websocket_manager is None:
         print("❌ WebSocket manager not initialized!")
         await websocket.close(code=1011, reason="Server not ready")
         return
 
     await websocket_manager.connect(websocket, client_id)
-    
+
     try:
         while True:
-            # Receive message from client
             print(f"🔄 Waiting for message from {client_id}...")
             data = await websocket.receive_text()
             print(f"📨 Raw message received from {client_id}: {data}")
 
             try:
                 message_data = json.loads(data)
-                print(f"✅ Parsed message data: {message_data}")
             except json.JSONDecodeError as e:
                 print(f"❌ JSON decode error: {e}")
                 await websocket_manager.send_message(client_id, {
@@ -400,18 +477,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = "default"):
                 continue
 
             # Handle the message
-            print(f"🔧 About to handle message: {message_data}")
             response = await websocket_manager.handle_message(client_id, message_data)
-            print(f"📤 Handler response: {response}")
-            
-            # Send response if it's an error, success, or agent_selected
-            if response.get("type") in ["error", "success", "agent_selected"]:
+
+            # Send response if needed
+            if response.get("type") in ["error", "success"]:
                 await websocket_manager.send_message(client_id, response)
-                
+
     except WebSocketDisconnect:
         print(f"🔌💔 WebSocketDisconnect for {client_id}")
         websocket_manager.disconnect(client_id)
     except Exception as e:
         print(f"🔌⚠️ WebSocket error for client {client_id}: {e}")
-        print(f"🔌⚠️ Exception type: {type(e).__name__}")
         websocket_manager.disconnect(client_id)

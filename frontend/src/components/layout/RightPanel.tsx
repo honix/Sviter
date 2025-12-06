@@ -1,35 +1,37 @@
 import React from 'react';
 import ChatInterface from '../chat/ChatInterface';
-import { AgentSelector } from '../agents/AgentSelector';
+import { ThreadSelector } from '../threads/ThreadSelector';
 import { useAppContext } from '../../contexts/AppContext';
-import type { Agent } from '../../types/agent';
 
 const RightPanel: React.FC = () => {
   const { state, actions } = useAppContext();
-  const { selectedAgent, isAgentRunning, connectionStatus } = state;
-
-  const handleAgentSelect = (agentName: string, agent: Agent) => {
-    actions.selectAgent(agent);
-  };
+  const { threads, selectedThreadId, connectionStatus } = state;
 
   const isConnected = connectionStatus === 'connected';
 
+  // Get current thread if one is selected
+  const selectedThread = selectedThreadId
+    ? threads.find(t => t.id === selectedThreadId)
+    : null;
+
   return (
     <div className="h-full flex flex-col bg-background">
-      {/* Header with Agent Selector */}
+      {/* Header with Thread Selector */}
       <div className="p-4 border-b border-border flex-shrink-0">
-        <AgentSelector
-          selectedAgent={selectedAgent?.name || 'ChatAgent'}
-          onAgentSelect={handleAgentSelect}
-          disabled={isAgentRunning}
-          agentInfo={selectedAgent}
+        <ThreadSelector
+          threads={threads}
+          selectedThreadId={selectedThreadId}
+          onSelect={actions.selectThread}
           isConnected={isConnected}
         />
       </div>
 
       {/* Chat Interface */}
       <div className="flex-1 min-h-0">
-        <ChatInterface />
+        <ChatInterface
+          threadId={selectedThreadId}
+          thread={selectedThread}
+        />
       </div>
     </div>
   );

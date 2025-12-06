@@ -37,6 +37,7 @@ class ClaudeSDKAdapter(LLMAdapter):
     - Tools via MCP server (in-process)
     - Restricts to ONLY wiki tools (no filesystem, bash, etc.)
     - Supports model selection via set_model()
+    - Maintains conversation history across calls
     """
 
     MCP_SERVER_NAME = "wiki"  # Tools will be named: mcp__wiki__read_page, etc.
@@ -64,6 +65,8 @@ class ClaudeSDKAdapter(LLMAdapter):
         self._tools: List['WikiTool'] = []
         self._on_tool_call: Optional[Callable[[Dict], Awaitable[None]]] = None
         self._tool_call_count: int = 0
+        # Conversation history for context
+        self._conversation_history: List[Dict[str, str]] = []
 
     def _create_mcp_server(self, tools: List['WikiTool']):
         """
@@ -143,6 +146,7 @@ class ClaudeSDKAdapter(LLMAdapter):
         """
         print(f"🔵 ClaudeSDKAdapter.process_conversation called with {len(tools)} tools")
         print(f"🔵 User message: {user_message[:50]}...")
+        print(f"🔵 Conversation history length: {len(self._conversation_history)}")
 
         # Extract system prompt from conversation history
         system_prompt = self.system_prompt
@@ -157,6 +161,30 @@ class ClaudeSDKAdapter(LLMAdapter):
 
         # Create MCP server with tools (uses stored callback)
         self._create_mcp_server(tools)
+
+        # Build context message including conversation history
+        # Since Claude SDK creates a fresh client each time, we include history in the message
+        context_parts = []
+        if self._conversation_history:
+            context_parts.append("Previous conversation context:")
+            for msg in self._conversation_history[-10:]:  # Last 10 exchanges for context
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                if role == "user":
+                    context_parts.append(f"User: {content}")
+                elif role == "assistant":
+                    context_parts.append(f"Assistant: {content}")
+            context_parts.append("")
+            context_parts.append("Current message:")
+
+        # Build the full message with context
+        if context_parts:
+            full_message = "\n".join(context_parts) + "\n" + user_message
+        else:
+            full_message = user_message
+
+        # Store current user message in history
+        self._conversation_history.append({"role": "user", "content": user_message})
 
         options = ClaudeAgentOptions(
             system_prompt=system_prompt,
@@ -173,7 +201,7 @@ class ClaudeSDKAdapter(LLMAdapter):
 
         try:
             async with ClaudeSDKClient(options=options) as client:
-                await client.query(user_message)
+                await client.query(full_message)
                 response_text = ""
                 async for msg in client.receive_response():
                     # Extract text content from AssistantMessage
@@ -184,6 +212,10 @@ class ClaudeSDKAdapter(LLMAdapter):
                                 response_text += block.text
                                 if on_message:
                                     await on_message("assistant", block.text)
+
+                # Store assistant response in history
+                if response_text:
+                    self._conversation_history.append({"role": "assistant", "content": response_text})
 
                 return ConversationResult(
                     status='completed',

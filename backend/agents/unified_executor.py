@@ -201,7 +201,7 @@ class UnifiedAgentExecutor:
                 "logs": logs
             }
 
-    async def process_turn(self, user_message: str = None) -> ExecutionResult:
+    async def process_turn(self, user_message: str = None, custom_tools: List[WikiTool] = None) -> ExecutionResult:
         """
         Process one turn of conversation.
 
@@ -211,6 +211,7 @@ class UnifiedAgentExecutor:
 
         Args:
             user_message: User's message (required for human_in_loop mode)
+            custom_tools: Optional list of custom tools to use instead of default wiki tools
 
         Returns:
             ExecutionResult with status
@@ -226,8 +227,8 @@ class UnifiedAgentExecutor:
                     logs.append(f"Created branch: {self.branch_created}")
                     await self._call_callback(self.on_branch_created, self.branch_created)
 
-            # Get wiki tools
-            wiki_tools = get_wiki_tools(self.wiki)
+            # Get tools - use custom tools if provided, otherwise default wiki tools
+            wiki_tools = custom_tools if custom_tools is not None else get_wiki_tools(self.wiki)
 
             logs.append(f"Processing with {self.current_provider} adapter")
 

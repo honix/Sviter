@@ -42,11 +42,6 @@ const CenterPanel: React.FC = () => {
   // Sync edit content when page changes
   useEffect(() => {
     if (currentPage) {
-      console.log('CenterPanel: currentPage changed:', {
-        title: currentPage.title,
-        contentLength: currentPage.content?.length,
-        content: currentPage.content
-      });
       setEditContent(currentPage.content);
       setEditContentJson(currentPage.content_json);
       setViewingRevision(null); // Reset revision view when page changes
