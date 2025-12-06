@@ -4,7 +4,7 @@ import { createWebSocketService, WebSocketService } from '../services/websocket'
 import { WebSocketMessage } from '../types/chat';
 import { treeApi } from '../services/tree-api';
 import { GitAPI } from '../services/git-api';
-import type { Agent } from '../types/agent';
+import type { Thread, ThreadMessage } from '../types/thread';
 
 interface AppState {
   pages: Page[];
@@ -14,12 +14,13 @@ interface AppState {
   error: string | null;
   isConnected: boolean;
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
-  // Agent state (unified - no more chat/agents tabs)
+  // Panel mode
   centerPanelMode: 'page' | 'branch-diff';
   selectedBranchForDiff: string | null;
-  // Current agent
-  selectedAgent: Agent | null; // Currently selected agent (ChatAgent is default)
-  isAgentRunning: boolean; // For autonomous agents: is the agent currently running?
+  // Thread state (replaces agent state)
+  threads: Thread[];
+  selectedThreadId: string | null;  // null = scout mode
+  threadMessages: Record<string, ThreadMessage[]>;  // thread_id -> messages
   // Page tree state
   pageTree: TreeItem[];
   expandedFolders: string[];
@@ -31,8 +32,8 @@ interface AppState {
 type AppAction =
   | { type: 'SET_PAGES'; payload: Page[] }
   | { type: 'ADD_PAGE'; payload: Page }
-  | { type: 'UPDATE_PAGE'; payload: { id: number; updates: Partial<Page> } }
-  | { type: 'DELETE_PAGE'; payload: number }
+  | { type: 'UPDATE_PAGE'; payload: { title: string; updates: Partial<Page> } }
+  | { type: 'DELETE_PAGE'; payload: string }
   | { type: 'SET_CURRENT_PAGE'; payload: Page | null }
   | { type: 'SET_VIEW_MODE'; payload: ViewMode }
   | { type: 'SET_LOADING'; payload: boolean }
@@ -41,10 +42,18 @@ type AppAction =
   | { type: 'SET_CONNECTION_STATUS'; payload: 'connecting' | 'connected' | 'disconnected' | 'error' }
   | { type: 'SET_CENTER_PANEL_MODE'; payload: 'page' | 'branch-diff' }
   | { type: 'SET_SELECTED_BRANCH_FOR_DIFF'; payload: string | null }
-  | { type: 'SET_SELECTED_AGENT'; payload: Agent | null }
-  | { type: 'SET_AGENT_RUNNING'; payload: boolean }
+  // Thread actions
+  | { type: 'SET_THREADS'; payload: Thread[] }
+  | { type: 'ADD_THREAD'; payload: Thread }
+  | { type: 'UPDATE_THREAD'; payload: { id: string; updates: Partial<Thread> } }
+  | { type: 'REMOVE_THREAD'; payload: string }
+  | { type: 'SELECT_THREAD'; payload: string | null }
+  | { type: 'ADD_THREAD_MESSAGE'; payload: { threadId: string; message: ThreadMessage } }
+  | { type: 'SET_THREAD_MESSAGES'; payload: { threadId: string; messages: ThreadMessage[] } }
+  // Tree actions
   | { type: 'SET_PAGE_TREE'; payload: TreeItem[] }
   | { type: 'TOGGLE_FOLDER'; payload: string }
+  // Branch actions
   | { type: 'SET_BRANCHES'; payload: string[] }
   | { type: 'SET_CURRENT_BRANCH'; payload: string }
   | { type: 'ADD_BRANCH'; payload: string }
@@ -61,10 +70,14 @@ const initialState: AppState = {
   connectionStatus: 'disconnected',
   centerPanelMode: 'page',
   selectedBranchForDiff: null,
-  selectedAgent: null, // Will be set to ChatAgent on first load
-  isAgentRunning: false,
+  // Thread state
+  threads: [],
+  selectedThreadId: null,  // Start in scout mode
+  threadMessages: {},
+  // Tree state
   pageTree: [],
   expandedFolders: [],
+  // Branch state
   branches: [],
   currentBranch: 'main'
 };
@@ -77,7 +90,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'ADD_PAGE':
       return { ...state, pages: [...state.pages, action.payload] };
 
-    case 'UPDATE_PAGE':
+    case 'UPDATE_PAGE': {
       const updatedPages = state.pages.map(page =>
         page.title === action.payload.title
           ? { ...page, ...action.payload.updates, updated_at: new Date().toISOString() }
@@ -92,8 +105,9 @@ function appReducer(state: AppState, action: AppAction): AppState {
         pages: updatedPages,
         currentPage: updatedCurrentPage
       };
+    }
 
-    case 'DELETE_PAGE':
+    case 'DELETE_PAGE': {
       const remainingPages = state.pages.filter(page => page.title !== action.payload);
       const newCurrentPage = state.currentPage?.title === action.payload
         ? (remainingPages.length > 0 ? remainingPages[0] : null)
@@ -104,6 +118,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
         pages: remainingPages,
         currentPage: newCurrentPage
       };
+    }
 
     case 'SET_CURRENT_PAGE':
       return { ...state, currentPage: action.payload };
@@ -135,12 +150,70 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_SELECTED_BRANCH_FOR_DIFF':
       return { ...state, selectedBranchForDiff: action.payload };
 
-    case 'SET_SELECTED_AGENT':
-      return { ...state, selectedAgent: action.payload };
+    // Thread reducers
+    case 'SET_THREADS':
+      return { ...state, threads: action.payload };
 
-    case 'SET_AGENT_RUNNING':
-      return { ...state, isAgentRunning: action.payload };
+    case 'ADD_THREAD':
+      // Don't add if already exists
+      if (state.threads.some(t => t.id === action.payload.id)) {
+        return state;
+      }
+      return {
+        ...state,
+        threads: [...state.threads, action.payload],
+        threadMessages: {
+          ...state.threadMessages,
+          [action.payload.id]: []
+        }
+      };
 
+    case 'UPDATE_THREAD':
+      return {
+        ...state,
+        threads: state.threads.map(t =>
+          t.id === action.payload.id
+            ? { ...t, ...action.payload.updates }
+            : t
+        )
+      };
+
+    case 'REMOVE_THREAD': {
+      const { [action.payload]: _, ...remainingMessages } = state.threadMessages;
+      return {
+        ...state,
+        threads: state.threads.filter(t => t.id !== action.payload),
+        threadMessages: remainingMessages,
+        // If removed thread was selected, go back to scout
+        selectedThreadId: state.selectedThreadId === action.payload ? null : state.selectedThreadId
+      };
+    }
+
+    case 'SELECT_THREAD':
+      return { ...state, selectedThreadId: action.payload };
+
+    case 'ADD_THREAD_MESSAGE':
+      return {
+        ...state,
+        threadMessages: {
+          ...state.threadMessages,
+          [action.payload.threadId]: [
+            ...(state.threadMessages[action.payload.threadId] || []),
+            action.payload.message
+          ]
+        }
+      };
+
+    case 'SET_THREAD_MESSAGES':
+      return {
+        ...state,
+        threadMessages: {
+          ...state.threadMessages,
+          [action.payload.threadId]: action.payload.messages
+        }
+      };
+
+    // Tree reducers
     case 'SET_PAGE_TREE':
       return { ...state, pageTree: action.payload };
 
@@ -154,6 +227,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
+    // Branch reducers
     case 'SET_BRANCHES':
       return { ...state, branches: action.payload };
 
@@ -161,14 +235,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, currentBranch: action.payload };
 
     case 'ADD_BRANCH':
-      // Add branch if not already in list
       if (state.branches.includes(action.payload)) {
         return state;
       }
       return { ...state, branches: [...state.branches, action.payload] };
 
     case 'REMOVE_BRANCH':
-      // Remove branch from list
       return { ...state, branches: state.branches.filter(b => b !== action.payload) };
 
     case 'UPDATE_CURRENT_PAGE_CONTENT':
@@ -199,9 +271,10 @@ interface AppContextType {
     setSelectedBranchForDiff: (branch: string | null) => void;
     viewBranchDiff: (branch: string) => void;
     closeBranchDiff: () => void;
-    // Agent actions
-    selectAgent: (agent: Agent) => void;
-    runAgent: () => void;
+    // Thread actions
+    selectThread: (threadId: string | null) => void;
+    acceptThread: (threadId: string) => void;
+    rejectThread: (threadId: string) => void;
     // Tree actions
     loadPageTree: () => Promise<void>;
     toggleFolder: (folderId: string) => void;
@@ -215,7 +288,7 @@ interface AppContextType {
     deleteBranch: (name: string) => Promise<void>;
   };
   websocket: {
-    sendMessage: (message: any) => void;
+    sendMessage: (message: unknown) => void;
     sendChatMessage: (content: string) => void;
     onMessage: (handler: (message: WebSocketMessage) => void) => () => void;
     lastMessage: WebSocketMessage | null;
@@ -229,8 +302,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const wsService = useRef<WebSocketService | null>(null);
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
   const messageHandlers = useRef<Set<(message: WebSocketMessage) => void>>(new Set());
-  // Ref to hold reload functions for use in WebSocket callback
-  const reloadFunctionsRef = useRef<{ loadPages: () => void; loadTree: () => void } | null>(null);
+  const reloadFunctionsRef = useRef<{ loadPages: () => void; loadTree: () => void; refreshCurrentPage: (title: string) => void } | null>(null);
+  const currentPageRef = useRef<Page | null>(null);
+  const pagesRef = useRef<Page[]>([]);
+  const pageTreeRef = useRef<TreeItem[]>([]);
+  const threadsRef = useRef<Thread[]>([]);
+  const currentBranchRef = useRef<string>('main');
+  const branchesRef = useRef<string[]>([]);
+
+  // Guards to prevent concurrent loads
+  const isLoadingPagesRef = useRef(false);
+  const isLoadingTreeRef = useRef(false);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    currentPageRef.current = state.currentPage;
+  }, [state.currentPage]);
+
+  useEffect(() => {
+    pagesRef.current = state.pages;
+  }, [state.pages]);
+
+  useEffect(() => {
+    pageTreeRef.current = state.pageTree;
+  }, [state.pageTree]);
+
+  useEffect(() => {
+    threadsRef.current = state.threads;
+  }, [state.threads]);
+
+  useEffect(() => {
+    currentBranchRef.current = state.currentBranch;
+  }, [state.currentBranch]);
+
+  useEffect(() => {
+    branchesRef.current = state.branches;
+  }, [state.branches]);
 
   // Initialize WebSocket service
   useEffect(() => {
@@ -243,10 +350,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const messageUnsubscribe = wsService.current.onMessage((message) => {
       setLastMessage(message);
 
-      // Handle messages directly in callback to avoid React 18 batching issues
-      // (multiple rapid messages could cause useEffect to miss some)
-      if (message.type === 'agent_complete') {
-        dispatch({ type: 'SET_AGENT_RUNNING', payload: false });
+      // Handle thread-specific messages
+      if (message.type === 'thread_created') {
+        dispatch({ type: 'ADD_THREAD', payload: message.thread });
+      } else if (message.type === 'thread_status') {
+        dispatch({
+          type: 'UPDATE_THREAD',
+          payload: {
+            id: message.thread_id,
+            updates: { status: message.status }
+          }
+        });
+      } else if (message.type === 'thread_deleted') {
+        dispatch({ type: 'REMOVE_THREAD', payload: message.thread_id });
+      } else if (message.type === 'thread_list') {
+        dispatch({ type: 'SET_THREADS', payload: message.threads });
+      } else if (message.type === 'thread_selected') {
+        dispatch({ type: 'SELECT_THREAD', payload: message.thread_id });
+        if (message.history) {
+          dispatch({
+            type: 'SET_THREAD_MESSAGES',
+            payload: {
+              threadId: message.thread_id || 'scout',
+              messages: message.history
+            }
+          });
+        }
+      } else if (message.type === 'thread_message') {
+        // Add message to thread's conversation
+        const threadMessage: ThreadMessage = {
+          id: Date.now().toString(),
+          role: message.role,
+          content: message.content,
+          timestamp: new Date().toISOString(),
+          tool_name: message.tool_name,
+          tool_args: message.tool_args
+        };
+        dispatch({
+          type: 'ADD_THREAD_MESSAGE',
+          payload: {
+            threadId: message.thread_id,
+            message: threadMessage
+          }
+        });
       } else if (message.type === 'branch_created') {
         dispatch({ type: 'ADD_BRANCH', payload: message.branch });
       } else if (message.type === 'branch_switched') {
@@ -254,7 +400,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else if (message.type === 'branch_deleted') {
         dispatch({ type: 'REMOVE_BRANCH', payload: message.branch });
       } else if (message.type === 'page_updated') {
-        // Reload pages and tree when agent creates/edits a page
+        // Reload pages and tree when content changes
+        if (reloadFunctionsRef.current) {
+          reloadFunctionsRef.current.loadPages();
+          reloadFunctionsRef.current.loadTree();
+          // Also refresh current page if it was the one updated
+          // Note: message.title comes from the backend, NOT message.content (which is the tool result)
+          if (message.title) {
+            reloadFunctionsRef.current.refreshCurrentPage(message.title);
+          }
+        }
+      } else if (message.type === 'pages_changed') {
+        // Reload pages and tree when content changes
         if (reloadFunctionsRef.current) {
           reloadFunctionsRef.current.loadPages();
           reloadFunctionsRef.current.loadTree();
@@ -281,28 +438,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // Auto-select ChatAgent on initialization
-  const selectDefaultAgent = useCallback(async () => {
-    try {
-      const response = await fetch('http://localhost:8000/api/agents');
-      const data = await response.json();
-      const chatAgent = data.agents.find((a: Agent) => a.name === 'ChatAgent');
-      if (chatAgent) {
-        dispatch({ type: 'SET_SELECTED_AGENT', payload: chatAgent });
-      }
-    } catch (error) {
-      console.error('Failed to fetch ChatAgent:', error);
+  // Helper to compare two pages arrays (order-independent comparison)
+  // Pages are compared as sets since backend sorts by updated_at which changes order
+  const arePagesEqual = useCallback((a: Page[], b: Page[]): boolean => {
+    if (a.length !== b.length) return false;
+    // Create a Set of page identifiers from array a
+    const aSet = new Set(a.map(p => `${p.title}|${p.path}`));
+    // Check if all pages in b exist in aSet
+    for (const page of b) {
+      if (!aSet.has(`${page.title}|${page.path}`)) return false;
     }
+    return true;
   }, []);
 
-  // Auto-select ChatAgent on first load
-  useEffect(() => {
-    selectDefaultAgent();
-  }, [selectDefaultAgent]);
+  // Helper to compare two tree arrays (order-independent comparison)
+  // Trees are compared as sets since order may change based on updates
+  const areTreesEqual = useCallback((a: TreeItem[], b: TreeItem[]): boolean => {
+    if (a.length !== b.length) return false;
 
-  const loadPages = React.useCallback(async () => {
-    dispatch({ type: 'SET_LOADING', payload: true });
-    dispatch({ type: 'SET_ERROR', payload: null });
+    // Create a map of tree items from array a by their id
+    const aMap = new Map<string, TreeItem>();
+    for (const item of a) {
+      aMap.set(item.id, item);
+    }
+
+    // Check if all items in b exist in aMap with matching properties
+    for (const bItem of b) {
+      const aItem = aMap.get(bItem.id);
+      if (!aItem) return false;
+      if (aItem.title !== bItem.title || aItem.path !== bItem.path) return false;
+
+      // Recursively compare children
+      const aChildren = aItem.children || [];
+      const bChildren = bItem.children || [];
+      if (!areTreesEqual(aChildren, bChildren)) return false;
+    }
+    return true;
+  }, []);
+
+  // Background-safe loadPages that doesn't dispatch loading state
+  // This prevents infinite re-render loops when called from WebSocket handlers
+  const loadPages = useCallback(async (showLoading = false) => {
+    // Guard against concurrent loads
+    if (isLoadingPagesRef.current) {
+      console.log('loadPages: skipping - already loading');
+      return;
+    }
+    isLoadingPagesRef.current = true;
+
+    if (showLoading) {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      dispatch({ type: 'SET_ERROR', payload: null });
+    }
 
     try {
       const response = await fetch('http://localhost:8000/api/pages');
@@ -313,45 +500,92 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const data = await response.json();
       const backendPages: Page[] = data.pages;
 
-      dispatch({ type: 'SET_PAGES', payload: backendPages });
+      // Only dispatch SET_PAGES if pages actually changed to avoid unnecessary re-renders
+      if (!arePagesEqual(pagesRef.current, backendPages)) {
+        pagesRef.current = backendPages; // Update ref immediately to prevent duplicate dispatches
+        dispatch({ type: 'SET_PAGES', payload: backendPages });
+      }
 
-      // Set current page to first page if none selected and pages exist
-      if (!state.currentPage && backendPages.length > 0) {
-        // Fetch full content for the first page
+      // Only fetch full page content if no page is currently selected
+      // When a page is already selected, don't refetch to avoid unnecessary re-renders
+      // The page content will be updated when the user navigates or refreshes
+      if (!currentPageRef.current && backendPages.length > 0) {
         try {
           const pageResponse = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(backendPages[0].title)}`);
           if (pageResponse.ok) {
             const fullPage = await pageResponse.json();
+            currentPageRef.current = fullPage; // Update ref immediately to prevent duplicate dispatches
             dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
-          } else {
-            dispatch({ type: 'SET_CURRENT_PAGE', payload: backendPages[0] });
           }
-        } catch (pageErr) {
-          console.error('Error loading first page content:', pageErr);
-          dispatch({ type: 'SET_CURRENT_PAGE', payload: backendPages[0] });
+        } catch {
+          // If we can't load the page, just keep the current one
         }
       }
     } catch (err) {
-      dispatch({ type: 'SET_ERROR', payload: 'Failed to load pages' });
+      if (showLoading) {
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to load pages' });
+      }
       console.error('Error loading pages:', err);
     } finally {
-      dispatch({ type: 'SET_LOADING', payload: false });
+      isLoadingPagesRef.current = false;
+      if (showLoading) {
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
     }
-  }, [state.currentPage]);
+  }, [arePagesEqual]); // Uses refs for state access
 
-  // Update ref with reload functions for use in WebSocket callback
-  // (needed because WebSocket callback has empty deps and can't access loadPages directly)
+  // Refresh current page content from API (for when page_updated is received)
+  const refreshCurrentPage = useCallback(async (pageTitle: string) => {
+    // Only refresh if this is the currently selected page
+    if (!currentPageRef.current || currentPageRef.current.title !== pageTitle) {
+      return;
+    }
+
+    try {
+      const pageResponse = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(pageTitle)}`);
+      if (pageResponse.ok) {
+        const fullPage = await pageResponse.json();
+        // Only update if content actually changed (compare by content length and first/last chars as quick check)
+        const currentContent = currentPageRef.current?.content || '';
+        const newContent = fullPage.content || '';
+        if (currentContent !== newContent) {
+          currentPageRef.current = fullPage;
+          dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
+        }
+      }
+    } catch (err) {
+      console.error('Error refreshing current page:', err);
+    }
+  }, []);
+
+  // Update ref with reload functions
   useEffect(() => {
     reloadFunctionsRef.current = {
       loadPages,
       loadTree: async () => {
-        const tree = await treeApi.getTree();
-        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
-      }
-    };
-  }, [loadPages]);
+        // Guard against concurrent loads
+        if (isLoadingTreeRef.current) {
+          console.log('loadTree: skipping - already loading');
+          return;
+        }
+        isLoadingTreeRef.current = true;
 
-  // Load branches callback (defined before use)
+        try {
+          const tree = await treeApi.getTree();
+          // Only dispatch if tree actually changed to avoid unnecessary re-renders
+          if (!areTreesEqual(pageTreeRef.current, tree)) {
+            pageTreeRef.current = tree; // Update ref immediately to prevent duplicate dispatches
+            dispatch({ type: 'SET_PAGE_TREE', payload: tree });
+          }
+        } finally {
+          isLoadingTreeRef.current = false;
+        }
+      },
+      refreshCurrentPage
+    };
+  }, [loadPages, areTreesEqual, refreshCurrentPage]);
+
+  // Load branches
   const loadBranches = useCallback(async () => {
     try {
       const [branchList, currentBranch] = await Promise.all([
@@ -365,45 +599,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  // Handle incoming WebSocket messages for page updates and real-time branch changes
+  // Shared helper: switch to a branch with loading indicator
+  const switchToBranch = useCallback(async (targetBranch: string) => {
+    const currentBranch = currentBranchRef.current;
+    if (targetBranch === currentBranch) return;
+
+    dispatch({ type: 'SET_LOADING', payload: true });
+    try {
+      await GitAPI.checkoutBranch(targetBranch);
+      dispatch({ type: 'SET_CURRENT_BRANCH', payload: targetBranch });
+      await loadPages();
+      const tree = await treeApi.getTree();
+      dispatch({ type: 'SET_PAGE_TREE', payload: tree });
+      // Refresh current page content from the new branch
+      const currentPage = currentPageRef.current;
+      if (currentPage?.title) {
+        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(currentPage.title)}`);
+        if (response.ok) {
+          const fullPage = await response.json();
+          dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to switch branch:', err);
+      dispatch({ type: 'SET_ERROR', payload: 'Failed to switch branch' });
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  }, [loadPages]);
+
+  // Handle page updates from lastMessage
+  // Note: page_updated and pages_changed are handled directly in the WebSocket handler above
+  // to avoid duplicate loadPages() calls. Only handle other message types here.
   useEffect(() => {
     if (!lastMessage) return;
 
     if (lastMessage.type === 'page_update') {
-      // Reload all pages when AI modifies them to ensure synchronization
-      loadPages();
+      // Use reloadFunctionsRef to avoid dependency on loadPages
+      reloadFunctionsRef.current?.loadPages();
     } else if (lastMessage.type === 'branch_switched') {
-      // Reload pages when branch changes (dispatch is handled in callback to avoid batching issues)
-      loadPages();
-    } else if (lastMessage.type === 'page_updated') {
-      // Real-time: Agent created/edited a page
-      // Reload pages list and page tree to show new/updated pages
-      loadPages();
-      // Also reload page tree
-      treeApi.getTree().then(tree => {
-        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
-      }).catch(err => console.error('Failed to reload page tree:', err));
-
-      // Update current page content if we're viewing that page
-      if (state.currentPage?.title === lastMessage.title) {
-        dispatch({ type: 'UPDATE_CURRENT_PAGE_CONTENT', payload: lastMessage.content });
-      }
+      reloadFunctionsRef.current?.loadPages();
     }
-  }, [lastMessage, loadPages, state.currentPage?.title]);
+    // page_updated is handled in the direct WebSocket handler at line 373
+  }, [lastMessage]); // Removed loadPages from deps - use ref instead
 
-
-  // Load pages from backend API on initialization
+  // Load pages on init (with loading indicator)
   useEffect(() => {
-    loadPages();
-  }, [loadPages]);
+    loadPages(true);
+  }, []); // Run only once on mount
 
-  // Load branches on initialization
+  // Load branches on init
   useEffect(() => {
     loadBranches();
   }, [loadBranches]);
 
   // WebSocket functions
-  const sendMessage = useCallback((message: any) => {
+  const sendMessage = useCallback((message: unknown) => {
     wsService.current?.send(message);
   }, []);
 
@@ -426,9 +677,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(title)}`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updates),
         });
 
@@ -459,7 +708,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
 
         dispatch({ type: 'DELETE_PAGE', payload: title });
-        // Reload tree to reflect deletion
         const tree = await treeApi.getTree();
         dispatch({ type: 'SET_PAGE_TREE', payload: tree });
       } catch (err) {
@@ -475,7 +723,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
-      // Fetch full page content from API
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'SET_ERROR', payload: null });
 
@@ -490,7 +737,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (err) {
         dispatch({ type: 'SET_ERROR', payload: 'Failed to load page content' });
         console.error('Error loading page:', err);
-        // Fallback to the page object without content
         dispatch({ type: 'SET_CURRENT_PAGE', payload: page });
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
@@ -507,9 +753,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const response = await fetch('http://localhost:8000/api/pages', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             title,
             content,
@@ -526,7 +770,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dispatch({ type: 'ADD_PAGE', payload: newPage });
         dispatch({ type: 'SET_CURRENT_PAGE', payload: newPage });
         dispatch({ type: 'SET_VIEW_MODE', payload: 'edit' });
-        // Reload tree to show new page
         const tree = await treeApi.getTree();
         dispatch({ type: 'SET_PAGE_TREE', payload: tree });
       } catch (err) {
@@ -549,19 +792,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: null });
     },
 
-    // Agent actions
-    selectAgent: (agent: Agent) => {
-      dispatch({ type: 'SET_SELECTED_AGENT', payload: agent });
-      // Send select_agent message to backend (switches agent and clears chat)
+    // Thread actions
+    selectThread: async (threadId: string | null) => {
       wsService.current?.send({
-        type: 'select_agent',
-        agent_name: agent.name
+        type: 'select_thread',
+        thread_id: threadId
+      });
+
+      // Determine target branch and switch if needed
+      if (threadId) {
+        const thread = threadsRef.current.find(t => t.id === threadId);
+        if (thread?.branch) {
+          // Add branch to list if not present
+          if (!branchesRef.current.includes(thread.branch)) {
+            dispatch({ type: 'ADD_BRANCH', payload: thread.branch });
+          }
+          await switchToBranch(thread.branch);
+        }
+      } else {
+        // Deselecting thread - go back to main
+        await switchToBranch('main');
+      }
+    },
+    acceptThread: (threadId: string) => {
+      wsService.current?.send({
+        type: 'accept_thread',
+        thread_id: threadId
       });
     },
-    runAgent: () => {
-      // For autonomous agents - trigger execution
-      dispatch({ type: 'SET_AGENT_RUNNING', payload: true });
-      wsService.current?.send({ type: 'run_agent' });
+    rejectThread: (threadId: string) => {
+      wsService.current?.send({
+        type: 'reject_thread',
+        thread_id: threadId
+      });
     },
 
     // Tree actions
@@ -582,10 +845,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     moveItem: async (sourcePath: string, targetParentPath: string | null, newOrder: number) => {
       try {
         await treeApi.moveItem({ sourcePath, targetParentPath, newOrder });
-        // Reload tree after move
         const tree = await treeApi.getTree();
         dispatch({ type: 'SET_PAGE_TREE', payload: tree });
-        // Also reload pages to update any changed paths
         const response = await fetch('http://localhost:8000/api/pages');
         if (response.ok) {
           const data = await response.json();
@@ -594,12 +855,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (err) {
         console.error('Failed to move item:', err);
         dispatch({ type: 'SET_ERROR', payload: 'Failed to move item' });
-        // Reload tree to ensure we have fresh paths even on error
         try {
           const tree = await treeApi.getTree();
           dispatch({ type: 'SET_PAGE_TREE', payload: tree });
-        } catch (e) {
-          console.error('Failed to reload tree:', e);
+        } catch {
+          // ignore
         }
       }
     },
@@ -630,38 +890,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshBranches: loadBranches,
 
     checkoutBranch: async (branch: string) => {
-      if (branch === state.currentBranch) return;
-
-      dispatch({ type: 'SET_LOADING', payload: true });
-      try {
-        await GitAPI.checkoutBranch(branch);
-        dispatch({ type: 'SET_CURRENT_BRANCH', payload: branch });
-
-        // Refresh pages for new branch
-        await loadPages();
-
-        // Reload page tree for new branch
-        const tree = await treeApi.getTree();
-        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
-      } catch (err) {
-        console.error('Failed to checkout branch:', err);
-        dispatch({ type: 'SET_ERROR', payload: 'Failed to switch branch' });
-      } finally {
-        dispatch({ type: 'SET_LOADING', payload: false });
-      }
+      await switchToBranch(branch);
     },
 
     createBranch: async (name: string) => {
       dispatch({ type: 'SET_LOADING', payload: true });
       try {
         const newBranch = await GitAPI.createBranch(name, state.currentBranch);
-        // Refresh branches list
         const branchList = await GitAPI.listBranches();
         dispatch({ type: 'SET_BRANCHES', payload: branchList });
         dispatch({ type: 'SET_CURRENT_BRANCH', payload: newBranch });
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Failed to create branch:', err);
-        dispatch({ type: 'SET_ERROR', payload: err.message || 'Failed to create branch' });
+        dispatch({ type: 'SET_ERROR', payload: (err as Error).message || 'Failed to create branch' });
         throw err;
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
@@ -681,12 +922,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatch({ type: 'SET_LOADING', payload: true });
       try {
         await GitAPI.deleteBranch(name, true);
-        // Refresh branches list
         const branchList = await GitAPI.listBranches();
         dispatch({ type: 'SET_BRANCHES', payload: branchList });
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Failed to delete branch:', err);
-        dispatch({ type: 'SET_ERROR', payload: err.message || 'Failed to delete branch' });
+        dispatch({ type: 'SET_ERROR', payload: (err as Error).message || 'Failed to delete branch' });
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
       }

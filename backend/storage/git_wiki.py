@@ -1239,3 +1239,60 @@ class GitWiki:
             return message.strip()
         except GitCommandError as e:
             raise GitWikiException(f"Failed to get commit message: {e}")
+
+    def get_page_content_at_ref(self, title: str, ref: str) -> str:
+        """
+        Get page content at specific git ref (branch/commit/tag).
+
+        Args:
+            title: Page title or path
+            ref: Git reference (branch name, commit SHA, or tag)
+
+        Returns:
+            Page content as string, or empty string if page doesn't exist at ref
+        """
+        filepath = self._get_page_path(title)
+        relative_path = filepath.relative_to(self.repo_path)
+
+        try:
+            # Get file content at specific ref
+            raw_content = self.repo.git.show(f"{ref}:{relative_path}")
+            # Parse frontmatter to extract just the content
+            post = frontmatter.loads(raw_content)
+            return post.content
+        except GitCommandError:
+            return ""  # Page doesn't exist at ref
+
+    def get_diff_stats_by_page(self, base: str, target: str) -> Dict[str, Dict[str, int]]:
+        """
+        Get per-page diff statistics between two refs.
+
+        Args:
+            base: Base ref (e.g., "main")
+            target: Target ref (e.g., "thread/feature-x")
+
+        Returns:
+            Dictionary mapping page paths to {additions, deletions}
+        """
+        try:
+            result = self.repo.git.diff('--numstat', base, target)
+            stats = {}
+
+            for line in result.strip().split('\n'):
+                if not line:
+                    continue
+                parts = line.split('\t')
+                if len(parts) == 3:
+                    adds, dels, path = parts
+                    # Only include pages (files in pages/ directory)
+                    if path.startswith('pages/') and path.endswith('.md'):
+                        # Convert path to page identifier
+                        page_path = path[6:]  # Remove 'pages/' prefix
+                        stats[page_path] = {
+                            "additions": int(adds) if adds != '-' else 0,
+                            "deletions": int(dels) if dels != '-' else 0
+                        }
+
+            return stats
+        except GitCommandError:
+            return {}
