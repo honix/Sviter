@@ -293,13 +293,31 @@ class WebSocketManager:
                 "threads": [t.to_dict() for t in threads]
             })
 
-        # Start thread
-        await self.thread_manager.start_thread(
-            thread_id,
-            on_message=on_message,
-            on_tool_call=on_tool_call,
-            on_status_change=on_status_change
-        )
+        # Start thread with guaranteed cleanup on failure
+        try:
+            success = await self.thread_manager.start_thread(
+                thread_id,
+                on_message=on_message,
+                on_tool_call=on_tool_call,
+                on_status_change=on_status_change
+            )
+            if not success:
+                # Thread failed to start - cleanup
+                self.thread_manager._cleanup_thread(thread_id)
+                await self.send_message(client_id, {
+                    "type": "thread_deleted",
+                    "thread_id": thread_id,
+                    "reason": "start_failed"
+                })
+        except Exception as e:
+            # Ensure cleanup on any exception
+            print(f"❌ Thread {thread_id} start failed: {e}")
+            self.thread_manager._cleanup_thread(thread_id)
+            await self.send_message(client_id, {
+                "type": "thread_deleted",
+                "thread_id": thread_id,
+                "reason": f"error: {e}"
+            })
 
     async def _handle_thread_chat(self, client_id: str, thread_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle chat message to a thread."""

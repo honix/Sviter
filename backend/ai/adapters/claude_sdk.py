@@ -65,8 +65,18 @@ class ClaudeSDKAdapter(LLMAdapter):
         self._tools: List['WikiTool'] = []
         self._on_tool_call: Optional[Callable[[Dict], Awaitable[None]]] = None
         self._tool_call_count: int = 0
-        # Conversation history for context
+        # Conversation history for context (with size limit to prevent unbounded growth)
         self._conversation_history: List[Dict[str, str]] = []
+        self._max_history_size: int = 50  # Maximum messages to keep in history
+
+    def _trim_history(self):
+        """Trim conversation history to max size, keeping most recent messages."""
+        if len(self._conversation_history) > self._max_history_size:
+            self._conversation_history = self._conversation_history[-self._max_history_size:]
+
+    def clear_history(self):
+        """Clear conversation history."""
+        self._conversation_history = []
 
     def _create_mcp_server(self, tools: List['WikiTool']):
         """
@@ -183,8 +193,9 @@ class ClaudeSDKAdapter(LLMAdapter):
         else:
             full_message = user_message
 
-        # Store current user message in history
+        # Store current user message in history (with size limit)
         self._conversation_history.append({"role": "user", "content": user_message})
+        self._trim_history()
 
         options = ClaudeAgentOptions(
             system_prompt=system_prompt,
@@ -213,9 +224,10 @@ class ClaudeSDKAdapter(LLMAdapter):
                                 if on_message:
                                     await on_message("assistant", block.text)
 
-                # Store assistant response in history
+                # Store assistant response in history (with size limit)
                 if response_text:
                     self._conversation_history.append({"role": "assistant", "content": response_text})
+                    self._trim_history()
 
                 return ConversationResult(
                     status='completed',

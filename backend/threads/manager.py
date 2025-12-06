@@ -93,9 +93,11 @@ class ThreadManager:
         thread = Thread.create(name, goal, client_id)
 
         # Pull latest main before creating branch
+        # Store original branch to restore after operation
+        original_branch = None
         try:
-            current_branch = self.wiki.get_current_branch()
-            if current_branch != "main":
+            original_branch = self.wiki.get_current_branch()
+            if original_branch != "main":
                 self.wiki.checkout_branch("main")
 
             # Pull latest from remote
@@ -106,6 +108,13 @@ class ThreadManager:
                 print(f"⚠️ Could not pull main (might be local-only): {pull_error}")
         except Exception as e:
             print(f"⚠️ Error preparing main for thread: {e}")
+        finally:
+            # Restore original branch if we switched away from it
+            if original_branch and original_branch != "main":
+                try:
+                    self.wiki.checkout_branch(original_branch)
+                except Exception as restore_error:
+                    print(f"⚠️ Could not restore branch {original_branch}: {restore_error}")
 
         # Create git branch (don't checkout - stay on main)
         try:

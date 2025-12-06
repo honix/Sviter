@@ -81,9 +81,16 @@ class Thread:
         """Factory method to create a new thread."""
         # Sanitize name for branch naming (alphanumeric, hyphens only)
         safe_name = re.sub(r'[^a-zA-Z0-9-]', '-', name.lower())
-        safe_name = re.sub(r'-+', '-', safe_name).strip('-')
-        if not safe_name:
+        safe_name = re.sub(r'-+', '-', safe_name)  # Collapse multiple dashes
+        safe_name = re.sub(r'^-+|-+$', '', safe_name)  # Remove leading/trailing dashes
+
+        # Additional git safety validations
+        if not safe_name or safe_name.startswith('/') or safe_name.endswith('.lock'):
             safe_name = "task"
+
+        # Ensure reasonable length (git has limits)
+        if len(safe_name) > 50:
+            safe_name = safe_name[:50].rstrip('-')
 
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
