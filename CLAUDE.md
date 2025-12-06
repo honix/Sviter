@@ -22,8 +22,6 @@ This is an AI-powered wiki system with a FastAPI backend and React frontend. The
   - Agents module with BaseAgent, executor, loop_controller, pr_manager
   - Git-native PRs using branches (`agent/<name>/<timestamp>`)
   - 5-layer loop control to prevent runaway agents
-- **Virtual Environment**: Uses `venv` for dependency isolation
-
 ### Frontend (React TypeScript)
 
 - **Framework**: React 19 with TypeScript and Vite
@@ -47,7 +45,6 @@ This is an AI-powered wiki system with a FastAPI backend and React frontend. The
 
 ```bash
 cd backend
-source venv/bin/activate  # Activate virtual environment
 python main.py           # Start FastAPI server on port 8000
 ```
 
@@ -63,10 +60,7 @@ npm run dev             # Start Vite dev server on port 5173
 
 ```
 ├── CLAUDE.md                 # This file - project instructions
-├── MVP.md                    # Project requirements and architecture
-├── openrouter_test.py        # Original prototype (reference)
 ├── backend/                  # Python FastAPI backend
-│   ├── venv/                 # Virtual environment (IMPORTANT: use this)
 │   ├── main.py               # FastAPI app entry point
 │   ├── requirements.txt      # Python dependencies
 │   ├── storage/             # Git-based wiki storage (GitWiki)
@@ -79,6 +73,7 @@ npm run dev             # Start Vite dev server on port 5173
 │   │   ├── config.py        # Global agent config
 │   │   ├── example_agent.py # Read-only example agent
 │   │   └── test_agent.py    # Test agent (creates pages)
+│   ├── scripts/             # Utility scripts (tests, analysis, chat client)
 │   ├── api/                 # WebSocket handlers
 │   └── tests/               # Backend tests
 └── frontend/                # React TypeScript frontend
@@ -103,7 +98,6 @@ npm run dev             # Start Vite dev server on port 5173
 
 ### Backend
 
-- **Virtual Environment**: ALWAYS use `source venv/bin/activate` before running Python commands
 - **Storage**: Git-based with GitWiki class - all content in `etoneto-wiki/` git submodule
 - **WebSocket**: Real-time communication on `/ws/{client_id}` endpoint
 - **AI Tools**: Custom functions for page management (read_page, edit_page, find_pages, list_all_pages)
@@ -148,7 +142,7 @@ npm run dev             # Start Vite dev server on port 5173
 
 ## Dependencies
 
-### Backend (in venv)
+### Backend
 
 - `fastapi` - Web framework
 - `uvicorn` - ASGI server
@@ -170,10 +164,10 @@ npm run dev             # Start Vite dev server on port 5173
 
 ## Development Workflow
 
-1. **Backend Development**: Always activate venv first with `source venv/bin/activate`
+1. **Backend Development**: Run `python main.py` in backend directory
 2. **Frontend Development**: Standard npm workflow in frontend directory
-3. **Testing**: Run backend tests with `python run_tests.py` (in venv)
-4. **WebSocket Testing**: Use `python chat_client.py` for backend testing (in venv)
+3. **Testing**: Run backend tests with `python scripts/run_tests.py`
+4. **WebSocket Testing**: Use `python scripts/chat_client.py` for backend testing
 5. **Agentic Testing**: Use Playwright MCP to test the full application autonomously - tests UI navigation, page creation/editing, WebSocket chat, and real-time synchronization
 
 ## Security Notes
@@ -185,7 +179,6 @@ npm run dev             # Start Vite dev server on port 5173
 
 ## Important Notes
 
-- **Virtual Environment**: The backend MUST be run with the virtual environment activated
 - **Port Configuration**: Backend on 8000, Frontend on 5173
 - **WebSocket URL**: Frontend connects to `ws://localhost:8000/ws/`
 - **Git Repository**: Wiki content stored in `etoneto-wiki/` submodule (https://github.com/honix/etoneto-wiki)

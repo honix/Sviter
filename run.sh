@@ -21,7 +21,6 @@ trap cleanup SIGINT SIGTERM EXIT
 # Start backend
 echo "🔧 Starting backend server..."
 cd backend
-source venv/bin/activate
 python main.py &
 BACKEND_PID=$!
 echo "   Backend PID: $BACKEND_PID"
