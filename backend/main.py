@@ -2,6 +2,7 @@ from fastapi import FastAPI, WebSocket, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from storage import GitWiki, PageNotFoundException, GitWikiException
 from api.session_manager import websocket_endpoint, initialize_session_manager
+from threads import git_operations as git_ops
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uvicorn
@@ -55,6 +56,10 @@ async def startup_event():
         pages = wiki.list_pages(limit=1)
         print(f"✅ Wiki repository loaded successfully ({WIKI_REPO_PATH})")
         print(f"📚 Found {len(wiki.list_pages())} pages")
+
+        # Clean up any orphaned worktrees from previous sessions
+        git_ops.cleanup_orphaned_worktrees(wiki)
+        print("🧹 Cleaned up orphaned worktrees")
 
         # Initialize session manager with wiki instance
         initialize_session_manager(wiki, OPENROUTER_API_KEY)
@@ -325,10 +330,10 @@ async def get_branch_diff_stats(branch1: str, branch2: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/git/diff-stats-by-page")
-async def get_diff_stats_by_page(base: str = "main"):
-    """Get per-page diff stats vs base branch"""
+async def get_diff_stats_by_page(base: str = "main", head: str = None):
+    """Get per-page diff stats between branches. If head is not provided, uses current branch."""
     try:
-        current = wiki.get_current_branch()
+        current = head if head else wiki.get_current_branch()
         if current == base:
             return {"stats": {}}
         stats = wiki.get_diff_stats_by_page(base, current)

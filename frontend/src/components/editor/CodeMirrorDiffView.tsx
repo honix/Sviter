@@ -11,8 +11,9 @@ import { diffLines } from 'diff';
 import { cn } from '@/lib/utils';
 
 interface CodeMirrorDiffViewProps {
-  currentContent: string;
   pagePath: string;
+  branchName: string;  // The branch to compare against main
+  refreshTrigger?: number;  // Changes to trigger refetch
   className?: string;
 }
 
@@ -21,43 +22,56 @@ const addedLine = Decoration.line({ class: 'cm-diff-added' });
 const removedLine = Decoration.line({ class: 'cm-diff-removed' });
 
 export function CodeMirrorDiffView({
-  currentContent,
   pagePath,
+  branchName,
+  refreshTrigger,
   className,
 }: CodeMirrorDiffViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const [mainContent, setMainContent] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [branchContent, setBranchContent] = useState<string | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
 
-  // Fetch main branch content
+  // Reset loading state when page changes
   useEffect(() => {
-    setLoading(true);
+    setInitialLoading(true);
+    setMainContent(null);
+    setBranchContent(null);
+  }, [pagePath]);
 
-    fetch(`http://localhost:8000/api/pages/${encodeURIComponent(pagePath)}/at-ref?ref=main`)
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to fetch');
-        return r.json();
-      })
-      .then(data => {
-        setMainContent(data.content || '');
-        setLoading(false);
+  // Fetch both main and branch content via API (no checkout needed)
+  useEffect(() => {
+    Promise.all([
+      fetch(`http://localhost:8000/api/pages/${encodeURIComponent(pagePath)}/at-ref?ref=main`)
+        .then(r => r.ok ? r.json() : { content: '' })
+        .then(data => data.content || ''),
+      fetch(`http://localhost:8000/api/pages/${encodeURIComponent(pagePath)}/at-ref?ref=${encodeURIComponent(branchName)}`)
+        .then(r => r.ok ? r.json() : { content: '' })
+        .then(data => data.content || '')
+    ])
+      .then(([main, branch]) => {
+        setMainContent(main);
+        setBranchContent(branch);
+        setInitialLoading(false);
       })
       .catch(() => {
         setMainContent('');
-        setLoading(false);
+        setBranchContent('');
+        setInitialLoading(false);
       });
-  }, [pagePath]);
+  }, [pagePath, branchName, refreshTrigger]);
 
   // Compute unified diff content with markers
-  const { diffContent, lineTypes } = useMemo(() => {
-    if (mainContent === null) {
-      return { diffContent: currentContent, lineTypes: new Map<number, 'added' | 'removed'>() };
+  const { diffContent, lineTypes, hasChanges } = useMemo(() => {
+    if (mainContent === null || branchContent === null) {
+      return { diffContent: '', lineTypes: new Map<number, 'added' | 'removed'>(), hasChanges: false };
     }
 
-    const changes = diffLines(mainContent, currentContent);
+    const changes = diffLines(mainContent, branchContent);
     const lines: string[] = [];
     const types = new Map<number, 'added' | 'removed'>();
+    let hasAnyChanges = false;
 
     for (const change of changes) {
       const changeLines = change.value.replace(/\n$/, '').split('\n');
@@ -66,21 +80,23 @@ export function CodeMirrorDiffView({
         if (change.added) {
           types.set(lines.length, 'added');
           lines.push(line);
+          hasAnyChanges = true;
         } else if (change.removed) {
           types.set(lines.length, 'removed');
           lines.push(line);
+          hasAnyChanges = true;
         } else {
           lines.push(line);
         }
       }
     }
 
-    return { diffContent: lines.join('\n'), lineTypes: types };
-  }, [mainContent, currentContent]);
+    return { diffContent: lines.join('\n'), lineTypes: types, hasChanges: hasAnyChanges };
+  }, [mainContent, branchContent]);
 
   // Create editor when content is ready
   useEffect(() => {
-    if (!containerRef.current || mainContent === null) return;
+    if (!containerRef.current || mainContent === null || branchContent === null) return;
 
     const isDark = document.documentElement.classList.contains('dark');
 
@@ -170,9 +186,9 @@ export function CodeMirrorDiffView({
       view.destroy();
       viewRef.current = null;
     };
-  }, [mainContent, diffContent, lineTypes]);
+  }, [pagePath, mainContent, diffContent, lineTypes]);
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className={cn("flex items-center justify-center h-full text-muted-foreground", className)}>
         Loading diff...

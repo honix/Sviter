@@ -234,13 +234,24 @@ class SessionManager:
         ]
 
     def _create_thread(self, name: str, goal: str, client_id: str) -> Thread:
-        """Create a new thread with git branch."""
+        """Create a new thread with git branch and worktree."""
         thread = Thread.create(name, goal, client_id)
 
         # Create git branch
         error = git_ops.prepare_branch(self.wiki, thread.branch)
         if error:
             thread.set_error(error)
+            return thread
+
+        # Create worktree for concurrent execution
+        try:
+            worktree_path = git_ops.create_worktree(self.wiki, thread.branch)
+            thread.worktree_path = str(worktree_path)
+        except Exception as e:
+            thread.set_error(f"Failed to create worktree: {e}")
+            # Clean up the branch if worktree creation failed
+            git_ops.delete_thread_branch(self.wiki, thread.branch)
+            return thread
 
         # Track thread
         if client_id not in self.client_threads:
@@ -250,14 +261,15 @@ class SessionManager:
         return thread
 
     async def _start_thread(self, thread: Thread, client_id: str):
-        """Start thread execution."""
+        """Start thread execution using thread's own worktree."""
         session_id = f"thread:{thread.id}"
 
-        # Checkout branch
-        error = git_ops.checkout_thread(self.wiki, thread.branch)
-        if error:
-            thread.set_error(error)
+        # Create GitWiki instance for this thread's worktree
+        if not thread.worktree_path:
+            thread.set_error("Thread has no worktree path")
             return False
+
+        thread_wiki = GitWiki(thread.worktree_path)
 
         # Status change callback
         async def on_status_change(status: str, message: str):
@@ -333,13 +345,12 @@ class SessionManager:
         )
 
         if not success:
-            git_ops.return_to_main(self.wiki)
             return False
 
         self.thread_sessions[thread.id] = session_id
 
-        # Get tools
-        tools = ToolBuilder.for_thread(self.wiki, on_request_help, on_mark_for_review)
+        # Get tools using thread's own wiki (worktree)
+        tools = ToolBuilder.for_thread(thread_wiki, on_request_help, on_mark_for_review)
         self.sessions[session_id].tools = tools
 
         # Run thread execution in background
@@ -402,14 +413,16 @@ class SessionManager:
         except Exception as e:
             thread.set_error(str(e))
             thread.set_status(ThreadStatus.NEED_HELP)
-        finally:
-            git_ops.return_to_main(self.wiki)
+        # No return_to_main needed - thread uses its own worktree
 
     async def _cleanup_thread(self, thread_id: str):
-        """Clean up thread and its session."""
-        # Get thread for branch cleanup
+        """Clean up thread, its worktree, branch, and session."""
+        # Get thread for cleanup
         thread = self._get_thread(thread_id)
         if thread:
+            # Remove worktree first (must be done before deleting branch)
+            git_ops.remove_worktree(self.wiki, thread.branch)
+            # Then delete the branch
             git_ops.delete_thread_branch(self.wiki, thread.branch)
 
         # Cleanup session
@@ -422,7 +435,7 @@ class SessionManager:
             client_threads.discard(thread_id)
 
     async def _accept_thread(self, thread_id: str) -> AcceptResult:
-        """Accept thread changes - merge to main, keep thread with accepted status."""
+        """Accept thread changes - merge to main, cleanup worktree."""
         thread = self._get_thread(thread_id)
         if not thread or thread.status != ThreadStatus.REVIEW:
             return AcceptResult.ERROR
@@ -430,7 +443,8 @@ class SessionManager:
         result = git_ops.merge_thread(self.wiki, thread.branch)
 
         if result["success"]:
-            # Mark as accepted but keep the thread (don't delete branch or cleanup)
+            # Clean up worktree only, keep branch for history
+            git_ops.remove_worktree(self.wiki, thread.branch)
             thread.set_status(ThreadStatus.ACCEPTED)
             return AcceptResult.SUCCESS
 
@@ -442,22 +456,23 @@ class SessionManager:
         return AcceptResult.ERROR
 
     async def _reject_thread(self, thread_id: str) -> bool:
-        """Reject thread changes - mark as rejected, keep branch."""
+        """Reject thread changes - cleanup worktree but keep branch for history."""
         thread = self._get_thread(thread_id)
         if not thread:
             return False
 
-        # Mark as rejected but keep the thread and branch
+        # Clean up worktree only, keep branch for history
+        git_ops.remove_worktree(self.wiki, thread.branch)
         thread.set_status(ThreadStatus.REJECTED)
         return True
 
     async def _resolve_conflicts(self, thread_id: str):
-        """Auto-resolve merge conflicts."""
+        """Auto-resolve merge conflicts using thread's worktree."""
         thread = self._get_thread(thread_id)
         session_id = self.thread_sessions.get(thread_id)
         session = self.sessions.get(session_id) if session_id else None
 
-        if not thread or not session:
+        if not thread or not session or not thread.worktree_path:
             return
 
         thread.set_status(ThreadStatus.WORKING)
@@ -471,7 +486,9 @@ class SessionManager:
         })
 
         try:
-            git_ops.merge_main_into_thread(self.wiki, thread.branch)
+            # Create GitWiki for thread's worktree to perform merge
+            thread_wiki = GitWiki(thread.worktree_path)
+            git_ops.merge_main_into_thread(thread_wiki, thread.branch)
 
             resolve_msg = """
 There are merge conflicts with the main branch. Please:
@@ -481,7 +498,7 @@ There are merge conflicts with the main branch. Please:
 """
             thread.add_message("user", resolve_msg)
             await session.executor.process_turn(resolve_msg, custom_tools=session.tools)
-            git_ops.return_to_main(self.wiki)
+            # No return_to_main needed - thread uses its own worktree
 
         except Exception as e:
             thread.set_error(f"Conflict resolution failed: {e}")
@@ -612,8 +629,8 @@ There are merge conflicts with the main branch. Please:
             })
 
         # Process message if thread is working
+        # Thread uses its own worktree, no checkout needed
         if thread.status == ThreadStatus.WORKING:
-            git_ops.checkout_thread(self.wiki, thread.branch)
             thread.add_message("user", user_message)
             # Send user message to frontend
             await self.send_message(client_id, {
@@ -627,8 +644,6 @@ There are merge conflicts with the main branch. Please:
             if result.status == 'error':
                 thread.set_error(result.error)
                 thread.set_status(ThreadStatus.NEED_HELP)
-
-            git_ops.return_to_main(self.wiki)
 
         return {"type": "success"}
 

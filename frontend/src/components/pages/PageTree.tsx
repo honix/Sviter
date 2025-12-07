@@ -12,14 +12,13 @@ import {
   useDroppable
 } from '@dnd-kit/core';
 import { TreeItem, Page } from '../../types/page';
-import BranchSwitcher from '../git/BranchSwitcher';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Plus, FileText, FolderPlus, GripVertical, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Type for diff stats per page
-interface DiffStats {
+// Per-page diff stats (matches backend format)
+interface PageDiffStats {
   [pagePath: string]: {
     additions: number;
     deletions: number;
@@ -31,6 +30,8 @@ interface PageTreeProps {
   pages: Page[];
   currentPage: Page | null;
   expandedFolders: string[];
+  currentBranch: string;
+  pageUpdateCounter: number;
   onPageSelect: (page: Page | null) => void;
   onCreatePage: (title: string) => void;
   onDeletePage: (title: string) => void;
@@ -109,6 +110,8 @@ const PageTree: React.FC<PageTreeProps> = ({
   pages,
   currentPage,
   expandedFolders,
+  currentBranch,
+  pageUpdateCounter,
   onPageSelect,
   onCreatePage,
   onDeletePage,
@@ -119,37 +122,21 @@ const PageTree: React.FC<PageTreeProps> = ({
 }) => {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
-  const [currentBranch, setCurrentBranch] = useState<string>('main');
-  const [diffStats, setDiffStats] = useState<DiffStats>({});
+  const [diffStats, setDiffStats] = useState<PageDiffStats>({});
 
-  // Fetch current branch and diff stats
+  // Fetch diff stats when viewing a non-main branch
   useEffect(() => {
-    const fetchBranchAndStats = async () => {
-      try {
-        // Fetch current branch
-        const branchResponse = await fetch('http://localhost:8000/api/git/current-branch');
-        const branchData = await branchResponse.json();
-        setCurrentBranch(branchData.branch);
+    if (currentBranch === 'main') {
+      setDiffStats({});
+      return;
+    }
 
-        // If not on main, fetch diff stats
-        if (branchData.branch !== 'main') {
-          const statsResponse = await fetch('http://localhost:8000/api/git/diff-stats-by-page');
-          const statsData = await statsResponse.json();
-          setDiffStats(statsData.stats || {});
-        } else {
-          setDiffStats({});
-        }
-      } catch (error) {
-        console.error('Failed to fetch branch/diff stats:', error);
-      }
-    };
-
-    fetchBranchAndStats();
-
-    // Re-fetch when pages change (in case branch changed)
-    const interval = setInterval(fetchBranchAndStats, 5000);
-    return () => clearInterval(interval);
-  }, [pages]);
+    // Fetch per-page diff stats with explicit head branch
+    fetch(`http://localhost:8000/api/git/diff-stats-by-page?base=main&head=${encodeURIComponent(currentBranch)}`)
+      .then(r => r.ok ? r.json() : { stats: {} })
+      .then(data => setDiffStats(data.stats || {}))
+      .catch(() => setDiffStats({}));
+  }, [currentBranch, pageUpdateCounter]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -316,31 +303,31 @@ const PageTree: React.FC<PageTreeProps> = ({
             )}
             <span className="text-sm flex-1 truncate">{item.title}</span>
             <span className="text-xs text-muted-foreground">{childCount}</span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5 opacity-0 group-hover:opacity-100"
-              onClick={(e) => {
-                e.stopPropagation();
-                const msg = childCount > 0
-                  ? `Delete folder "${item.title}" and all its contents (${childCount} items)?`
-                  : `Delete folder "${item.title}"?`;
-                if (confirm(msg)) {
-                  onDeleteFolder(item.path);
-                }
-              }}
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
+            {currentBranch === 'main' && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 opacity-0 group-hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const msg = childCount > 0
+                    ? `Delete folder "${item.title}" and all its contents (${childCount} items)?`
+                    : `Delete folder "${item.title}"?`;
+                  if (confirm(msg)) {
+                    onDeleteFolder(item.path);
+                  }
+                }}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            )}
           </div>
         </FolderDropTarget>
       );
     }
 
     // Page item
-    // Get diff stats for this page
     const pageStats = diffStats[item.path];
-    const hasChanges = pageStats && (pageStats.additions > 0 || pageStats.deletions > 0);
 
     return (
       <div
@@ -355,43 +342,34 @@ const PageTree: React.FC<PageTreeProps> = ({
         <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab flex-shrink-0" />
         <FileText className="h-4 w-4 flex-shrink-0" />
         <span className="text-sm flex-1 truncate">{item.title}</span>
-        {/* Diff stats badge */}
-        {hasChanges && (
-          <span className="text-xs flex gap-1 flex-shrink-0 mr-1">
+        {pageStats && (pageStats.additions > 0 || pageStats.deletions > 0) && (
+          <span className="text-xs font-mono flex gap-1 px-1.5 py-0.5 rounded bg-background/80 border border-border/50">
             {pageStats.additions > 0 && (
-              <span className={cn(
-                "text-green-600 dark:text-green-400",
-                isSelected && "text-green-300"
-              )}>
-                +{pageStats.additions}
-              </span>
+              <span className="text-green-600 dark:text-green-400">+{pageStats.additions}</span>
             )}
             {pageStats.deletions > 0 && (
-              <span className={cn(
-                "text-red-500 dark:text-red-400",
-                isSelected && "text-red-300"
-              )}>
-                -{pageStats.deletions}
-              </span>
+              <span className="text-red-600 dark:text-red-400">-{pageStats.deletions}</span>
             )}
           </span>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(
-            "h-5 w-5 opacity-0 group-hover:opacity-100",
-            isSelected && "hover:bg-primary-foreground/20"
-          )}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (confirm(`Delete page "${item.title}"?`)) {
-              onDeletePage(item.title);
-            }
-          }}
-        >
-          <Trash2 className="h-3 w-3" />
-        </Button>
+        {currentBranch === 'main' && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-5 w-5 opacity-0 group-hover:opacity-100",
+              isSelected && "hover:bg-primary-foreground/20"
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm(`Delete page "${item.title}"?`)) {
+                onDeletePage(item.title);
+              }
+            }}
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        )}
       </div>
     );
   };
@@ -405,17 +383,21 @@ const PageTree: React.FC<PageTreeProps> = ({
           Pages
         </h2>
 
-        <BranchSwitcher />
-
-        <div className="flex gap-2">
-          <Button onClick={handleCreatePage} className="flex-1" size="sm">
-            <Plus className="h-4 w-4 mr-2" />
-            New Page
-          </Button>
-          <Button onClick={handleCreateFolder} variant="outline" size="sm" title="New Folder">
-            <FolderPlus className="h-4 w-4" />
-          </Button>
-        </div>
+        {currentBranch === 'main' ? (
+          <div className="flex gap-2">
+            <Button onClick={handleCreatePage} className="flex-1" size="sm">
+              <Plus className="h-4 w-4 mr-2" />
+              New Page
+            </Button>
+            <Button onClick={handleCreateFolder} variant="outline" size="sm" title="New Folder">
+              <FolderPlus className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
+          <div className="text-sm text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
+            Reviewing thread changes
+          </div>
+        )}
       </div>
 
       {/* Tree Content */}

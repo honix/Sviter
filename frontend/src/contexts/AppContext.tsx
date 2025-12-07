@@ -3,7 +3,6 @@ import { Page, ViewMode, TreeItem } from '../types/page';
 import { createWebSocketService, WebSocketService } from '../services/websocket';
 import { WebSocketMessage } from '../types/chat';
 import { treeApi } from '../services/tree-api';
-import { GitAPI } from '../services/git-api';
 import type { Thread, ThreadMessage } from '../types/thread';
 
 interface AppState {
@@ -24,9 +23,10 @@ interface AppState {
   // Page tree state
   pageTree: TreeItem[];
   expandedFolders: string[];
-  // Branch state
-  branches: string[];
+  // Branch state (for diff view)
   currentBranch: string;
+  // Refresh trigger for real-time updates
+  pageUpdateCounter: number;
 }
 
 type AppAction =
@@ -53,12 +53,11 @@ type AppAction =
   // Tree actions
   | { type: 'SET_PAGE_TREE'; payload: TreeItem[] }
   | { type: 'TOGGLE_FOLDER'; payload: string }
-  // Branch actions
-  | { type: 'SET_BRANCHES'; payload: string[] }
+  // Branch actions (for diff view only - no actual checkout)
   | { type: 'SET_CURRENT_BRANCH'; payload: string }
-  | { type: 'ADD_BRANCH'; payload: string }
-  | { type: 'REMOVE_BRANCH'; payload: string }
-  | { type: 'UPDATE_CURRENT_PAGE_CONTENT'; payload: string };
+  | { type: 'UPDATE_CURRENT_PAGE_CONTENT'; payload: string }
+  // Refresh trigger
+  | { type: 'INCREMENT_PAGE_UPDATE_COUNTER' };
 
 const initialState: AppState = {
   pages: [],
@@ -77,9 +76,10 @@ const initialState: AppState = {
   // Tree state
   pageTree: [],
   expandedFolders: [],
-  // Branch state
-  branches: [],
-  currentBranch: 'main'
+  // Branch state (for diff view - no actual checkout)
+  currentBranch: 'main',
+  // Refresh trigger for real-time updates
+  pageUpdateCounter: 0
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -227,21 +227,9 @@ function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
-    // Branch reducers
-    case 'SET_BRANCHES':
-      return { ...state, branches: action.payload };
-
+    // Branch reducer (for diff view only - no actual checkout)
     case 'SET_CURRENT_BRANCH':
       return { ...state, currentBranch: action.payload };
-
-    case 'ADD_BRANCH':
-      if (state.branches.includes(action.payload)) {
-        return state;
-      }
-      return { ...state, branches: [...state.branches, action.payload] };
-
-    case 'REMOVE_BRANCH':
-      return { ...state, branches: state.branches.filter(b => b !== action.payload) };
 
     case 'UPDATE_CURRENT_PAGE_CONTENT':
       if (!state.currentPage) return state;
@@ -249,6 +237,9 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         currentPage: { ...state.currentPage, content: action.payload }
       };
+
+    case 'INCREMENT_PAGE_UPDATE_COUNTER':
+      return { ...state, pageUpdateCounter: state.pageUpdateCounter + 1 };
 
     default:
       return state;
@@ -281,11 +272,6 @@ interface AppContextType {
     moveItem: (sourcePath: string, targetParentPath: string | null, newOrder: number) => Promise<void>;
     createFolder: (name: string, parentPath?: string) => Promise<void>;
     deleteFolder: (path: string) => Promise<void>;
-    // Branch actions
-    refreshBranches: () => Promise<void>;
-    checkoutBranch: (branch: string) => Promise<void>;
-    createBranch: (name: string) => Promise<void>;
-    deleteBranch: (name: string) => Promise<void>;
   };
   websocket: {
     sendMessage: (message: unknown) => void;
@@ -308,7 +294,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const pageTreeRef = useRef<TreeItem[]>([]);
   const threadsRef = useRef<Thread[]>([]);
   const currentBranchRef = useRef<string>('main');
-  const branchesRef = useRef<string[]>([]);
 
   // Guards to prevent concurrent loads
   const isLoadingPagesRef = useRef(false);
@@ -334,10 +319,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     currentBranchRef.current = state.currentBranch;
   }, [state.currentBranch]);
-
-  useEffect(() => {
-    branchesRef.current = state.branches;
-  }, [state.branches]);
 
   // Initialize WebSocket service
   useEffect(() => {
@@ -393,12 +374,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             message: threadMessage
           }
         });
-      } else if (message.type === 'branch_created') {
-        dispatch({ type: 'ADD_BRANCH', payload: message.branch });
-      } else if (message.type === 'branch_switched') {
-        dispatch({ type: 'SET_CURRENT_BRANCH', payload: message.branch });
-      } else if (message.type === 'branch_deleted') {
-        dispatch({ type: 'REMOVE_BRANCH', payload: message.branch });
       } else if (message.type === 'page_updated') {
         // Reload pages and tree when content changes
         if (reloadFunctionsRef.current) {
@@ -410,6 +385,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             reloadFunctionsRef.current.refreshCurrentPage(message.title);
           }
         }
+        // Trigger diff view refresh
+        dispatch({ type: 'INCREMENT_PAGE_UPDATE_COUNTER' });
       } else if (message.type === 'pages_changed') {
         // Reload pages and tree when content changes
         if (reloadFunctionsRef.current) {
@@ -585,48 +562,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [loadPages, areTreesEqual, refreshCurrentPage]);
 
-  // Load branches
-  const loadBranches = useCallback(async () => {
-    try {
-      const [branchList, currentBranch] = await Promise.all([
-        GitAPI.listBranches(),
-        GitAPI.getCurrentBranch()
-      ]);
-      dispatch({ type: 'SET_BRANCHES', payload: branchList });
-      dispatch({ type: 'SET_CURRENT_BRANCH', payload: currentBranch });
-    } catch (err) {
-      console.error('Failed to load branches:', err);
-    }
-  }, []);
-
-  // Shared helper: switch to a branch with loading indicator
-  const switchToBranch = useCallback(async (targetBranch: string) => {
-    const currentBranch = currentBranchRef.current;
-    if (targetBranch === currentBranch) return;
-
-    dispatch({ type: 'SET_LOADING', payload: true });
-    try {
-      await GitAPI.checkoutBranch(targetBranch);
-      dispatch({ type: 'SET_CURRENT_BRANCH', payload: targetBranch });
-      await loadPages();
-      const tree = await treeApi.getTree();
-      dispatch({ type: 'SET_PAGE_TREE', payload: tree });
-      // Refresh current page content from the new branch
-      const currentPage = currentPageRef.current;
-      if (currentPage?.title) {
-        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(currentPage.title)}`);
-        if (response.ok) {
-          const fullPage = await response.json();
-          dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
-        }
-      }
-    } catch (err) {
-      console.error('Failed to switch branch:', err);
-      dispatch({ type: 'SET_ERROR', payload: 'Failed to switch branch' });
-    } finally {
-      dispatch({ type: 'SET_LOADING', payload: false });
-    }
-  }, [loadPages]);
 
   // Handle page updates from lastMessage
   // Note: page_updated and pages_changed are handled directly in the WebSocket handler above
@@ -637,21 +572,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (lastMessage.type === 'page_update') {
       // Use reloadFunctionsRef to avoid dependency on loadPages
       reloadFunctionsRef.current?.loadPages();
-    } else if (lastMessage.type === 'branch_switched') {
-      reloadFunctionsRef.current?.loadPages();
     }
-    // page_updated is handled in the direct WebSocket handler at line 373
-  }, [lastMessage]); // Removed loadPages from deps - use ref instead
+    // page_updated is handled in the direct WebSocket handler
+  }, [lastMessage]);
 
   // Load pages on init (with loading indicator)
   useEffect(() => {
     loadPages(true);
   }, []); // Run only once on mount
-
-  // Load branches on init
-  useEffect(() => {
-    loadBranches();
-  }, [loadBranches]);
 
   // WebSocket functions
   const sendMessage = useCallback((message: unknown) => {
@@ -799,19 +727,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         thread_id: threadId
       });
 
-      // Determine target branch and switch if needed
+      // With worktrees, threads run in isolated directories.
+      // No git checkout needed - diff views use git diff API with branch refs.
       if (threadId) {
         const thread = threadsRef.current.find(t => t.id === threadId);
         if (thread?.branch) {
-          // Add branch to list if not present
-          if (!branchesRef.current.includes(thread.branch)) {
-            dispatch({ type: 'ADD_BRANCH', payload: thread.branch });
-          }
-          await switchToBranch(thread.branch);
+          // Auto-show diff view when selecting a thread
+          dispatch({ type: 'SET_CURRENT_BRANCH', payload: thread.branch });
+          dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: thread.branch });
+          dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'branch-diff' });
         }
       } else {
-        // Deselecting thread - go back to main
-        await switchToBranch('main');
+        // Deselecting thread - back to page view
+        dispatch({ type: 'SET_CURRENT_BRANCH', payload: 'main' });
+        dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'page' });
+        dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: null });
       }
     },
     acceptThread: (threadId: string) => {
@@ -883,52 +813,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (err) {
         console.error('Failed to delete folder:', err);
         dispatch({ type: 'SET_ERROR', payload: 'Failed to delete folder' });
-      }
-    },
-
-    // Branch actions
-    refreshBranches: loadBranches,
-
-    checkoutBranch: async (branch: string) => {
-      await switchToBranch(branch);
-    },
-
-    createBranch: async (name: string) => {
-      dispatch({ type: 'SET_LOADING', payload: true });
-      try {
-        const newBranch = await GitAPI.createBranch(name, state.currentBranch);
-        const branchList = await GitAPI.listBranches();
-        dispatch({ type: 'SET_BRANCHES', payload: branchList });
-        dispatch({ type: 'SET_CURRENT_BRANCH', payload: newBranch });
-      } catch (err: unknown) {
-        console.error('Failed to create branch:', err);
-        dispatch({ type: 'SET_ERROR', payload: (err as Error).message || 'Failed to create branch' });
-        throw err;
-      } finally {
-        dispatch({ type: 'SET_LOADING', payload: false });
-      }
-    },
-
-    deleteBranch: async (name: string) => {
-      if (name === state.currentBranch) {
-        dispatch({ type: 'SET_ERROR', payload: 'Cannot delete current branch' });
-        return;
-      }
-      if (name === 'main') {
-        dispatch({ type: 'SET_ERROR', payload: 'Cannot delete main branch' });
-        return;
-      }
-
-      dispatch({ type: 'SET_LOADING', payload: true });
-      try {
-        await GitAPI.deleteBranch(name, true);
-        const branchList = await GitAPI.listBranches();
-        dispatch({ type: 'SET_BRANCHES', payload: branchList });
-      } catch (err: unknown) {
-        console.error('Failed to delete branch:', err);
-        dispatch({ type: 'SET_ERROR', payload: (err as Error).message || 'Failed to delete branch' });
-      } finally {
-        dispatch({ type: 'SET_LOADING', payload: false });
       }
     }
   };

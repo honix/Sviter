@@ -4,7 +4,7 @@ import { useAppContext } from '../../contexts/AppContext';
 
 const LeftPanel: React.FC = () => {
   const { state, actions } = useAppContext();
-  const { pages, currentPage, pageTree, expandedFolders } = state;
+  const { pages, currentPage, pageTree, expandedFolders, currentBranch, pageUpdateCounter } = state;
   const {
     setCurrentPage,
     createPage,
@@ -27,6 +27,8 @@ const LeftPanel: React.FC = () => {
       pages={pages}
       currentPage={currentPage}
       expandedFolders={expandedFolders}
+      currentBranch={currentBranch}
+      pageUpdateCounter={pageUpdateCounter}
       onPageSelect={setCurrentPage}
       onCreatePage={createPage}
       onDeletePage={deletePage}

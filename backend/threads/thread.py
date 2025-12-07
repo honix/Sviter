@@ -58,7 +58,7 @@ class Thread:
     Thread = Agent + Branch + Conversation + Status
 
     Each thread represents an autonomous agent working on a specific task
-    on its own git branch.
+    on its own git branch, with its own worktree for concurrent execution.
     """
     id: str
     name: str
@@ -75,6 +75,9 @@ class Thread:
 
     # Tracking
     client_id: Optional[str] = None  # Which client owns this thread
+
+    # Worktree path for concurrent execution
+    worktree_path: Optional[str] = None  # Path to thread's worktree directory
 
     @classmethod
     def create(cls, name: str, goal: str, client_id: str = None) -> 'Thread':
