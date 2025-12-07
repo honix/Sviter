@@ -276,11 +276,11 @@ class ToolBuilder:
         return [
             WikiTool(
                 name="read_page",
-                description="Read the content of a wiki page by title.",
+                description="Read a wiki page. Returns full content and metadata (author, dates, tags). Use this before editing to see current content.",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "title": {"type": "string", "description": "Page title to read"}
+                        "title": {"type": "string", "description": "Page title (case-sensitive)"}
                     },
                     "required": ["title"]
                 },
@@ -288,11 +288,11 @@ class ToolBuilder:
             ),
             WikiTool(
                 name="find_pages",
-                description="Search for wiki pages by title or content.",
+                description="Search wiki pages by keyword. Returns matching titles with excerpts. Use to discover relevant pages.",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "Search query"},
+                        "query": {"type": "string", "description": "Search term (matches title and content)"},
                         "limit": {"type": "integer", "description": "Max results (default: 10)"}
                     },
                     "required": ["query"]
@@ -301,7 +301,7 @@ class ToolBuilder:
             ),
             WikiTool(
                 name="list_all_pages",
-                description="Get a list of all wiki pages.",
+                description="List all wiki pages with titles, authors, and dates. Use to get an overview of the wiki.",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -319,14 +319,14 @@ class ToolBuilder:
         return [
             WikiTool(
                 name="edit_page",
-                description="Create or update a wiki page with new content.",
+                description="Create or update a wiki page. Creates new page if it doesn't exist. Always read_page first to see current content before editing.",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "title": {"type": "string", "description": "Page title"},
-                        "content": {"type": "string", "description": "New content (markdown format)"},
-                        "author": {"type": "string", "description": "Author name (optional)"},
-                        "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags (optional)"}
+                        "title": {"type": "string", "description": "Page title (case-sensitive)"},
+                        "content": {"type": "string", "description": "Complete page content in markdown format"},
+                        "author": {"type": "string", "description": "Author name (optional, defaults to 'AI Agent')"},
+                        "tags": {"type": "array", "items": {"type": "string"}, "description": "Page tags (optional)"}
                     },
                     "required": ["title", "content"]
                 },
@@ -343,12 +343,12 @@ class ToolBuilder:
         return [
             WikiTool(
                 name="spawn_thread",
-                description="Create a new worker thread to edit wiki pages. The thread will work independently on the given goal.",
+                description="Create a worker thread to edit wiki pages. The thread works on its own git branch and can read/edit pages independently. User reviews changes when done.",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "name": {"type": "string", "description": "Short name for the thread (e.g., 'update-python-docs')"},
-                        "goal": {"type": "string", "description": "Clear description of what the thread should accomplish"}
+                        "name": {"type": "string", "description": "Short kebab-case name (e.g., 'update-python-docs', 'fix-typos')"},
+                        "goal": {"type": "string", "description": "Specific task description - be clear about what pages to edit and how"}
                     },
                     "required": ["name", "goal"]
                 },
@@ -356,7 +356,7 @@ class ToolBuilder:
             ),
             WikiTool(
                 name="list_threads",
-                description="List all threads and their current status (working, need_help, review, accepted, rejected).",
+                description="List all threads with their status. Check this before spawning to avoid duplicates. Statuses: working, need_help, review, accepted, rejected.",
                 parameters={
                     "type": "object",
                     "properties": {},
@@ -375,11 +375,11 @@ class ToolBuilder:
         return [
             WikiTool(
                 name="request_help",
-                description="Ask the user for help when you're stuck or need clarification.",
+                description="Ask the user for help. Use when stuck, need clarification, or unsure how to proceed. Pauses execution until user responds.",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "question": {"type": "string", "description": "Your question for the user - be specific about what you need"}
+                        "question": {"type": "string", "description": "Specific question - explain what you tried and what you need"}
                     },
                     "required": ["question"]
                 },
@@ -387,11 +387,11 @@ class ToolBuilder:
             ),
             WikiTool(
                 name="mark_for_review",
-                description="Mark your changes as complete and ready for user review.",
+                description="Mark task complete for user review. User will accept (merge to main), request changes, or reject. Call this when you've finished your goal.",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "summary": {"type": "string", "description": "Summary of changes made - describe what you did"}
+                        "summary": {"type": "string", "description": "Summary of what you changed - list pages edited and key modifications"}
                     },
                     "required": ["summary"]
                 },
