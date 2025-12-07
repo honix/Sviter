@@ -228,7 +228,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
               </div>
             ) : message.type === 'tool_call' ? (
               // Tool call - subtle indicator with animated dot
-              <div key={message.id} className="my-2 py-2 px-4 flex items-center gap-2 opacity-60">
+              <div key={message.id} className="mb-2 pb-2 px-4 flex items-center gap-2 opacity-60">
                 <div className={`w-1.5 h-1.5 rounded-full bg-primary/60 ${isWorking ? 'animate-pulse' : ''}`} />
                 <span className="text-xs text-muted-foreground font-mono tracking-wide">
                   Tool: {message.tool_name}
