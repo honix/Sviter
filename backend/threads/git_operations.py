@@ -39,25 +39,57 @@ def create_worktree(wiki: GitWiki, branch_name: str) -> Path:
     return worktree_path
 
 
-def remove_worktree(wiki: GitWiki, branch_name: str) -> None:
+def remove_worktree(wiki: GitWiki, branch_name: str) -> bool:
     """
     Remove a worktree after thread completion.
 
     Should be called during accept/reject before deleting the branch.
+    Returns True if worktree was successfully removed or didn't exist.
 
     Args:
         wiki: GitWiki instance (main wiki)
         branch_name: Branch name whose worktree to remove
+
+    Returns:
+        True if worktree removed successfully, False otherwise
     """
     worktrees_path = Path(wiki.repo_path) / WORKTREES_DIR
     safe_name = branch_name.replace("/", "-")
     worktree_path = worktrees_path / safe_name
 
-    if worktree_path.exists():
+    if not worktree_path.exists():
+        # Already gone, prune any stale entries
         try:
-            wiki.repo.git.worktree("remove", str(worktree_path), "--force")
-        except Exception as e:
-            print(f"Warning: Could not remove worktree {worktree_path}: {e}")
+            wiki.repo.git.worktree("prune")
+        except Exception:
+            pass
+        return True
+
+    # Try to remove the worktree
+    try:
+        wiki.repo.git.worktree("remove", str(worktree_path), "--force")
+        return True
+    except Exception as e:
+        print(f"Warning: First worktree remove attempt failed: {e}")
+
+    # Retry with prune first
+    try:
+        wiki.repo.git.worktree("prune")
+        wiki.repo.git.worktree("remove", str(worktree_path), "--force")
+        return True
+    except Exception as e:
+        print(f"Warning: Could not remove worktree {worktree_path} after prune: {e}")
+
+    # Last resort: manually remove directory
+    try:
+        import shutil
+        shutil.rmtree(worktree_path)
+        wiki.repo.git.worktree("prune")
+        print(f"Manually removed worktree directory: {worktree_path}")
+        return True
+    except Exception as e:
+        print(f"Error: Failed to manually remove worktree {worktree_path}: {e}")
+        return False
 
 
 def cleanup_orphaned_worktrees(wiki: GitWiki) -> None:

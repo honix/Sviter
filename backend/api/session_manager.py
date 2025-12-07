@@ -269,7 +269,11 @@ class SessionManager:
             thread.set_error("Thread has no worktree path")
             return False
 
-        thread_wiki = GitWiki(thread.worktree_path)
+        try:
+            thread_wiki = GitWiki(thread.worktree_path)
+        except Exception as e:
+            thread.set_error(f"Failed to initialize worktree wiki: {e}")
+            return False
 
         # Status change callback
         async def on_status_change(status: str, message: str):
@@ -421,9 +425,12 @@ class SessionManager:
         thread = self._get_thread(thread_id)
         if thread:
             # Remove worktree first (must be done before deleting branch)
-            git_ops.remove_worktree(self.wiki, thread.branch)
-            # Then delete the branch
-            git_ops.delete_thread_branch(self.wiki, thread.branch)
+            worktree_removed = git_ops.remove_worktree(self.wiki, thread.branch)
+            # Only delete branch if worktree was successfully removed
+            if worktree_removed:
+                git_ops.delete_thread_branch(self.wiki, thread.branch)
+            else:
+                print(f"Warning: Could not remove worktree for {thread.branch}, skipping branch deletion")
 
         # Cleanup session
         session_id = self.thread_sessions.pop(thread_id, None)

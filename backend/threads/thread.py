@@ -95,13 +95,14 @@ class Thread:
         if len(safe_name) > 50:
             safe_name = safe_name[:50].rstrip('-')
 
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        # Short UUID for unique branch names
+        short_uuid = str(uuid.uuid4())[:6]
 
         return cls(
             id=str(uuid.uuid4()),
             name=name,
             goal=goal,
-            branch=f"thread/{safe_name}/{timestamp}",
+            branch=f"thread/{safe_name}-{short_uuid}",
             status=ThreadStatus.WORKING,
             created_at=datetime.now(),
             updated_at=datetime.now(),
