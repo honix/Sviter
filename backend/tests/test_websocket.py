@@ -61,7 +61,7 @@ class TestWebSocketManager:
             mock_websocket.accept.assert_called_once()
             
             # Test disconnection
-            websocket_manager.disconnect(client_id)
+            await websocket_manager.disconnect(client_id)
             
             assert client_id not in websocket_manager.active_connections
             assert client_id not in websocket_manager.chat_handlers

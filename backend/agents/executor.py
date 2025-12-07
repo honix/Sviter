@@ -289,8 +289,11 @@ class AgentExecutor:
         """Get current conversation history"""
         return self.conversation_history.copy()
 
-    def reset_conversation(self):
+    async def reset_conversation(self):
         """Reset conversation to initial state"""
+        # Disconnect Claude SDK client if active
+        if self.adapter and hasattr(self.adapter, 'disconnect'):
+            await self.adapter.disconnect()
         self.conversation_history = []
         self.adapter = None
         self.iteration_count = 0
@@ -302,7 +305,7 @@ class AgentExecutor:
         self.human_in_loop = True
         self.on_start_called = False
 
-    def end_session(self, call_on_finish: bool = True) -> Dict[str, Any]:
+    async def end_session(self, call_on_finish: bool = True) -> Dict[str, Any]:
         """
         End the session and clean up.
 
@@ -322,6 +325,10 @@ class AgentExecutor:
             "branch_deleted": None,
             "switched_to_branch": None
         }
+
+        # Disconnect Claude SDK client if active
+        if self.adapter and hasattr(self.adapter, 'disconnect'):
+            await self.adapter.disconnect()
 
         if call_on_finish and self.current_agent_class:
             try:

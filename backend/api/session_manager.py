@@ -86,12 +86,12 @@ class SessionManager:
         # Start main session
         await self._start_main_session(client_id)
 
-    def disconnect(self, client_id: str):
+    async def disconnect(self, client_id: str):
         """Clean up connection and main session, but keep threads."""
         # End main session
         if client_id in self.main_sessions:
             session_id = self.main_sessions.pop(client_id)
-            self._cleanup_session(session_id)
+            await self._cleanup_session(session_id)
 
         # Keep all threads on disconnect - user might reconnect
         # Threads persist until explicitly accepted/rejected or server restart
@@ -107,7 +107,7 @@ class SessionManager:
                 await self.connections[client_id].send_text(json.dumps(message))
             except Exception as e:
                 if "connection closed" in str(e).lower():
-                    self.disconnect(client_id)
+                    await self.disconnect(client_id)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Session Management (shared for main and threads)
@@ -150,7 +150,7 @@ class SessionManager:
 
         return True
 
-    def _cleanup_session(self, session_id: str):
+    async def _cleanup_session(self, session_id: str):
         """Clean up a session."""
         # Cancel background task
         if session_id in self.tasks:
@@ -161,7 +161,7 @@ class SessionManager:
         session = self.sessions.pop(session_id, None)
         if session:
             try:
-                session.executor.end_session(call_on_finish=False)
+                await session.executor.end_session(call_on_finish=False)
             except Exception:
                 pass
 
@@ -405,7 +405,7 @@ class SessionManager:
         finally:
             git_ops.return_to_main(self.wiki)
 
-    def _cleanup_thread(self, thread_id: str):
+    async def _cleanup_thread(self, thread_id: str):
         """Clean up thread and its session."""
         # Get thread for branch cleanup
         thread = self._get_thread(thread_id)
@@ -415,7 +415,7 @@ class SessionManager:
         # Cleanup session
         session_id = self.thread_sessions.pop(thread_id, None)
         if session_id:
-            self._cleanup_session(session_id)
+            await self._cleanup_session(session_id)
 
         # Remove from client tracking
         for client_threads in self.client_threads.values():
@@ -525,7 +525,7 @@ There are merge conflicts with the main branch. Please:
         elif message_type == "reset":
             # Reset main conversation
             if client_id in self.main_sessions:
-                self._cleanup_session(self.main_sessions[client_id])
+                await self._cleanup_session(self.main_sessions[client_id])
                 del self.main_sessions[client_id]
             self.client_view[client_id] = "main"
             await self._start_main_session(client_id)
@@ -572,14 +572,14 @@ There are merge conflicts with the main branch. Please:
         try:
             success = await self._start_thread(thread, client_id)
             if not success:
-                self._cleanup_thread(thread.id)
+                await self._cleanup_thread(thread.id)
                 await self.send_message(client_id, {
                     "type": "thread_deleted",
                     "thread_id": thread.id,
                     "reason": "start_failed"
                 })
         except Exception as e:
-            self._cleanup_thread(thread.id)
+            await self._cleanup_thread(thread.id)
             await self.send_message(client_id, {
                 "type": "thread_deleted",
                 "thread_id": thread.id,
@@ -772,6 +772,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = "default"):
                 await session_manager.send_message(client_id, response)
 
     except WebSocketDisconnect:
-        session_manager.disconnect(client_id)
+        await session_manager.disconnect(client_id)
     except Exception:
-        session_manager.disconnect(client_id)
+        await session_manager.disconnect(client_id)

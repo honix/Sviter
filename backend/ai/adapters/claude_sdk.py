@@ -37,7 +37,7 @@ class ClaudeSDKAdapter(LLMAdapter):
     - Tools via MCP server (in-process)
     - Restricts to ONLY wiki tools (no filesystem, bash, etc.)
     - Supports model selection via set_model()
-    - Maintains conversation history across calls
+    - Persistent client maintains conversation history automatically
     """
 
     MCP_SERVER_NAME = "wiki"  # Tools will be named: mcp__wiki__read_page, etc.
@@ -65,18 +65,25 @@ class ClaudeSDKAdapter(LLMAdapter):
         self._tools: List['WikiTool'] = []
         self._on_tool_call: Optional[Callable[[Dict], Awaitable[None]]] = None
         self._tool_call_count: int = 0
-        # Conversation history for context (with size limit to prevent unbounded growth)
-        self._conversation_history: List[Dict[str, str]] = []
-        self._max_history_size: int = 50  # Maximum messages to keep in history
+        # Persistent client - SDK maintains conversation history automatically
+        self._client: Optional['ClaudeSDKClient'] = None
+        self._client_connected: bool = False
 
-    def _trim_history(self):
-        """Trim conversation history to max size, keeping most recent messages."""
-        if len(self._conversation_history) > self._max_history_size:
-            self._conversation_history = self._conversation_history[-self._max_history_size:]
+    async def disconnect(self):
+        """Disconnect and clean up the persistent client."""
+        if self._client:
+            try:
+                await self._client.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._client = None
+            self._client_connected = False
 
     def clear_history(self):
-        """Clear conversation history."""
-        self._conversation_history = []
+        """Clear conversation history by resetting the client."""
+        # Will create fresh client on next process_conversation call
+        self._client = None
+        self._client_connected = False
 
     def _create_mcp_server(self, tools: List['WikiTool']):
         """
@@ -138,25 +145,25 @@ class ClaudeSDKAdapter(LLMAdapter):
         on_tool_call: Optional[Callable[[Dict], Awaitable[None]]] = None,
     ) -> ConversationResult:
         """
-        Process conversation with Claude SDK (SDK handles loop internally).
+        Process conversation with Claude SDK using persistent client.
 
+        The SDK maintains conversation history automatically across calls.
         IMPORTANT: Uses allowed_tools to restrict Claude to ONLY wiki MCP tools.
-        This prevents filesystem access, command execution, file search.
 
         Args:
             user_message: User's message/query
-            conversation_history: Previous messages (includes system prompt)
+            conversation_history: Previous messages (includes system prompt) - used for system prompt extraction only
             tools: List of WikiTool objects
             max_turns: Maximum conversation turns
             on_message: Callback for streaming (type, content)
-            on_tool_call: Callback for tool execution (not used - SDK handles internally)
+            on_tool_call: Callback for tool execution
 
         Returns:
             ConversationResult with final response
         """
         print(f"🔵 ClaudeSDKAdapter.process_conversation called with {len(tools)} tools")
         print(f"🔵 User message: {user_message[:50]}...")
-        print(f"🔵 Conversation history length: {len(self._conversation_history)}")
+        print(f"🔵 Client connected: {self._client_connected}")
 
         # Extract system prompt from conversation history
         system_prompt = self.system_prompt
@@ -172,70 +179,45 @@ class ClaudeSDKAdapter(LLMAdapter):
         # Create MCP server with tools (uses stored callback)
         self._create_mcp_server(tools)
 
-        # Build context message including conversation history
-        # Since Claude SDK creates a fresh client each time, we include history in the message
-        context_parts = []
-        if self._conversation_history:
-            context_parts.append("Previous conversation context:")
-            for msg in self._conversation_history[-10:]:  # Last 10 exchanges for context
-                role = msg.get("role", "unknown")
-                content = msg.get("content", "")
-                if role == "user":
-                    context_parts.append(f"User: {content}")
-                elif role == "assistant":
-                    context_parts.append(f"Assistant: {content}")
-            context_parts.append("")
-            context_parts.append("Current message:")
-
-        # Build the full message with context
-        if context_parts:
-            full_message = "\n".join(context_parts) + "\n" + user_message
-        else:
-            full_message = user_message
-
-        # Store current user message in history (with size limit)
-        self._conversation_history.append({"role": "user", "content": user_message})
-        self._trim_history()
-
-        options = ClaudeAgentOptions(
-            system_prompt=system_prompt,
-            max_turns=max_turns,
-            model=self.model,
-            # mcp_servers is a dict: {"server_name": config}
-            mcp_servers={self.MCP_SERVER_NAME: self.mcp_server},
-            # CRITICAL: Restrict to ONLY our wiki MCP tools
-            # This blocks filesystem, bash, and all other Claude Code tools
-            allowed_tools=self.tool_names,
-            # Allow tools to run without asking for permission
-            permission_mode='bypassPermissions',
-        )
-
         try:
-            async with ClaudeSDKClient(options=options) as client:
-                await client.query(full_message)
-                response_text = ""
-                async for msg in client.receive_response():
-                    # Extract text content from AssistantMessage
-                    # Tool calls are reported from MCP wrapper with results
-                    if isinstance(msg, AssistantMessage) and msg.content:
-                        for block in msg.content:
-                            if isinstance(block, TextBlock):
-                                response_text += block.text
-                                if on_message:
-                                    await on_message("assistant", block.text)
-
-                # Store assistant response in history (with size limit)
-                if response_text:
-                    self._conversation_history.append({"role": "assistant", "content": response_text})
-                    self._trim_history()
-
-                return ConversationResult(
-                    status='completed',
-                    stop_reason='natural_completion',
-                    iterations=max(1, self._tool_call_count),  # Count tool calls as iterations
-                    final_response=response_text
+            # Create client if not exists (first call)
+            if not self._client:
+                options = ClaudeAgentOptions(
+                    system_prompt=system_prompt,
+                    max_turns=max_turns,
+                    model=self.model,
+                    mcp_servers={self.MCP_SERVER_NAME: self.mcp_server},
+                    # CRITICAL: Restrict to ONLY our wiki MCP tools
+                    allowed_tools=self.tool_names,
+                    permission_mode='bypassPermissions',
                 )
+                self._client = ClaudeSDKClient(options=options)
+                await self._client.__aenter__()
+                self._client_connected = True
+                print("🔵 Created new persistent ClaudeSDKClient")
+
+            # Send message - SDK maintains conversation history automatically
+            await self._client.query(user_message)
+
+            response_text = ""
+            async for msg in self._client.receive_response():
+                # Extract text content from AssistantMessage
+                if isinstance(msg, AssistantMessage) and msg.content:
+                    for block in msg.content:
+                        if isinstance(block, TextBlock):
+                            response_text += block.text
+                            if on_message:
+                                await on_message("assistant", block.text)
+
+            return ConversationResult(
+                status='completed',
+                stop_reason='natural_completion',
+                iterations=max(1, self._tool_call_count),
+                final_response=response_text
+            )
         except Exception as e:
+            # Reset client on error so next call creates fresh one
+            await self.disconnect()
             return ConversationResult(
                 status='error',
                 stop_reason='exception',
