@@ -124,14 +124,14 @@ export function CodeMirrorDiffView({
       EditorView.theme({
         '&': {
           height: '100%',
-          fontSize: '13px',
+          fontSize: '14px',
         },
         '.cm-scroller': {
           overflow: 'auto',
           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
         },
         '.cm-content': {
-          padding: '8px',
+          padding: '16px',
         },
         '.cm-gutters': {
           backgroundColor: 'transparent',
@@ -183,7 +183,7 @@ export function CodeMirrorDiffView({
   return (
     <div
       ref={containerRef}
-      className={cn("h-full overflow-hidden", className)}
+      className={cn("h-full overflow-hidden bg-background", className)}
     />
   );
 }

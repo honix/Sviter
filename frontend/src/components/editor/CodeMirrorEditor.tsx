@@ -1,7 +1,7 @@
 /**
  * CodeMirrorEditor - Plain text/markdown editor using CodeMirror
  */
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 import { EditorView, basicSetup } from 'codemirror';
 import { EditorState } from '@codemirror/state';
 import { markdown } from '@codemirror/lang-markdown';
@@ -23,17 +23,12 @@ export function CodeMirrorEditor({
 }: CodeMirrorEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const contentRef = useRef(content);
+  const onChangeRef = useRef(onChange);
+  const isInternalChange = useRef(false);
+  const initialContentRef = useRef(content);
 
-  // Update content ref
-  contentRef.current = content;
-
-  const handleChange = useCallback(() => {
-    if (viewRef.current && onChange) {
-      const newContent = viewRef.current.state.doc.toString();
-      onChange(newContent);
-    }
-  }, [onChange]);
+  // Keep onChange ref updated
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -48,7 +43,9 @@ export function CodeMirrorEditor({
       EditorState.readOnly.of(!editable),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && editable) {
-          handleChange();
+          isInternalChange.current = true;
+          const newContent = update.state.doc.toString();
+          onChangeRef.current?.(newContent);
         }
       }),
       EditorView.theme({
@@ -75,7 +72,7 @@ export function CodeMirrorEditor({
     }
 
     const state = EditorState.create({
-      doc: contentRef.current,
+      doc: initialContentRef.current,
       extensions,
     });
 
@@ -90,11 +87,17 @@ export function CodeMirrorEditor({
       view.destroy();
       viewRef.current = null;
     };
-  }, [editable, handleChange]);
+  }, [editable]);
 
-  // Update content when it changes externally
+  // Update content when it changes externally (not from user typing)
   useEffect(() => {
     if (viewRef.current) {
+      // Skip if this change came from the editor itself
+      if (isInternalChange.current) {
+        isInternalChange.current = false;
+        return;
+      }
+
       const currentContent = viewRef.current.state.doc.toString();
       if (content !== currentContent) {
         viewRef.current.dispatch({
@@ -112,7 +115,7 @@ export function CodeMirrorEditor({
     <div
       ref={containerRef}
       className={cn(
-        'h-full overflow-hidden bg-background border rounded-md',
+        'h-full overflow-hidden bg-background',
         className
       )}
     />
