@@ -38,9 +38,30 @@ class ClaudeSDKAdapter(LLMAdapter):
     - Restricts to ONLY wiki tools (no filesystem, bash, etc.)
     - Supports model selection via set_model()
     - Persistent client maintains conversation history automatically
+
+    Security:
+    - allowed_tools: Whitelists only MCP wiki tools
+    - disallowed_tools: Explicitly blocks built-in Claude Code tools (Read, Write, Bash, etc.)
+    - This double restriction prevents filesystem access outside wiki operations
     """
 
     MCP_SERVER_NAME = "wiki"  # Tools will be named: mcp__wiki__read_page, etc.
+
+    # Built-in Claude Code tools to block (these bypass allowed_tools!)
+    BLOCKED_BUILTIN_TOOLS = [
+        "Read",           # File reading
+        "Write",          # File writing
+        "Edit",           # File editing
+        "MultiEdit",      # Batch file editing
+        "Bash",           # Shell command execution
+        "Glob",           # File pattern matching
+        "Grep",           # Content search
+        "LS",             # Directory listing
+        "NotebookEdit",   # Jupyter notebook editing
+        "WebFetch",       # Web requests
+        "WebSearch",      # Web search
+        "Task",           # Spawning sub-agents
+    ]
 
     def __init__(self, system_prompt: str = "", model: str = None, max_turns: int = 20):
         """
@@ -126,9 +147,11 @@ class ClaudeSDKAdapter(LLMAdapter):
             mcp_tools.append(make_tool_fn(wiki_tool))
 
             # Track tool name for allowed_tools restriction
-            self.tool_names.append(wiki_tool.name)
+            # MCP tools must be prefixed: mcp__{server_name}__{tool_name}
+            self.tool_names.append(f"mcp__{self.MCP_SERVER_NAME}__{wiki_tool.name}")
 
         print(f"🔧 Creating MCP server '{self.MCP_SERVER_NAME}' with tools: {self.tool_names}")
+        print(f"🔒 Blocking built-in tools: {self.BLOCKED_BUILTIN_TOOLS}")
         self.mcp_server = create_sdk_mcp_server(
             name=self.MCP_SERVER_NAME,
             version="1.0.0",
@@ -189,6 +212,9 @@ class ClaudeSDKAdapter(LLMAdapter):
                     mcp_servers={self.MCP_SERVER_NAME: self.mcp_server},
                     # CRITICAL: Restrict to ONLY our wiki MCP tools
                     allowed_tools=self.tool_names,
+                    # SECURITY: Block built-in Claude Code tools (Read, Write, Bash, etc.)
+                    # These bypass allowed_tools and must be explicitly disallowed!
+                    disallowed_tools=self.BLOCKED_BUILTIN_TOOLS,
                     permission_mode='bypassPermissions',
                 )
                 self._client = ClaudeSDKClient(options=options)
