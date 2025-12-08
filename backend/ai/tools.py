@@ -3,6 +3,10 @@ Wiki tools for agents.
 
 WikiTool: Provider-agnostic tool definition
 ToolBuilder: Factory for creating composable tool sets
+
+Claude Code-style tools:
+- Read: read_page (with line numbers), grep_pages, glob_pages, list_pages
+- Write: write_page, edit_page (exact match), insert_at_line
 """
 from typing import Dict, List, Any, Callable, TYPE_CHECKING
 from dataclasses import dataclass
@@ -29,7 +33,7 @@ class WikiTool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Tool Implementations
+# Helper Functions
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _serialize_datetime(obj):
@@ -39,130 +43,367 @@ def _serialize_datetime(obj):
     return obj
 
 
-def _read_page(wiki: GitWiki, title: str) -> str:
-    """Read a wiki page by title"""
+def _format_datetime(dt) -> str:
+    """Format datetime for display"""
+    if isinstance(dt, datetime):
+        return dt.strftime('%Y-%m-%d %H:%M')
+    if dt:
+        try:
+            return datetime.fromisoformat(str(dt)).strftime('%Y-%m-%d %H:%M')
+        except:
+            return str(dt)
+    return "N/A"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reading Tools
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _read_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """Read a wiki page with line numbers"""
+    title = args.get("title", "")
+    offset = args.get("offset", 1)  # 1-indexed
+    limit = args.get("limit", 2000)
+
+    if isinstance(offset, str):
+        offset = int(offset)
+    if isinstance(limit, str):
+        limit = int(limit)
+
     if not title:
         return "Error: Page title is required"
 
     try:
         page = wiki.get_page(title)
-
-        created_at = _serialize_datetime(page["created_at"])
-        updated_at = _serialize_datetime(page["updated_at"])
-
-        result = {
-            "title": page["title"],
-            "content": page["content"],
-            "author": page["author"],
-            "created_at": created_at,
-            "updated_at": updated_at,
-            "tags": page["tags"]
-        }
-
-        return f"Page '{title}' found:\n\nContent:\n{page['content']}\n\nMetadata: {json.dumps(result, indent=2)}"
-    except PageNotFoundException:
-        return f"Page '{title}' not found. You can create it using the edit_page tool."
-
-
-def _edit_page(wiki: GitWiki, arguments: Dict[str, Any]) -> str:
-    """Edit or create a wiki page"""
-    title = arguments.get("title")
-    content = arguments.get("content")
-    author = arguments.get("author", "AI Agent")
-    tags = arguments.get("tags", [])
-
-    if not title or content is None:
-        return "Error: Both title and content are required"
-
-    try:
-        wiki.get_page(title)
-        wiki.update_page(title, content, author, tags)
-        return f"Page '{title}' updated successfully. New content length: {len(content)} characters."
-    except PageNotFoundException:
-        wiki.create_page(title, content, author, tags)
-        return f"Page '{title}' created successfully. Content length: {len(content)} characters."
-
-
-def _find_pages(wiki: GitWiki, arguments: Dict[str, Any]) -> str:
-    """Search for wiki pages"""
-    query = arguments.get("query")
-    limit = arguments.get("limit", 10)
-    if isinstance(limit, str):
-        limit = int(limit)
-
-    if not query:
-        return "Error: Search query is required"
-
-    pages = wiki.search_pages(query, limit)
-
-    if not pages:
-        return f"No pages found matching '{query}'"
-
-    results = []
-    for page in pages:
         content = page["content"]
-        excerpt = content[:200] + "..." if len(content) > 200 else content
-        results.append({
-            "title": page["title"],
-            "excerpt": excerpt,
-            "author": page["author"],
-            "updated_at": _serialize_datetime(page["updated_at"]),
-            "tags": page["tags"]
-        })
+        lines = content.split('\n')
+        total_lines = len(lines)
 
-    result_text = f"Found {len(pages)} pages matching '{query}':\n\n"
-    for i, result in enumerate(results, 1):
-        result_text += f"{i}. **{result['title']}** (by {result['author']})\n"
-        result_text += f"   {result['excerpt']}\n"
-        if result['tags']:
-            result_text += f"   Tags: {', '.join(result['tags'])}\n"
-        result_text += "\n"
+        # Apply offset/limit (convert to 0-indexed internally)
+        start_idx = max(0, offset - 1)
+        end_idx = min(len(lines), start_idx + limit)
+        selected_lines = lines[start_idx:end_idx]
 
-    return result_text
+        # Build header
+        header = [f"Page: {page['title']}"]
+        header.append(f"Author: {page['author']} | Created: {_format_datetime(page.get('created_at'))} | Updated: {_format_datetime(page.get('updated_at'))}")
+        if page.get('tags'):
+            header.append(f"Tags: {', '.join(page['tags'])}")
+        header.append(f"Total lines: {total_lines}")
+        if offset > 1 or end_idx < total_lines:
+            header.append(f"Showing lines {offset}-{start_idx + len(selected_lines)}")
+        header.append("---")
+
+        # Format with line numbers
+        formatted_lines = []
+        for i, line in enumerate(selected_lines, start=offset):
+            # Truncate long lines
+            display_line = line[:2000] + "..." if len(line) > 2000 else line
+            formatted_lines.append(f"{i:5} | {display_line}")
+
+        return "\n".join(header + formatted_lines)
+
+    except PageNotFoundException:
+        return f"Error: Page '{title}' not found.\n\nUse list_pages to see available pages, or write_page to create a new one."
 
 
-def _list_all_pages(wiki: GitWiki, arguments: Dict[str, Any]) -> str:
-    """List all wiki pages"""
-    limit = arguments.get("limit", 50)
+def _grep_pages(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """Search wiki pages using regex pattern"""
+    pattern = args.get("pattern", "")
+    limit = args.get("limit", 50)
+    context = args.get("context", 0)
+    case_sensitive = args.get("case_sensitive", False)
+
     if isinstance(limit, str):
         limit = int(limit)
+    if isinstance(context, str):
+        context = int(context)
+
+    if not pattern:
+        return "Error: Search pattern is required"
+
+    # Enforce limits
+    limit = min(limit, 200)
+    context = min(context, 5)
+
+    matches = wiki.search_pages_regex(pattern, limit, context, case_sensitive)
+
+    if not matches:
+        return f"No matches found for pattern '{pattern}'"
+
+    # Check for error
+    if matches and "error" in matches[0]:
+        return matches[0]["error"]
+
+    # Format output
+    lines = [f"Found {len(matches)} match{'es' if len(matches) != 1 else ''} for pattern '{pattern}':\n"]
+
+    current_page = None
+    for match in matches:
+        # Group by page
+        if match["page_title"] != current_page:
+            current_page = match["page_title"]
+            lines.append(f"\n[{current_page}] ({match['page_path']})")
+
+        line_num = match["line_number"]
+
+        # Show context before
+        for i, ctx_line in enumerate(match.get("context_before", [])):
+            ctx_num = line_num - len(match.get("context_before", [])) + i
+            lines.append(f"    {ctx_num:5} | {ctx_line}")
+
+        # Show matching line with marker
+        lines.append(f" >> {line_num:5} | {match['content']}")
+
+        # Show context after
+        for i, ctx_line in enumerate(match.get("context_after", [])):
+            ctx_num = line_num + i + 1
+            lines.append(f"    {ctx_num:5} | {ctx_line}")
+
+    return "\n".join(lines)
+
+
+def _glob_pages(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """Find pages by title/path pattern"""
+    pattern = args.get("pattern", "")
+    limit = args.get("limit", 50)
+
+    if isinstance(limit, str):
+        limit = int(limit)
+
+    if not pattern:
+        return "Error: Pattern is required"
+
+    limit = min(limit, 200)
+
+    results = wiki.glob_pages(pattern, limit)
+
+    if not results:
+        return f"No pages found matching pattern '{pattern}'"
+
+    lines = [f"Found {len(results)} page{'s' if len(results) != 1 else ''} matching '{pattern}':\n"]
+
+    for i, page in enumerate(results, 1):
+        updated = _format_datetime(page.get("updated_at"))
+        lines.append(f"{i}. {page['title']} ({page['path']})")
+        lines.append(f"   Updated: {updated}")
+
+    return "\n".join(lines)
+
+
+def _list_pages(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """List all wiki pages"""
+    limit = args.get("limit", 50)
+    sort = args.get("sort", "updated")
+
+    if isinstance(limit, str):
+        limit = int(limit)
+
+    limit = min(limit, 200)
 
     pages = wiki.list_pages(limit=limit)
 
     if not pages:
         return "No pages found in the wiki."
 
-    result_text = f"Found {len(pages)} pages:\n\n"
+    # Sort based on parameter
+    if sort == "title":
+        pages.sort(key=lambda p: p.get("title", "").lower())
+    elif sort == "created":
+        pages.sort(key=lambda p: p.get("created_at") or "", reverse=True)
+    # Default is 'updated' which is already sorted by GitWiki
+
+    lines = [f"Found {len(pages)} page{'s' if len(pages) != 1 else ''}:\n"]
+
     for i, page in enumerate(pages, 1):
-        result_text += f"{i}. **{page['title']}** (by {page['author']})\n"
-
-        if page.get('created_at'):
-            created_at = page['created_at']
-            if isinstance(created_at, datetime):
-                result_text += f"   Created: {created_at.strftime('%Y-%m-%d %H:%M')}\n"
-            else:
-                try:
-                    created = datetime.fromisoformat(str(created_at)).strftime('%Y-%m-%d %H:%M')
-                    result_text += f"   Created: {created}\n"
-                except:
-                    result_text += f"   Created: {created_at}\n"
-
-        if page.get('updated_at'):
-            updated_at = page['updated_at']
-            if isinstance(updated_at, datetime):
-                result_text += f"   Updated: {updated_at.strftime('%Y-%m-%d %H:%M')}\n"
-            else:
-                try:
-                    updated = datetime.fromisoformat(str(updated_at)).strftime('%Y-%m-%d %H:%M')
-                    result_text += f"   Updated: {updated}\n"
-                except:
-                    result_text += f"   Updated: {updated_at}\n"
-
+        lines.append(f"{i}. **{page['title']}** (by {page['author']})")
+        lines.append(f"   Path: {page.get('path', 'N/A')}")
+        lines.append(f"   Updated: {_format_datetime(page.get('updated_at'))}")
         if page.get('tags'):
-            result_text += f"   Tags: {', '.join(page['tags'])}\n"
-        result_text += "\n"
+            lines.append(f"   Tags: {', '.join(page['tags'])}")
 
-    return result_text
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Writing Tools
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _write_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """Create or completely overwrite a wiki page"""
+    title = args.get("title", "")
+    content = args.get("content")
+    author = args.get("author", "AI Agent")
+    tags = args.get("tags", [])
+
+    if not title:
+        return "Error: Page title is required"
+    if content is None:
+        return "Error: Page content is required"
+
+    try:
+        # Check if page exists
+        existing = None
+        try:
+            existing = wiki.get_page(title)
+        except PageNotFoundException:
+            pass
+
+        if existing:
+            wiki.update_page(title, content, author, tags)
+            action = "overwritten"
+        else:
+            wiki.create_page(title, content, author, tags)
+            action = "created"
+
+        line_count = len(content.split('\n'))
+
+        return f"""Page '{title}' {action} successfully.
+- Content length: {len(content)} characters
+- Lines: {line_count}
+- Author: {author}
+- Tags: {', '.join(tags) if tags else 'none'}"""
+
+    except Exception as e:
+        return f"Error writing page: {e}"
+
+
+def _edit_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """Edit page by replacing exact text match (Claude Code style)"""
+    title = args.get("title", "")
+    old_text = args.get("old_text", "")
+    new_text = args.get("new_text", "")
+    replace_all = args.get("replace_all", False)
+    author = args.get("author", "AI Agent")
+
+    if not title:
+        return "Error: Page title is required"
+    if not old_text:
+        return "Error: old_text is required - the exact text to find and replace"
+    if new_text is None:
+        return "Error: new_text is required (can be empty string to delete)"
+
+    try:
+        page = wiki.get_page(title)
+        content = page["content"]
+
+        # Count occurrences
+        count = content.count(old_text)
+
+        if count == 0:
+            return f"""Error: old_text not found in page '{title}'.
+
+The text you're looking for does not exist. This could be due to:
+1. Whitespace differences (spaces, tabs, newlines)
+2. The text was already changed
+3. Typo in old_text
+
+Use read_page to see the exact current content."""
+
+        if count > 1 and not replace_all:
+            return f"""Error: old_text matches {count} times in page '{title}'.
+
+For safety, edit_page requires unique matches by default.
+Either:
+1. Include more context in old_text to make it unique
+2. Set replace_all=true to replace all occurrences"""
+
+        # Find affected line numbers before replacement
+        lines_before = content.split('\n')
+        affected_lines = []
+        for i, line in enumerate(lines_before, 1):
+            if old_text in line or (i > 1 and old_text in '\n'.join(lines_before[i-2:i])):
+                affected_lines.append(i)
+
+        # Perform replacement
+        if replace_all:
+            new_content = content.replace(old_text, new_text)
+            replacements = count
+        else:
+            new_content = content.replace(old_text, new_text, 1)
+            replacements = 1
+
+        # Update page
+        wiki.update_page(
+            title=title,
+            content=new_content,
+            author=author,
+            commit_msg=f"Edit page: {title}"
+        )
+
+        result = [f"Page '{title}' edited successfully."]
+        result.append(f"- Replaced {replacements} occurrence{'s' if replacements > 1 else ''}")
+        if affected_lines:
+            if len(affected_lines) <= 3:
+                result.append(f"- Lines affected: {', '.join(map(str, affected_lines))}")
+            else:
+                result.append(f"- Lines affected: {affected_lines[0]}-{affected_lines[-1]}")
+        result.append(f"- New content length: {len(new_content)} characters")
+
+        return "\n".join(result)
+
+    except PageNotFoundException:
+        return f"Error: Page '{title}' not found.\n\nUse write_page to create a new page."
+    except Exception as e:
+        return f"Error editing page: {e}"
+
+
+def _insert_at_line(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """Insert content at a specific line number"""
+    title = args.get("title", "")
+    line = args.get("line", 1)
+    content = args.get("content", "")
+    author = args.get("author", "AI Agent")
+
+    if isinstance(line, str):
+        line = int(line)
+
+    if not title:
+        return "Error: Page title is required"
+    if not content:
+        return "Error: Content to insert is required"
+
+    try:
+        page = wiki.get_page(title)
+        existing_content = page["content"]
+        lines = existing_content.split('\n')
+        total_lines = len(lines)
+
+        # Validate line number
+        if line < 1:
+            return "Error: Line number must be 1 or greater"
+
+        # Insert content
+        insert_lines = content.split('\n')
+        insert_count = len(insert_lines)
+
+        if line > total_lines:
+            # Append at end
+            lines.extend(insert_lines)
+            actual_line = total_lines + 1
+        else:
+            # Insert before specified line (0-indexed)
+            for i, new_line in enumerate(insert_lines):
+                lines.insert(line - 1 + i, new_line)
+            actual_line = line
+
+        new_content = '\n'.join(lines)
+
+        wiki.update_page(
+            title=title,
+            content=new_content,
+            author=author,
+            commit_msg=f"Insert at line {actual_line}: {title}"
+        )
+
+        return f"""Content inserted at line {actual_line} in page '{title}'.
+- Lines inserted: {insert_count}
+- New total lines: {len(lines)}"""
+
+    except PageNotFoundException:
+        return f"Error: Page '{title}' not found.\n\nUse write_page to create a new page."
+    except Exception as e:
+        return f"Error inserting content: {e}"
 
 
 def _spawn_thread(
@@ -260,7 +501,13 @@ Your execution is complete for now."""
 
 class ToolBuilder:
     """
-    Factory for creating composable tool sets.
+    Factory for creating composable tool sets (Claude Code style).
+
+    Tool Categories:
+    - read: read_page, grep_pages, glob_pages, list_pages
+    - write: write_page, edit_page, insert_at_line
+    - thread: spawn_thread, list_threads (main only)
+    - lifecycle: request_help, mark_for_review (thread only)
 
     Usage:
         # For main chat (read-only + thread management):
@@ -271,66 +518,166 @@ class ToolBuilder:
     """
 
     @staticmethod
-    def wiki_read_tools(wiki) -> List[WikiTool]:
-        """Read-only wiki tools: read_page, find_pages, list_all_pages"""
+    def read_tools(wiki) -> List[WikiTool]:
+        """Read-only wiki tools: read_page, grep_pages, glob_pages, list_pages"""
         return [
             WikiTool(
                 name="read_page",
-                description="Read a wiki page. Returns full content and metadata (author, dates, tags). Use this before editing to see current content.",
+                description="""Read a wiki page with line numbers. Use this to view page content before editing.
+
+Features:
+- Returns content with line numbers (1-indexed)
+- Supports offset/limit for reading specific sections
+- Shows metadata (author, dates, tags)
+- Lines longer than 2000 chars are truncated""",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "title": {"type": "string", "description": "Page title (case-sensitive)"}
+                        "title": {"type": "string", "description": "Page title or path (e.g., 'Python Guide' or '01-docs/02-api.md')"},
+                        "offset": {"type": "integer", "description": "Starting line number (1-indexed). Omit to start from beginning."},
+                        "limit": {"type": "integer", "description": "Max lines to return (default: 2000)."}
                     },
                     "required": ["title"]
                 },
-                function=lambda args, w=wiki: _read_page(w, args.get("title"))
+                function=lambda args, w=wiki: _read_page(w, args)
             ),
             WikiTool(
-                name="find_pages",
-                description="Search wiki pages by keyword. Returns matching titles with excerpts. Use to discover relevant pages.",
+                name="grep_pages",
+                description="""Search wiki pages using regex pattern. Returns matching lines with context.
+
+Features:
+- Regex pattern matching (case-insensitive by default)
+- Shows page title, line number, and matching content
+- Optional context lines before/after matches
+- Useful for finding where content is discussed""",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "Search term (matches title and content)"},
-                        "limit": {"type": "integer", "description": "Max results (default: 10)"}
+                        "pattern": {"type": "string", "description": "Regex pattern to search for (e.g., 'def\\s+\\w+', 'TODO', 'error')"},
+                        "limit": {"type": "integer", "description": "Max matches to return (default: 50, max: 200)"},
+                        "context": {"type": "integer", "description": "Lines of context before/after match (default: 0, max: 5)"},
+                        "case_sensitive": {"type": "boolean", "description": "Case-sensitive search (default: false)"}
                     },
-                    "required": ["query"]
+                    "required": ["pattern"]
                 },
-                function=lambda args, w=wiki: _find_pages(w, args)
+                function=lambda args, w=wiki: _grep_pages(w, args)
             ),
             WikiTool(
-                name="list_all_pages",
-                description="List all wiki pages with titles, authors, and dates. Use to get an overview of the wiki.",
+                name="glob_pages",
+                description="""Find pages by title pattern using glob-style matching.
+
+Patterns:
+- * matches any characters within a path segment
+- ** matches any characters including path separators
+- ? matches single character
+
+Examples:
+- 'docs/*' - all pages in docs folder
+- '**/*api*' - pages with 'api' anywhere in path
+- 'guide-?' - guide-1, guide-2, etc.""",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "limit": {"type": "integer", "description": "Max pages (default: 50)"}
+                        "pattern": {"type": "string", "description": "Glob pattern to match page titles/paths"},
+                        "limit": {"type": "integer", "description": "Max results to return (default: 50)"}
+                    },
+                    "required": ["pattern"]
+                },
+                function=lambda args, w=wiki: _glob_pages(w, args)
+            ),
+            WikiTool(
+                name="list_pages",
+                description="""List all wiki pages with titles and dates.
+
+Use this to get an overview of wiki content. For searching specific content, use grep_pages. For matching title patterns, use glob_pages.""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "limit": {"type": "integer", "description": "Max pages to return (default: 50, max: 200)"},
+                        "sort": {"type": "string", "enum": ["updated", "created", "title"], "description": "Sort order (default: 'updated' - most recent first)"}
                     },
                     "required": []
                 },
-                function=lambda args, w=wiki: _list_all_pages(w, args)
+                function=lambda args, w=wiki: _list_pages(w, args)
             )
         ]
 
     @staticmethod
-    def wiki_edit_tools(wiki) -> List[WikiTool]:
-        """Edit wiki tool: edit_page"""
+    def write_tools(wiki) -> List[WikiTool]:
+        """Write wiki tools: write_page, edit_page, insert_at_line"""
         return [
             WikiTool(
-                name="edit_page",
-                description="Create or update a wiki page. Creates new page if it doesn't exist. Always read_page first to see current content before editing.",
+                name="write_page",
+                description="""Create a new wiki page or completely overwrite an existing one.
+
+IMPORTANT: This REPLACES the entire page content. For targeted edits, use edit_page instead.
+
+Use cases:
+- Creating new pages
+- Complete rewrites when most content changes
+- Initializing pages with templates""",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "title": {"type": "string", "description": "Page title (case-sensitive)"},
+                        "title": {"type": "string", "description": "Page title (will be created if doesn't exist)"},
                         "content": {"type": "string", "description": "Complete page content in markdown format"},
-                        "author": {"type": "string", "description": "Author name (optional, defaults to 'AI Agent')"},
-                        "tags": {"type": "array", "items": {"type": "string"}, "description": "Page tags (optional)"}
+                        "author": {"type": "string", "description": "Author name (default: 'AI Agent')"},
+                        "tags": {"type": "array", "items": {"type": "string"}, "description": "Page tags for categorization"}
                     },
                     "required": ["title", "content"]
                 },
+                function=lambda args, w=wiki: _write_page(w, args)
+            ),
+            WikiTool(
+                name="edit_page",
+                description="""Edit a wiki page by replacing exact text matches. This is the primary tool for making targeted changes.
+
+CRITICAL: The old_text must match EXACTLY including whitespace, newlines, and indentation. Use read_page first to see exact content.
+
+Behavior:
+- Finds exact match of old_text in page content
+- Replaces it with new_text
+- Errors if old_text not found
+- Errors if old_text matches multiple times (unless replace_all=true)
+
+Tips:
+- Include enough context in old_text to make it unique
+- For multiple changes, make separate edit_page calls
+- Use read_page to verify exact text before editing""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Page title"},
+                        "old_text": {"type": "string", "description": "Exact text to find and replace (must be unique unless replace_all=true)"},
+                        "new_text": {"type": "string", "description": "Replacement text"},
+                        "replace_all": {"type": "boolean", "description": "Replace all occurrences (default: false - requires unique match)"},
+                        "author": {"type": "string", "description": "Author name for commit (default: 'AI Agent')"}
+                    },
+                    "required": ["title", "old_text", "new_text"]
+                },
                 function=lambda args, w=wiki: _edit_page(w, args)
+            ),
+            WikiTool(
+                name="insert_at_line",
+                description="""Insert content at a specific line number in a page.
+
+The content is inserted BEFORE the specified line. Use this for:
+- Adding new sections at specific positions
+- Inserting content when exact text matching is difficult
+- Adding content at the start (line 1) or end (line > total lines)
+
+Note: Line numbers are 1-indexed (first line is 1).""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Page title"},
+                        "line": {"type": "integer", "description": "Line number to insert before (1-indexed). Use line > total_lines to append."},
+                        "content": {"type": "string", "description": "Content to insert (can be multiple lines)"},
+                        "author": {"type": "string", "description": "Author name for commit (default: 'AI Agent')"}
+                    },
+                    "required": ["title", "line", "content"]
+                },
+                function=lambda args, w=wiki: _insert_at_line(w, args)
             )
         ]
 
@@ -409,7 +756,7 @@ class ToolBuilder:
         Get tools for main assistant: read-only wiki + thread management.
         """
         return (
-            ToolBuilder.wiki_read_tools(wiki) +
+            ToolBuilder.read_tools(wiki) +
             ToolBuilder.main_tools(spawn_callback, list_callback)
         )
 
@@ -423,7 +770,7 @@ class ToolBuilder:
         Get tools for thread agent: full wiki + lifecycle management.
         """
         return (
-            ToolBuilder.wiki_read_tools(wiki) +
-            ToolBuilder.wiki_edit_tools(wiki) +
+            ToolBuilder.read_tools(wiki) +
+            ToolBuilder.write_tools(wiki) +
             ToolBuilder.thread_tools(help_callback, review_callback)
         )
