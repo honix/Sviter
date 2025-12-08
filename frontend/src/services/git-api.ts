@@ -65,7 +65,7 @@ export class GitAPI {
   }
 
   /**
-   * Get current branch
+   * Get current branch (used for display only)
    */
   static async getCurrentBranch(): Promise<string> {
     const response = await fetch(`${API_BASE_URL}/api/git/current-branch`);
@@ -74,60 +74,5 @@ export class GitAPI {
     }
     const data = await response.json();
     return data.branch;
-  }
-
-  /**
-   * Checkout a branch
-   */
-  static async checkoutBranch(branchName: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/api/git/checkout`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ branch: branchName }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to checkout branch: ${response.statusText}`);
-    }
-  }
-
-  /**
-   * Create a new branch
-   */
-  static async createBranch(branchName: string, fromBranch: string = 'main'): Promise<string> {
-    const response = await fetch(`${API_BASE_URL}/api/git/create-branch`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        name: branchName,
-        from: fromBranch,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to create branch: ${response.statusText}`);
-    }
-    const data = await response.json();
-    return data.branch;
-  }
-
-  /**
-   * Delete a branch
-   */
-  static async deleteBranch(branchName: string, force: boolean = false): Promise<void> {
-    const response = await fetch(
-      `${API_BASE_URL}/api/git/branches/${encodeURIComponent(branchName)}?force=${force}`,
-      {
-        method: 'DELETE',
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(`Failed to delete branch: ${response.statusText}`);
-    }
   }
 }

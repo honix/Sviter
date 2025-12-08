@@ -4,8 +4,125 @@ Git operations for thread management.
 Provides safe branch operations with proper cleanup and error handling.
 """
 
+from pathlib import Path
 from typing import Dict, Any, Optional
 from storage.git_wiki import GitWiki
+
+
+WORKTREES_DIR = ".worktrees"
+
+
+def create_worktree(wiki: GitWiki, branch_name: str) -> Path:
+    """
+    Create a worktree for a thread branch.
+
+    Worktrees allow multiple branches to be checked out simultaneously
+    in separate directories, enabling concurrent thread execution.
+
+    Args:
+        wiki: GitWiki instance (main wiki)
+        branch_name: Branch name (e.g., 'thread/task/20250607-123456')
+
+    Returns:
+        Path to the created worktree directory
+    """
+    worktrees_path = Path(wiki.repo_path) / WORKTREES_DIR
+    worktrees_path.mkdir(exist_ok=True)
+
+    # Sanitize branch name for directory (replace / with -)
+    safe_name = branch_name.replace("/", "-")
+    worktree_path = worktrees_path / safe_name
+
+    # Create the worktree with the branch checked out
+    wiki.repo.git.worktree("add", str(worktree_path), branch_name)
+
+    return worktree_path
+
+
+def remove_worktree(wiki: GitWiki, branch_name: str) -> bool:
+    """
+    Remove a worktree after thread completion.
+
+    Should be called during accept/reject before deleting the branch.
+    Returns True if worktree was successfully removed or didn't exist.
+
+    Args:
+        wiki: GitWiki instance (main wiki)
+        branch_name: Branch name whose worktree to remove
+
+    Returns:
+        True if worktree removed successfully, False otherwise
+    """
+    worktrees_path = Path(wiki.repo_path) / WORKTREES_DIR
+    safe_name = branch_name.replace("/", "-")
+    worktree_path = worktrees_path / safe_name
+
+    if not worktree_path.exists():
+        # Already gone, prune any stale entries
+        try:
+            wiki.repo.git.worktree("prune")
+        except Exception:
+            pass
+        return True
+
+    # Try to remove the worktree
+    try:
+        wiki.repo.git.worktree("remove", str(worktree_path), "--force")
+        return True
+    except Exception as e:
+        print(f"Warning: First worktree remove attempt failed: {e}")
+
+    # Retry with prune first
+    try:
+        wiki.repo.git.worktree("prune")
+        wiki.repo.git.worktree("remove", str(worktree_path), "--force")
+        return True
+    except Exception as e:
+        print(f"Warning: Could not remove worktree {worktree_path} after prune: {e}")
+
+    # Last resort: manually remove directory
+    try:
+        import shutil
+        shutil.rmtree(worktree_path)
+        wiki.repo.git.worktree("prune")
+        print(f"Manually removed worktree directory: {worktree_path}")
+        return True
+    except Exception as e:
+        print(f"Error: Failed to manually remove worktree {worktree_path}: {e}")
+        return False
+
+
+def cleanup_orphaned_worktrees(wiki: GitWiki) -> None:
+    """
+    Remove any orphaned worktrees from previous crashed sessions.
+
+    Should be called on server startup.
+
+    Args:
+        wiki: GitWiki instance
+    """
+    try:
+        # git worktree prune removes stale worktree entries
+        wiki.repo.git.worktree("prune")
+
+        # Also clean up the .worktrees directory
+        worktrees_path = Path(wiki.repo_path) / WORKTREES_DIR
+        if worktrees_path.exists():
+            # List current valid worktrees
+            worktree_list = wiki.repo.git.worktree("list", "--porcelain")
+            valid_paths = set()
+            for line in worktree_list.split('\n'):
+                if line.startswith('worktree '):
+                    valid_paths.add(Path(line[9:]))
+
+            # Remove directories that aren't valid worktrees
+            for item in worktrees_path.iterdir():
+                if item.is_dir() and item not in valid_paths:
+                    import shutil
+                    shutil.rmtree(item)
+                    print(f"Cleaned up orphaned worktree directory: {item}")
+    except Exception as e:
+        print(f"Warning: Error during worktree cleanup: {e}")
 
 
 def prepare_branch(wiki: GitWiki, branch_name: str) -> Optional[str]:
@@ -29,7 +146,7 @@ def prepare_branch(wiki: GitWiki, branch_name: str) -> Optional[str]:
 
         # Pull latest from remote
         try:
-            wiki.git_repo.remotes.origin.pull("main")
+            wiki.repo.remotes.origin.pull("main")
             print(f"Pulled latest main for branch {branch_name}")
         except Exception as pull_error:
             print(f"Could not pull main (might be local-only): {pull_error}")
@@ -112,7 +229,7 @@ def merge_thread(wiki: GitWiki, branch: str) -> Dict[str, Any]:
         if "conflict" in error_str:
             # Abort the failed merge
             try:
-                wiki.git_repo.git.merge("--abort")
+                wiki.repo.git.merge("--abort")
             except Exception:
                 pass
 
@@ -125,15 +242,21 @@ def merge_main_into_thread(wiki: GitWiki, branch: str) -> Optional[str]:
     """
     Merge main into thread branch (for conflict resolution).
 
+    When using worktrees, the wiki already has the thread branch checked out,
+    so no checkout is needed.
+
     Args:
-        wiki: GitWiki instance
+        wiki: GitWiki instance (can be main wiki or thread's worktree wiki)
         branch: Thread branch to update
 
     Returns:
         Error message if failed, None on success (conflicts may still exist)
     """
     try:
-        wiki.checkout_branch(branch)
+        # Only checkout if not already on the branch (for worktrees, we're already there)
+        current = wiki.get_current_branch()
+        if current != branch:
+            wiki.checkout_branch(branch)
 
         try:
             wiki.merge_branch("main", branch)

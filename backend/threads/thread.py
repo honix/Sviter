@@ -58,7 +58,7 @@ class Thread:
     Thread = Agent + Branch + Conversation + Status
 
     Each thread represents an autonomous agent working on a specific task
-    on its own git branch.
+    on its own git branch, with its own worktree for concurrent execution.
     """
     id: str
     name: str
@@ -76,6 +76,9 @@ class Thread:
     # Tracking
     client_id: Optional[str] = None  # Which client owns this thread
 
+    # Worktree path for concurrent execution
+    worktree_path: Optional[str] = None  # Path to thread's worktree directory
+
     @classmethod
     def create(cls, name: str, goal: str, client_id: str = None) -> 'Thread':
         """Factory method to create a new thread."""
@@ -92,13 +95,14 @@ class Thread:
         if len(safe_name) > 50:
             safe_name = safe_name[:50].rstrip('-')
 
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        # Short UUID for unique branch names
+        short_uuid = str(uuid.uuid4())[:6]
 
         return cls(
             id=str(uuid.uuid4()),
             name=name,
             goal=goal,
-            branch=f"thread/{safe_name}/{timestamp}",
+            branch=f"thread/{safe_name}-{short_uuid}",
             status=ThreadStatus.WORKING,
             created_at=datetime.now(),
             updated_at=datetime.now(),

@@ -14,7 +14,7 @@ import { CodeMirrorDiffView } from '../editor/CodeMirrorDiffView';
 
 const CenterPanel: React.FC = () => {
   const { state, actions } = useAppContext();
-  const { currentPage, viewMode, isLoading, error, currentBranch } = state;
+  const { currentPage, viewMode, isLoading, error, currentBranch, pageUpdateCounter } = state;
   const { setViewMode, updatePage } = actions;
 
   const [editContent, setEditContent] = useState('');
@@ -349,8 +349,9 @@ const CenterPanel: React.FC = () => {
           <TabsContent value="diff" className="flex-1 overflow-hidden mt-0 flex flex-col">
             <div className="flex-1 overflow-auto min-h-0">
               <CodeMirrorDiffView
-                currentContent={currentPage.content || ''}
                 pagePath={currentPage.path}
+                branchName={currentBranch}
+                refreshTrigger={pageUpdateCounter}
                 className="h-full"
               />
             </div>
