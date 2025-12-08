@@ -18,6 +18,7 @@ import {
   PromptInputAction,
 } from '@/components/ui/prompt-input';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { ArrowUp, GitBranch, Loader2, AlertCircle, CheckCircle, Check, XCircle } from 'lucide-react';
 import type { Thread, ThreadMessage } from '../../types/thread';
 import type { ChatMessage } from '../../types/chat';
@@ -56,7 +57,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
           : 'assistant',
       content: msg.content,
       timestamp: msg.timestamp,
-      tool_name: msg.tool_name
+      tool_name: msg.tool_name,
+      tool_args: msg.tool_args as Record<string, any>,
+      tool_error: msg.content?.startsWith('Error:')
     }));
   }, [isScoutMode, scoutMessages, threadMessages, threadId]);
 
@@ -227,13 +230,60 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
                 <div className="whitespace-pre-wrap">{message.content}</div>
               </div>
             ) : message.type === 'tool_call' ? (
-              // Tool call - subtle indicator with animated dot
-              <div key={message.id} className="mb-2 pb-2 px-4 flex items-center gap-2 opacity-60">
-                <div className={`w-1.5 h-1.5 rounded-full bg-primary/60 ${isWorking ? 'animate-pulse' : ''}`} />
-                <span className="text-xs text-muted-foreground font-mono tracking-wide">
-                  Tool: {message.tool_name}
-                </span>
-              </div>
+              // Tool call - status dot with brief summary (tool calls arrive after completion)
+              (() => {
+                const args = message.tool_args || {};
+                const briefArgs = Object.entries(args)
+                  .map(([k, v]) => {
+                    const val = typeof v === 'string'
+                      ? (v.length > 20 ? v.slice(0, 20) + '...' : v)
+                      : String(v);
+                    return `${k}: ${val}`;
+                  })
+                  .join(', ');
+                const fullArgsEntries = Object.entries(args);
+                return (
+                  <Tooltip key={message.id}>
+                    <TooltipTrigger asChild>
+                      <div className="mb-4 px-4 flex items-center gap-2 text-xs opacity-70 cursor-default">
+                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                          message.tool_error ? 'bg-red-500' : 'bg-green-500'
+                        }`} />
+                        <span className="font-mono truncate">
+                          {message.tool_name}({briefArgs})
+                          {message.tool_error
+                            ? <span className="text-red-500"> error: {message.content.slice(7, 57)}...</span>
+                            : <span className="text-muted-foreground"> -&gt; done</span>
+                          }
+                        </span>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-md font-mono text-xs bg-muted text-foreground border border-border shadow-md">
+                      <div className="space-y-2">
+                        <div className="font-bold border-b border-border pb-1">
+                          {message.tool_name}
+                        </div>
+                        {fullArgsEntries.length > 0 ? (
+                          <div className="space-y-1">
+                            {fullArgsEntries.map(([k, v]) => (
+                              <div key={k}>
+                                <span className="font-bold">{k}:</span>{' '}
+                                <span className="whitespace-pre-wrap">{typeof v === 'string' ? v : JSON.stringify(v)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : <div className="text-muted-foreground">No arguments</div>}
+                        <div className="border-t border-border pt-1 mt-1">
+                          {message.tool_error
+                            ? <div className="text-red-700">{message.content.replace(/^Error:/, 'error:')}</div>
+                            : <span className="text-green-700">✓ done</span>
+                          }
+                        </div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })()
             ) : (
               <Message
                 key={message.id}

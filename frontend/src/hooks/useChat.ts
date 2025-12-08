@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { ChatMessage, WebSocketMessage } from '../types/chat';
+import type { ChatMessage } from '../types/chat';
 import { useAppContext } from '../contexts/AppContext';
 
 export interface UseChatReturn {
@@ -46,11 +46,14 @@ export const useChat = (): UseChatReturn => {
         }
       } else if (message.type === 'tool_call') {
         console.log('useChat: Creating tool_call message');
+        const isError = (message.result || '').startsWith('Error:');
         const toolCallMessage: ChatMessage = {
           id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
           type: 'tool_call',
           content: message.result || '',
           tool_name: message.tool_name || 'tool',
+          tool_args: message.arguments || {},
+          tool_error: isError,
           timestamp: new Date().toISOString()
         };
 
