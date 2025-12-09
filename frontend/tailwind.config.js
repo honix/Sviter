@@ -35,6 +35,15 @@ export default {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      animation: {
+        "text-shimmer": "text-shimmer 2s ease-in-out infinite",
+      },
+      keyframes: {
+        "text-shimmer": {
+          "0%, 100%": { backgroundPosition: "100% 50%" },
+          "50%": { backgroundPosition: "0% 50%" },
+        },
+      },
     },
   },
   plugins: [],

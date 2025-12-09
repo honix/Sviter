@@ -15,7 +15,9 @@ from threads.accept_result import AcceptResult
 from ai.prompts import ASSISTANT_PROMPT, THREAD_PROMPT
 from threads import git_operations as git_ops
 from ai.tools import ToolBuilder
+from db import get_or_create_guest
 import json
+import uuid
 from typing import Dict, Any, Optional, List, Callable, Set
 from dataclasses import dataclass
 from enum import Enum
@@ -36,7 +38,9 @@ class Session:
     client_id: str
     executor: AgentExecutor
     tools: List = None
-    # Thread-specific
+    # Thread ID for unified messaging (both assistant and worker)
+    thread_id: Optional[str] = None
+    # Worker-specific thread object
     thread: Optional[Thread] = None
 
 
@@ -73,6 +77,9 @@ class SessionManager:
         # Background tasks: session_id -> asyncio.Task
         self.tasks: Dict[str, asyncio.Task] = {}
 
+        # User's assistant thread IDs: user_id -> thread_id (persists while server runs)
+        self.user_assistant_threads: Dict[str, str] = {}
+
     # ─────────────────────────────────────────────────────────────────────────
     # WebSocket Connection
     # ─────────────────────────────────────────────────────────────────────────
@@ -80,6 +87,11 @@ class SessionManager:
     async def connect(self, websocket: WebSocket, client_id: str):
         """Accept WebSocket connection and initialize main session."""
         await websocket.accept()
+
+        # Validate user (creates guest if not exists, updates last_seen)
+        user = get_or_create_guest(client_id)
+        print(f"👤 User connected: {user['id']} (type: {user['type']})")
+
         self.connections[client_id] = websocket
         self.client_view[client_id] = "main"
 
@@ -109,6 +121,19 @@ class SessionManager:
                 if "connection closed" in str(e).lower():
                     await self.disconnect(client_id)
 
+    async def broadcast(self, message: Dict[str, Any]):
+        """Broadcast message to ALL connected clients."""
+        disconnected = []
+        for client_id, websocket in self.connections.items():
+            try:
+                await websocket.send_text(json.dumps(message))
+            except Exception as e:
+                if "connection closed" in str(e).lower():
+                    disconnected.append(client_id)
+        # Clean up disconnected clients
+        for client_id in disconnected:
+            await self.disconnect(client_id)
+
     # ─────────────────────────────────────────────────────────────────────────
     # Session Management (shared for main and threads)
     # ─────────────────────────────────────────────────────────────────────────
@@ -121,6 +146,7 @@ class SessionManager:
         system_prompt: str,
         on_message: Callable,
         on_tool_call: Callable,
+        thread_id: str = None,
         thread: Thread = None,
     ) -> bool:
         """Start a new session (main or thread)."""
@@ -144,6 +170,7 @@ class SessionManager:
             type=session_type,
             client_id=client_id,
             executor=executor,
+            thread_id=thread_id or (thread.id if thread else None),
             thread=thread,
         )
         self.sessions[session_id] = session
@@ -173,15 +200,31 @@ class SessionManager:
         """Initialize main assistant session for client."""
         session_id = f"main:{client_id}"
 
+        # Get or create assistant thread_id for this user
+        if client_id not in self.user_assistant_threads:
+            self.user_assistant_threads[client_id] = str(uuid.uuid4())
+        assistant_thread_id = self.user_assistant_threads[client_id]
+
         async def on_message(msg_type: str, content: str):
             if msg_type == "system_prompt":
-                await self.send_message(client_id, {"type": "system_prompt", "content": content})
+                await self.send_message(client_id, {
+                    "type": "system_prompt",
+                    "thread_id": assistant_thread_id,
+                    "content": content
+                })
             elif msg_type == "assistant":
-                await self.send_message(client_id, {"type": "chat_response", "message": content})
+                # Unified format: thread_message with thread_id
+                await self.send_message(client_id, {
+                    "type": "thread_message",
+                    "thread_id": assistant_thread_id,
+                    "role": "assistant",
+                    "content": content
+                })
 
         async def on_tool_call(tool_info: Dict[str, Any]):
             await self.send_message(client_id, {
                 "type": "tool_call",
+                "thread_id": assistant_thread_id,
                 "tool_name": tool_info["tool_name"],
                 "arguments": tool_info["arguments"],
                 "result": tool_info["result"],
@@ -195,18 +238,26 @@ class SessionManager:
             system_prompt=ASSISTANT_PROMPT,
             on_message=on_message,
             on_tool_call=on_tool_call,
+            thread_id=assistant_thread_id,
         )
 
         if success:
             self.main_sessions[client_id] = session_id
 
+            # Send assistant thread info on connect
+            await self.send_message(client_id, {
+                "type": "thread_selected",
+                "thread_id": assistant_thread_id,
+                "thread_type": "assistant",
+                "history": []  # Fresh session - no history yet
+            })
+
             # Send thread list on connect
-            threads = self._list_threads(client_id)
-            if threads:
-                await self.send_message(client_id, {
-                    "type": "thread_list",
-                    "threads": [t.to_dict() for t in threads]
-                })
+            threads = self._list_threads()
+            await self.send_message(client_id, {
+                "type": "thread_list",
+                "threads": [t.to_dict() for t in threads]
+            })
         else:
             await self.send_message(client_id, {
                 "type": "error",
@@ -224,14 +275,14 @@ class SessionManager:
             return self.sessions[session_id].thread
         return None
 
-    def _list_threads(self, client_id: str) -> List[Thread]:
-        """List all threads for a client."""
-        if client_id not in self.client_threads:
-            return []
-        return [
-            self._get_thread(tid) for tid in self.client_threads[client_id]
-            if self._get_thread(tid) is not None
-        ]
+    def _list_threads(self) -> List[Thread]:
+        """List ALL worker threads (shared across all users)."""
+        threads = []
+        for thread_id in self.thread_sessions:
+            thread = self._get_thread(thread_id)
+            if thread is not None:
+                threads.append(thread)
+        return threads
 
     def _create_thread(self, name: str, goal: str, client_id: str) -> Thread:
         """Create a new thread with git branch and worktree."""
@@ -275,17 +326,17 @@ class SessionManager:
             thread.set_error(f"Failed to initialize worktree wiki: {e}")
             return False
 
-        # Status change callback
+        # Status change callback - broadcast to ALL users
         async def on_status_change(status: str, message: str):
-            await self.send_message(client_id, {
+            await self.broadcast({
                 "type": "thread_status",
                 "thread_id": thread.id,
                 "status": status,
                 "message": message
             })
-            # Send updated thread list
-            threads = self._list_threads(client_id)
-            await self.send_message(client_id, {
+            # Broadcast updated thread list
+            threads = self._list_threads()
+            await self.broadcast({
                 "type": "thread_list",
                 "threads": [t.to_dict() for t in threads]
             })
@@ -301,20 +352,20 @@ class SessionManager:
             thread.add_message("system", f"Marked for review: {summary}")
             asyncio.create_task(on_status_change("review", summary))
 
-        # Message callback
+        # Message callback - broadcast to ALL users
         async def on_message(msg_type: str, content: str):
             if msg_type == "assistant":
                 thread.add_message("assistant", content)
             elif msg_type == "system_prompt":
                 thread.add_message("system", content)
-            await self.send_message(client_id, {
+            await self.broadcast({
                 "type": "thread_message",
                 "thread_id": thread.id,
                 "role": msg_type,
                 "content": content
             })
 
-        # Tool call callback
+        # Tool call callback - broadcast to ALL users
         async def on_tool_call(tool_info: Dict[str, Any]):
             thread.add_message(
                 "tool_call", tool_info.get("result", ""),
@@ -322,7 +373,7 @@ class SessionManager:
                 tool_args=tool_info.get("arguments"),
                 tool_result=tool_info.get("result")
             )
-            await self.send_message(client_id, {
+            await self.broadcast({
                 "type": "thread_message",
                 "thread_id": thread.id,
                 "role": "tool_call",
@@ -330,9 +381,9 @@ class SessionManager:
                 "tool_name": tool_info.get("tool_name"),
                 "tool_args": tool_info.get("arguments")
             })
-            # Notify page updates
+            # Notify page updates to all users
             if tool_info.get("tool_name") == "edit_page":
-                await self.send_message(client_id, {
+                await self.broadcast({
                     "type": "page_updated",
                     "title": tool_info["arguments"].get("title")
                 })
@@ -373,8 +424,8 @@ class SessionManager:
             # Initial turn
             initial = f"Your goal: {thread.goal}\n\nBegin working on this task."
             thread.add_message("user", initial)
-            # Send user message to frontend
-            await self.send_message(client_id, {
+            # Broadcast user message to all users
+            await self.broadcast({
                 "type": "thread_message",
                 "thread_id": thread.id,
                 "role": "user",
@@ -387,14 +438,14 @@ class SessionManager:
                 if result.status in ['completed', 'stopped']:
                     if thread.status == ThreadStatus.WORKING:
                         thread.set_status(ThreadStatus.REVIEW, "Task completed")
-                        await self.send_message(client_id, {
+                        await self.broadcast({
                             "type": "thread_status",
                             "thread_id": thread.id,
                             "status": "review",
                             "message": "Task completed"
                         })
-                        threads = self._list_threads(client_id)
-                        await self.send_message(client_id, {
+                        threads = self._list_threads()
+                        await self.broadcast({
                             "type": "thread_list",
                             "threads": [t.to_dict() for t in threads]
                         })
@@ -402,7 +453,7 @@ class SessionManager:
                 elif result.status == 'error':
                     thread.set_error(result.error)
                     thread.set_status(ThreadStatus.NEED_HELP)
-                    await self.send_message(client_id, {
+                    await self.broadcast({
                         "type": "thread_status",
                         "thread_id": thread.id,
                         "status": "need_help",
@@ -536,7 +587,7 @@ There are merge conflicts with the main branch. Please:
             return await self._handle_reject_thread(client_id, message_data.get("thread_id"))
 
         elif message_type == "get_thread_list":
-            threads = self._list_threads(client_id)
+            threads = self._list_threads()
             await self.send_message(client_id, {
                 "type": "thread_list",
                 "threads": [t.to_dict() for t in threads]
@@ -575,10 +626,23 @@ There are merge conflicts with the main branch. Please:
             return thread.to_dict()
 
         def list_callback():
-            return [t.to_dict() for t in self._list_threads(client_id)]
+            return [t.to_dict() for t in self._list_threads()]
 
         tools = ToolBuilder.for_main(self.wiki, spawn_callback, list_callback)
+        assistant_thread_id = self.user_assistant_threads.get(client_id)
+
+        # Signal that agent is starting to process
+        await self.send_message(client_id, {
+            "type": "agent_start",
+            "thread_id": assistant_thread_id
+        })
         result = await session.executor.process_turn(user_message, custom_tools=tools)
+
+        # Signal that agent turn is complete
+        await self.send_message(client_id, {
+            "type": "agent_complete",
+            "thread_id": assistant_thread_id
+        })
 
         if result.status in ['completed', 'stopped']:
             return {"type": "success"}
@@ -587,8 +651,9 @@ There are merge conflicts with the main branch. Please:
         return {"type": "error", "message": f"Unexpected status: {result.status}"}
 
     async def _start_thread_with_notifications(self, thread: Thread, client_id: str):
-        """Start thread and send notifications."""
-        await self.send_message(client_id, {
+        """Start thread and broadcast notifications to ALL users."""
+        # Broadcast thread creation to all clients
+        await self.broadcast({
             "type": "thread_created",
             "thread": thread.to_dict()
         })
@@ -597,21 +662,21 @@ There are merge conflicts with the main branch. Please:
             success = await self._start_thread(thread, client_id)
             if not success:
                 await self._cleanup_thread(thread.id)
-                await self.send_message(client_id, {
+                await self.broadcast({
                     "type": "thread_deleted",
                     "thread_id": thread.id,
                     "reason": "start_failed"
                 })
         except Exception as e:
             await self._cleanup_thread(thread.id)
-            await self.send_message(client_id, {
+            await self.broadcast({
                 "type": "thread_deleted",
                 "thread_id": thread.id,
                 "reason": f"error: {e}"
             })
 
     async def _handle_thread_chat(self, client_id: str, thread_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle chat to a thread."""
+        """Handle chat to a thread - broadcast to ALL users for real-time collaboration."""
         user_message = message_data.get("message", "")
         if not user_message:
             return {"type": "error", "message": "Empty message"}
@@ -625,10 +690,10 @@ There are merge conflicts with the main branch. Please:
         if not session:
             return {"type": "error", "message": "Thread session not found"}
 
-        # Resume if waiting for input
+        # Resume if waiting for input - broadcast to all users
         if thread.status in (ThreadStatus.NEED_HELP, ThreadStatus.REVIEW):
             thread.set_status(ThreadStatus.WORKING)
-            await self.send_message(client_id, {
+            await self.broadcast({
                 "type": "thread_status",
                 "thread_id": thread_id,
                 "status": "working",
@@ -638,15 +703,29 @@ There are merge conflicts with the main branch. Please:
         # Process message if thread is working
         # Thread uses its own worktree, no checkout needed
         if thread.status == ThreadStatus.WORKING:
-            thread.add_message("user", user_message)
-            # Send user message to frontend
-            await self.send_message(client_id, {
+            thread.add_message("user", user_message, user_id=client_id)
+            # Broadcast user message to ALL users for real-time collaboration
+            await self.broadcast({
                 "type": "thread_message",
                 "thread_id": thread_id,
                 "role": "user",
-                "content": user_message
+                "content": user_message,
+                "user_id": client_id  # Include who sent the message
+            })
+            # Signal that agent is starting to process - ALL users see "Working..."
+            thread.is_generating = True
+            await self.broadcast({
+                "type": "agent_start",
+                "thread_id": thread_id
             })
             result = await session.executor.process_turn(user_message, custom_tools=session.tools)
+
+            # Signal that agent turn is complete - broadcast to all users
+            thread.is_generating = False
+            await self.broadcast({
+                "type": "agent_complete",
+                "thread_id": thread_id
+            })
 
             if result.status == 'error':
                 thread.set_error(result.error)
@@ -655,16 +734,19 @@ There are merge conflicts with the main branch. Please:
         return {"type": "success"}
 
     async def _handle_select_thread(self, client_id: str, thread_id: Optional[str]) -> Dict[str, Any]:
-        """Switch view to thread or main."""
+        """Switch view to thread or main (assistant)."""
         if thread_id is None:
             self.client_view[client_id] = "main"
             session_id = self.main_sessions.get(client_id)
             session = self.sessions.get(session_id) if session_id else None
             if session:
                 history = session.executor.get_conversation_history()
+                # Send assistant thread_id (not null)
+                assistant_thread_id = self.user_assistant_threads.get(client_id)
                 await self.send_message(client_id, {
                     "type": "thread_selected",
-                    "thread_id": None,
+                    "thread_id": assistant_thread_id,
+                    "thread_type": "assistant",
                     "history": history
                 })
             return {"type": "success"}
@@ -677,13 +759,20 @@ There are merge conflicts with the main branch. Please:
         await self.send_message(client_id, {
             "type": "thread_selected",
             "thread_id": thread_id,
-            "thread": thread.to_dict(),
+            "thread_type": "worker",
+            "thread": thread.to_dict(),  # includes is_generating
             "history": [m.to_dict() for m in thread.conversation]
         })
+        # Send agent_start if thread is currently generating (ensures frontend shows "Working...")
+        if thread.is_generating:
+            await self.send_message(client_id, {
+                "type": "agent_start",
+                "thread_id": thread_id
+            })
         return {"type": "success"}
 
     async def _handle_accept_thread(self, client_id: str, thread_id: str) -> Dict[str, Any]:
-        """Accept thread changes."""
+        """Accept thread changes - broadcast to all users."""
         thread = self._get_thread(thread_id)
         if not thread:
             return {"type": "error", "message": "Thread not found"}
@@ -691,23 +780,23 @@ There are merge conflicts with the main branch. Please:
         result = await self._accept_thread(thread_id)
 
         if result == AcceptResult.SUCCESS:
-            await self.send_message(client_id, {
+            await self.broadcast({
                 "type": "thread_status",
                 "thread_id": thread_id,
                 "status": "accepted",
                 "message": "Changes merged to main"
             })
             self.client_view[client_id] = "main"
-            threads = self._list_threads(client_id)
-            await self.send_message(client_id, {
+            threads = self._list_threads()
+            await self.broadcast({
                 "type": "thread_list",
                 "threads": [t.to_dict() for t in threads]
             })
-            await self.send_message(client_id, {"type": "pages_changed"})
+            await self.broadcast({"type": "pages_changed"})
             return {"type": "success", "result": "accepted"}
 
         elif result == AcceptResult.CONFLICT:
-            await self.send_message(client_id, {
+            await self.broadcast({
                 "type": "accept_conflict",
                 "thread_id": thread_id,
                 "message": "Merge conflict detected. Agent is resolving..."
@@ -717,19 +806,19 @@ There are merge conflicts with the main branch. Please:
         return {"type": "error", "message": "Failed to accept thread"}
 
     async def _handle_reject_thread(self, client_id: str, thread_id: str) -> Dict[str, Any]:
-        """Reject thread changes."""
+        """Reject thread changes - broadcast to all users."""
         success = await self._reject_thread(thread_id)
 
         if success:
-            await self.send_message(client_id, {
+            await self.broadcast({
                 "type": "thread_status",
                 "thread_id": thread_id,
                 "status": "rejected",
                 "message": "Changes rejected"
             })
             self.client_view[client_id] = "main"
-            threads = self._list_threads(client_id)
-            await self.send_message(client_id, {
+            threads = self._list_threads()
+            await self.broadcast({
                 "type": "thread_list",
                 "threads": [t.to_dict() for t in threads]
             })

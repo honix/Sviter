@@ -28,6 +28,7 @@ export interface ThreadMessage {
   tool_name?: string;
   tool_args?: Record<string, unknown>;
   tool_result?: string;
+  user_id?: string;  // Who sent this message (for collaborative threads)
 }
 
 export interface ThreadDiffStats {

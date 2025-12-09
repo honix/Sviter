@@ -10,6 +10,12 @@ import uuid
 import re
 
 
+class ThreadType(Enum):
+    """Type of thread."""
+    ASSISTANT = "assistant"  # Read-only assistant chat (per-user)
+    WORKER = "worker"        # Autonomous worker with read+write (shared)
+
+
 class ThreadStatus(Enum):
     """Status of a thread."""
     WORKING = "working"      # Agent actively processing
@@ -29,6 +35,7 @@ class ThreadMessage:
     tool_name: Optional[str] = None
     tool_args: Optional[Dict[str, Any]] = None
     tool_result: Optional[str] = None
+    user_id: Optional[str] = None  # Who sent this message (for collaborative threads)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -38,7 +45,8 @@ class ThreadMessage:
             "timestamp": self.timestamp.isoformat(),
             "tool_name": self.tool_name,
             "tool_args": self.tool_args,
-            "tool_result": self.tool_result
+            "tool_result": self.tool_result,
+            "user_id": self.user_id
         }
 
     @classmethod
@@ -67,6 +75,7 @@ class Thread:
     status: ThreadStatus
     created_at: datetime
     updated_at: datetime
+    type: ThreadType = ThreadType.WORKER  # assistant or worker
     conversation: List[ThreadMessage] = field(default_factory=list)
     error: Optional[str] = None
 
@@ -78,6 +87,9 @@ class Thread:
 
     # Worktree path for concurrent execution
     worktree_path: Optional[str] = None  # Path to thread's worktree directory
+
+    # Whether the thread is currently generating a response
+    is_generating: bool = False
 
     @classmethod
     def create(cls, name: str, goal: str, client_id: str = None) -> 'Thread':
@@ -117,12 +129,14 @@ class Thread:
             "name": self.name,
             "goal": self.goal,
             "branch": self.branch,
+            "type": self.type.value,
             "status": self.status.value,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "message_count": len(self.conversation),
             "error": self.error,
-            "review_summary": self.review_summary
+            "review_summary": self.review_summary,
+            "is_generating": self.is_generating
         }
 
     def add_message(self, role: str, content: str, **kwargs) -> ThreadMessage:

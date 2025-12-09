@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useReducer, useEffect, useRef, useState, useCallback } from 'react';
-import { Page, ViewMode, TreeItem } from '../types/page';
+import type { Page, ViewMode, TreeItem } from '../types/page';
 import { createWebSocketService, WebSocketService } from '../services/websocket';
-import { WebSocketMessage } from '../types/chat';
+import type { WebSocketMessage } from '../types/chat';
 import { treeApi } from '../services/tree-api';
-import type { Thread, ThreadMessage } from '../types/thread';
+import type { Thread, ThreadMessage, ThreadStatus } from '../types/thread';
+import { useAuth } from './AuthContext';
 
 interface AppState {
   pages: Page[];
@@ -17,8 +18,9 @@ interface AppState {
   centerPanelMode: 'page' | 'branch-diff';
   selectedBranchForDiff: string | null;
   // Thread state (replaces agent state)
-  threads: Thread[];
-  selectedThreadId: string | null;  // null = scout mode
+  threads: Thread[];  // Worker threads only
+  selectedThreadId: string | null;  // Currently viewed thread (assistant or worker)
+  assistantThreadId: string | null;  // Assistant thread ID (received from backend on connect)
   threadMessages: Record<string, ThreadMessage[]>;  // thread_id -> messages
   // Page tree state
   pageTree: TreeItem[];
@@ -48,6 +50,7 @@ type AppAction =
   | { type: 'UPDATE_THREAD'; payload: { id: string; updates: Partial<Thread> } }
   | { type: 'REMOVE_THREAD'; payload: string }
   | { type: 'SELECT_THREAD'; payload: string | null }
+  | { type: 'SET_ASSISTANT_THREAD_ID'; payload: string }
   | { type: 'ADD_THREAD_MESSAGE'; payload: { threadId: string; message: ThreadMessage } }
   | { type: 'SET_THREAD_MESSAGES'; payload: { threadId: string; messages: ThreadMessage[] } }
   // Tree actions
@@ -71,7 +74,8 @@ const initialState: AppState = {
   selectedBranchForDiff: null,
   // Thread state
   threads: [],
-  selectedThreadId: null,  // Start in scout mode
+  selectedThreadId: null,  // null = assistant mode
+  assistantThreadId: null,  // Set when backend sends thread_selected with type=assistant
   threadMessages: {},
   // Tree state
   pageTree: [],
@@ -184,13 +188,16 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         threads: state.threads.filter(t => t.id !== action.payload),
         threadMessages: remainingMessages,
-        // If removed thread was selected, go back to scout
-        selectedThreadId: state.selectedThreadId === action.payload ? null : state.selectedThreadId
+        // If removed thread was selected, switch back to assistant
+        selectedThreadId: state.selectedThreadId === action.payload ? state.assistantThreadId : state.selectedThreadId
       };
     }
 
     case 'SELECT_THREAD':
       return { ...state, selectedThreadId: action.payload };
+
+    case 'SET_ASSISTANT_THREAD_ID':
+      return { ...state, assistantThreadId: action.payload };
 
     case 'ADD_THREAD_MESSAGE':
       return {
@@ -266,6 +273,7 @@ interface AppContextType {
     selectThread: (threadId: string | null) => void;
     acceptThread: (threadId: string) => void;
     rejectThread: (threadId: string) => void;
+    addThreadMessage: (threadId: string, role: ThreadMessage['role'], content: string) => void;
     // Tree actions
     loadPageTree: () => Promise<void>;
     toggleFolder: (folderId: string) => void;
@@ -284,6 +292,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { userId, isLoading: isAuthLoading } = useAuth();
   const [state, dispatch] = useReducer(appReducer, initialState);
   const wsService = useRef<WebSocketService | null>(null);
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
@@ -320,9 +329,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     currentBranchRef.current = state.currentBranch;
   }, [state.currentBranch]);
 
-  // Initialize WebSocket service
+  // Initialize WebSocket service - wait for auth to complete
   useEffect(() => {
-    wsService.current = createWebSocketService('app-main');
+    // Don't connect until we have a userId
+    if (isAuthLoading || !userId) {
+      return;
+    }
+
+    wsService.current = createWebSocketService(userId);
 
     const statusUnsubscribe = wsService.current.onStatusChange((status) => {
       dispatch({ type: 'SET_CONNECTION_STATUS', payload: status });
@@ -334,44 +348,87 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Handle thread-specific messages
       if (message.type === 'thread_created') {
         dispatch({ type: 'ADD_THREAD', payload: message.thread });
-      } else if (message.type === 'thread_status') {
+      } else if (message.type === 'thread_status' && message.thread_id && message.status) {
         dispatch({
           type: 'UPDATE_THREAD',
           payload: {
             id: message.thread_id,
-            updates: { status: message.status }
+            updates: { status: message.status as ThreadStatus }
           }
         });
-      } else if (message.type === 'thread_deleted') {
+      } else if (message.type === 'thread_deleted' && message.thread_id) {
         dispatch({ type: 'REMOVE_THREAD', payload: message.thread_id });
-      } else if (message.type === 'thread_list') {
-        dispatch({ type: 'SET_THREADS', payload: message.threads });
+      } else if (message.type === 'thread_list' && message.threads) {
+        dispatch({ type: 'SET_THREADS', payload: message.threads as Thread[] });
       } else if (message.type === 'thread_selected') {
-        dispatch({ type: 'SELECT_THREAD', payload: message.thread_id });
-        if (message.history) {
+        // Set assistant thread ID if this is the assistant thread
+        if (message.thread_type === 'assistant' && message.thread_id) {
+          dispatch({ type: 'SET_ASSISTANT_THREAD_ID', payload: message.thread_id });
+        }
+        // Always set selected thread to the received thread_id
+        dispatch({ type: 'SELECT_THREAD', payload: message.thread_id ?? null });
+        // Only replace messages if history has content (avoid wiping out system_prompt)
+        if (message.history && message.history.length > 0 && message.thread_id) {
           dispatch({
             type: 'SET_THREAD_MESSAGES',
             payload: {
-              threadId: message.thread_id || 'scout',
-              messages: message.history
+              threadId: message.thread_id,
+              messages: message.history as ThreadMessage[]
             }
           });
         }
-      } else if (message.type === 'thread_message') {
+      } else if (message.type === 'thread_message' && message.thread_id && message.role && message.content !== undefined) {
         // Add message to thread's conversation
+        const threadId = message.thread_id;
+        const role = message.role as ThreadMessage['role'];
+        const content = message.content;
         const threadMessage: ThreadMessage = {
           id: Date.now().toString(),
-          role: message.role,
-          content: message.content,
+          role,
+          content,
           timestamp: new Date().toISOString(),
           tool_name: message.tool_name,
-          tool_args: message.tool_args
+          tool_args: message.tool_args,
+          user_id: message.user_id  // Who sent this message (for collaborative threads)
+        };
+        dispatch({
+          type: 'ADD_THREAD_MESSAGE',
+          payload: {
+            threadId,
+            message: threadMessage
+          }
+        });
+      } else if (message.type === 'system_prompt' && message.thread_id && message.content !== undefined) {
+        // Store system prompt in thread messages
+        const content = message.content;
+        const systemPromptMessage: ThreadMessage = {
+          id: `sysprompt_${Date.now()}`,
+          role: 'system_prompt',
+          content,
+          timestamp: new Date().toISOString()
         };
         dispatch({
           type: 'ADD_THREAD_MESSAGE',
           payload: {
             threadId: message.thread_id,
-            message: threadMessage
+            message: systemPromptMessage
+          }
+        });
+      } else if (message.type === 'tool_call' && message.thread_id) {
+        // Store tool call in thread messages
+        const toolCallMessage: ThreadMessage = {
+          id: `tool_${Date.now()}`,
+          role: 'tool_call',
+          content: message.result || '',
+          timestamp: new Date().toISOString(),
+          tool_name: message.tool_name,
+          tool_args: message.arguments
+        };
+        dispatch({
+          type: 'ADD_THREAD_MESSAGE',
+          payload: {
+            threadId: message.thread_id,
+            message: toolCallMessage
           }
         });
       } else if (message.type === 'page_updated') {
@@ -413,7 +470,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       messageUnsubscribe();
       wsService.current?.disconnect();
     };
-  }, []);
+  }, [userId, isAuthLoading]);
 
   // Helper to compare two pages arrays (order-independent comparison)
   // Pages are compared as sets since backend sorts by updated_at which changes order
@@ -754,6 +811,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       wsService.current?.send({
         type: 'reject_thread',
         thread_id: threadId
+      });
+    },
+    addThreadMessage: (threadId: string, role: ThreadMessage['role'], content: string) => {
+      const message: ThreadMessage = {
+        id: `user_${Date.now()}`,
+        role,
+        content,
+        timestamp: new Date().toISOString()
+      };
+      dispatch({
+        type: 'ADD_THREAD_MESSAGE',
+        payload: { threadId, message }
       });
     },
 

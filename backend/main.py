@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uvicorn
 from config import WIKI_REPO_PATH, OPENROUTER_API_KEY
+from db import init_db
+from auth import router as auth_router
 
 # Pydantic models for request/response
 class PageCreate(BaseModel):
@@ -48,11 +50,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include auth routes
+app.include_router(auth_router)
+
 # Startup event
 @app.on_event("startup")
 async def startup_event():
     """Verify wiki repository and initialize chat manager on startup"""
     try:
+        # Initialize database
+        init_db()
+        print("✅ Database initialized")
+
         pages = wiki.list_pages(limit=1)
         print(f"✅ Wiki repository loaded successfully ({WIKI_REPO_PATH})")
         print(f"📚 Found {len(wiki.list_pages())} pages")
