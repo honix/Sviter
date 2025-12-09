@@ -7,6 +7,8 @@ export interface ChatMessage {
   tool_count?: number;
   iterations?: number;
   tool_name?: string;
+  tool_args?: Record<string, any>;
+  tool_error?: boolean;
 }
 
 export interface ToolCall {
@@ -20,7 +22,9 @@ export interface ToolCall {
 
 export interface WebSocketMessage {
   type:
-    | 'chat' | 'chat_response' | 'tool_call' | 'system' | 'page_update' | 'error' | 'status' | 'success'
+    | 'chat' | 'chat_response' | 'tool_call' | 'system' | 'system_prompt' | 'page_update' | 'error' | 'status' | 'success'
+    // Agent messages
+    | 'agent_complete' | 'agent_selected'
     // Thread messages
     | 'thread_created' | 'thread_status' | 'thread_deleted' | 'thread_list' | 'thread_selected' | 'thread_message'
     // Branch messages
@@ -47,6 +51,7 @@ export interface WebSocketMessage {
   status?: string;  // Thread status (working, need_help, review, accepted, rejected)
   // Branch fields
   branch?: string;
+  branch_created?: string;
   // Page fields
   title?: string;
 }

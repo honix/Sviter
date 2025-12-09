@@ -1296,3 +1296,140 @@ class GitWiki:
             return stats
         except GitCommandError:
             return {}
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Search and Pattern Matching
+    # ─────────────────────────────────────────────────────────────────────────────
+
+    def search_pages_regex(
+        self,
+        pattern: str,
+        limit: int = 50,
+        context_lines: int = 0,
+        case_sensitive: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Search pages using regex pattern, returning matches with line numbers and context.
+
+        Args:
+            pattern: Regex pattern to search for
+            limit: Maximum number of matches to return
+            context_lines: Number of context lines before/after each match
+            case_sensitive: Whether search is case-sensitive (default: False)
+
+        Returns:
+            List of match dictionaries with page_title, page_path, line_number,
+            content, context_before, context_after
+        """
+        import re as regex_module
+
+        matches = []
+        flags = 0 if case_sensitive else regex_module.IGNORECASE
+
+        try:
+            compiled = regex_module.compile(pattern, flags)
+        except regex_module.error as e:
+            return [{"error": f"Invalid regex pattern: {e}"}]
+
+        for filepath in self.pages_dir.rglob("*.md"):
+            if not filepath.is_file():
+                continue
+
+            try:
+                content = filepath.read_text(encoding='utf-8')
+                # Skip frontmatter for search
+                post = frontmatter.loads(content)
+                page_content = post.content
+                lines = page_content.split('\n')
+
+                page_path = str(filepath.relative_to(self.pages_dir))
+                page_title = post.metadata.get("title", self.filename_to_title(filepath.name))
+
+                for line_num, line in enumerate(lines, start=1):
+                    if compiled.search(line):
+                        # Get context lines
+                        start_ctx = max(0, line_num - 1 - context_lines)
+                        end_ctx = min(len(lines), line_num + context_lines)
+
+                        context_before = lines[start_ctx:line_num - 1]
+                        context_after = lines[line_num:end_ctx]
+
+                        matches.append({
+                            "page_title": page_title,
+                            "page_path": page_path,
+                            "line_number": line_num,
+                            "content": line,
+                            "context_before": context_before,
+                            "context_after": context_after
+                        })
+
+                        if len(matches) >= limit:
+                            return matches
+
+            except Exception:
+                continue
+
+        return matches
+
+    def glob_pages(self, pattern: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Find pages matching glob pattern on titles/paths.
+
+        Supports:
+        - * matches any characters within a path segment
+        - ** matches any characters including path separators
+        - ? matches single character
+
+        Args:
+            pattern: Glob pattern (e.g., "docs/*", "**/*api*")
+            limit: Maximum results to return
+
+        Returns:
+            List of matching pages with title, path, updated_at
+        """
+        import fnmatch
+
+        # Normalize pattern - ensure it ends with .md for file matching
+        if not pattern.endswith('.md') and not pattern.endswith('*'):
+            search_pattern = pattern + '*'
+        else:
+            search_pattern = pattern
+
+        # Handle ** for recursive matching
+        if '**' in search_pattern:
+            # Convert ** to fnmatch-compatible pattern
+            search_pattern = search_pattern.replace('**/', '*')
+            search_pattern = search_pattern.replace('**', '*')
+
+        results = []
+
+        for filepath in self.pages_dir.rglob("*.md"):
+            if not filepath.is_file():
+                continue
+
+            rel_path = str(filepath.relative_to(self.pages_dir))
+            # Remove .md for matching against pattern
+            rel_path_no_ext = rel_path.replace('.md', '')
+
+            # Match against both with and without extension
+            if fnmatch.fnmatch(rel_path, search_pattern) or \
+               fnmatch.fnmatch(rel_path_no_ext, search_pattern) or \
+               fnmatch.fnmatch(rel_path.lower(), search_pattern.lower()) or \
+               fnmatch.fnmatch(rel_path_no_ext.lower(), search_pattern.lower()):
+
+                try:
+                    page_data = self._parse_page(filepath)
+                    results.append({
+                        "title": page_data["title"],
+                        "path": rel_path,
+                        "updated_at": page_data.get("updated_at")
+                    })
+
+                    if len(results) >= limit:
+                        break
+                except Exception:
+                    continue
+
+        # Sort by updated_at (most recent first)
+        results.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+        return results
