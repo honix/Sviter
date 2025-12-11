@@ -199,17 +199,21 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_ASSISTANT_THREAD_ID':
       return { ...state, assistantThreadId: action.payload };
 
-    case 'ADD_THREAD_MESSAGE':
+    case 'ADD_THREAD_MESSAGE': {
+      const existingMessages = state.threadMessages[action.payload.threadId] || [];
+      // Don't add duplicate system_prompt messages
+      if (action.payload.message.role === 'system_prompt' &&
+          existingMessages.some(m => m.role === 'system_prompt')) {
+        return state;
+      }
       return {
         ...state,
         threadMessages: {
           ...state.threadMessages,
-          [action.payload.threadId]: [
-            ...(state.threadMessages[action.payload.threadId] || []),
-            action.payload.message
-          ]
+          [action.payload.threadId]: [...existingMessages, action.payload.message]
         }
       };
+    }
 
     case 'SET_THREAD_MESSAGES':
       return {

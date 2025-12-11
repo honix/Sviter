@@ -168,12 +168,21 @@ class ThreadManager:
         # Force reload messages from DB to ensure we have latest
         assistant.reload_messages()
 
+        # Build history with system prompt at the start
+        system_prompt_msg = {
+            "id": f"sysprompt_{assistant.id}",
+            "role": "system_prompt",
+            "content": assistant.get_prompt(),
+            "timestamp": assistant.messages[0].created_at.isoformat() if assistant.messages else None
+        }
+        history = [system_prompt_msg] + [m.to_dict() for m in assistant.messages]
+
         # Send initial state to client
         await self.send_message(client_id, {
             "type": "thread_selected",
             "thread_id": assistant.id,
             "thread_type": "assistant",
-            "history": [m.to_dict() for m in assistant.messages]
+            "history": history
         })
 
         # Send thread list
@@ -611,12 +620,21 @@ class ThreadManager:
         # Force reload messages from DB to ensure we have latest
         thread.reload_messages()
 
+        # Build history with system prompt at the start
+        system_prompt_msg = {
+            "id": f"sysprompt_{thread_id}",
+            "role": "system_prompt",
+            "content": thread.get_prompt(),
+            "timestamp": thread.messages[0].created_at.isoformat() if thread.messages else None
+        }
+        history = [system_prompt_msg] + [m.to_dict() for m in thread.messages]
+
         await self.send_message(client_id, {
             "type": "thread_selected",
             "thread_id": thread_id,
             "thread_type": thread.type.value,
             "thread": thread.to_dict(),
-            "history": [m.to_dict() for m in thread.messages]
+            "history": history
         })
 
         # Send agent_start if currently generating

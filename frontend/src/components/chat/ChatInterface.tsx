@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useChat } from '../../hooks/useChat';
 import { useAppContext } from '../../contexts/AppContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -23,7 +24,6 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { Loader } from '@/components/ui/loader';
 import { ArrowUp, GitBranch, Loader2, AlertCircle, CheckCircle, Check, XCircle } from 'lucide-react';
 import type { Thread } from '../../types/thread';
-import type { ChatMessage } from '../../types/chat';
 import type { MarkdownLinkHandler } from '@/components/ui/markdown';
 import { ThreadChangesView } from '../threads/ThreadChangesView';
 
@@ -60,7 +60,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
   const { connectionStatus, assistantThreadId } = state;
   const { messages, sendMessage, clearMessages, isGenerating } = useChat(threadId);
   const [inputValue, setInputValue] = useState('');
+  const [expandedSystemPrompts, setExpandedSystemPrompts] = useState<Set<string>>(new Set());
   const { userId: currentUserId } = useAuth();
+
+  const toggleSystemPrompt = useCallback((messageId: string) => {
+    setExpandedSystemPrompts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId);
+      } else {
+        newSet.add(messageId);
+      }
+      return newSet;
+    });
+  }, []);
 
   const isConnected = connectionStatus === 'connected';
   const isAssistantMode = threadId === assistantThreadId;
@@ -219,13 +232,30 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
           )}
           {displayMessages.map((message) => (
             message.type === 'system_prompt' ? (
-              // System prompt - distinct styling, full width
+              // System prompt - collapsible, minimized by default
               <div
                 key={message.id}
-                className="mb-4 p-3 rounded-lg border border-border bg-muted/50 text-sm text-muted-foreground"
+                className="mb-4 rounded-lg border border-border bg-muted/50 text-sm text-muted-foreground cursor-pointer hover:bg-muted/70 transition-colors"
+                onClick={() => toggleSystemPrompt(message.id)}
               >
-                <div className="text-xs font-medium text-muted-foreground/70 mb-2">System Prompt</div>
-                <div className="whitespace-pre-wrap">{message.content}</div>
+                <div className="flex items-center gap-2 p-2 px-3">
+                  {expandedSystemPrompts.has(message.id) ? (
+                    <ChevronDown className="h-3 w-3 flex-shrink-0" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3 flex-shrink-0" />
+                  )}
+                  <span className="text-xs font-medium text-muted-foreground/70">System Prompt</span>
+                  {!expandedSystemPrompts.has(message.id) && (
+                    <span className="text-xs text-muted-foreground/50 truncate">
+                      {message.content.slice(0, 60)}...
+                    </span>
+                  )}
+                </div>
+                {expandedSystemPrompts.has(message.id) && (
+                  <div className="px-3 pb-3 pt-1 whitespace-pre-wrap border-t border-border/50">
+                    {message.content}
+                  </div>
+                )}
               </div>
             ) : message.type === 'tool_call' ? (
               // Tool call - status dot with brief summary (tool calls arrive after completion)

@@ -42,7 +42,7 @@ class AssistantThread(ReadToolsMixin, SpawnMixin, Thread):
     """
 
     @classmethod
-    def create(cls, owner_id: str, name: str = "Assistant") -> 'AssistantThread':
+    def create(cls, owner_id: str, name: str = "User Assistant") -> 'AssistantThread':
         """Create a new assistant thread for a user."""
         thread_id = str(uuid.uuid4())
         now = datetime.now()

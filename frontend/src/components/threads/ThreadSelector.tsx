@@ -1,19 +1,27 @@
 /**
- * ThreadSelector - dropdown to select between User Chat (scout) and active threads
+ * ThreadSelector - dropdown to select between User Assistant and active threads
  */
-import React from 'react';
+import React from "react";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-} from '@/components/ui/select';
-import { MessageCircle, AlertCircle, CheckCircle, Loader2, GitBranch, Check, XCircle } from 'lucide-react';
-import type { Thread, ThreadStatus } from '../../types/thread';
+} from "@/components/ui/select";
+import {
+  MessageCircle,
+  AlertCircle,
+  CheckCircle,
+  Loader2,
+  GitBranch,
+  Check,
+  XCircle,
+} from "lucide-react";
+import type { Thread, ThreadStatus } from "../../types/thread";
 
 interface ThreadSelectorProps {
   threads: Thread[];
-  selectedThreadId: string | null;  // null = scout mode
+  selectedThreadId: string | null; // null = assistant mode
   onSelect: (threadId: string | null) => void;
   isConnected: boolean;
   disabled?: boolean;
@@ -21,25 +29,25 @@ interface ThreadSelectorProps {
 
 const StatusIcon: React.FC<{ status: ThreadStatus }> = ({ status }) => {
   switch (status) {
-    case 'working':
+    case "working":
       return <Loader2 className="h-3 w-3 animate-spin text-blue-500" />;
-    case 'need_help':
+    case "need_help":
       return <AlertCircle className="h-3 w-3 text-yellow-500" />;
-    case 'review':
+    case "review":
       return <CheckCircle className="h-3 w-3 text-green-500" />;
-    case 'accepted':
+    case "accepted":
       return <Check className="h-3 w-3 text-green-600" />;
-    case 'rejected':
+    case "rejected":
       return <XCircle className="h-3 w-3 text-red-500" />;
   }
 };
 
 const statusLabel: Record<ThreadStatus, string> = {
-  'working': 'Working',
-  'need_help': 'Needs help',
-  'review': 'Ready for review',
-  'accepted': 'Accepted',
-  'rejected': 'Rejected'
+  working: "Working",
+  need_help: "Needs help",
+  review: "Ready for review",
+  accepted: "Accepted",
+  rejected: "Rejected",
 };
 
 export function ThreadSelector({
@@ -47,48 +55,53 @@ export function ThreadSelector({
   selectedThreadId,
   onSelect,
   isConnected,
-  disabled
+  disabled,
 }: ThreadSelectorProps) {
   const selectedThread = selectedThreadId
-    ? threads.find(t => t.id === selectedThreadId)
+    ? threads.find((t) => t.id === selectedThreadId)
     : null;
 
   const handleValueChange = (value: string) => {
-    onSelect(value === 'scout' ? null : value);
+    onSelect(value === "assistant" ? null : value);
   };
 
   return (
     <Select
-      value={selectedThreadId || 'scout'}
+      value={selectedThreadId || "assistant"}
       onValueChange={handleValueChange}
       disabled={disabled}
     >
       <SelectTrigger className="w-full h-auto py-2">
         <div className="flex items-center gap-2 w-full">
           {/* Connection indicator */}
-          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-            isConnected ? 'bg-green-500' : 'bg-gray-400'
-          }`} />
+          <div
+            className={`w-2 h-2 rounded-full flex-shrink-0 ${
+              isConnected ? "bg-green-500" : "bg-gray-400"
+            }`}
+          />
 
           <div className="flex flex-col items-start text-left flex-1 min-w-0">
             {selectedThread ? (
               <>
                 <div className="flex items-center gap-1.5">
                   <StatusIcon status={selectedThread.status} />
-                  <span className="font-medium truncate">{selectedThread.name}</span>
+                  <span className="font-medium truncate">
+                    {selectedThread.name}
+                  </span>
                 </div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <GitBranch className="h-3 w-3" />
-                  <span className="truncate">{selectedThread.branch}</span>
-                </div>
+                {selectedThread.type !== 'assistant' && selectedThread.branch && (
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <GitBranch className="h-3 w-3" />
+                    <span className="truncate">{selectedThread.branch}</span>
+                  </div>
+                )}
               </>
             ) : (
               <>
                 <div className="flex items-center gap-1.5">
                   <MessageCircle className="h-4 w-4" />
-                  <span className="font-medium">User Chat</span>
+                  <span className="font-medium">User Assistant</span>
                 </div>
-                <span className="text-xs text-muted-foreground">Scout mode (read-only)</span>
               </>
             )}
           </div>
@@ -96,23 +109,28 @@ export function ThreadSelector({
       </SelectTrigger>
 
       <SelectContent className="bg-background">
-        {/* Scout option (always first) */}
-        <SelectItem value="scout">
+        {/* User assistant option (always first) */}
+        <SelectItem value="assistant">
           <div className="flex items-center gap-2">
             <MessageCircle className="h-4 w-4" />
-            <span>User Chat</span>
-            <span className="text-xs text-muted-foreground">(Scout)</span>
+            <span>User Assistant</span>
           </div>
         </SelectItem>
 
         {/* Separator if threads exist */}
-        {threads.length > 0 && (
-          <div className="border-t my-1" />
-        )}
+        {threads.length > 0 && <div className="border-t my-1" />}
 
         {/* Thread options grouped by status */}
-        {(['review', 'need_help', 'working', 'accepted', 'rejected'] as ThreadStatus[]).map(status => {
-          const statusThreads = threads.filter(t => t.status === status);
+        {(
+          [
+            "review",
+            "need_help",
+            "working",
+            "accepted",
+            "rejected",
+          ] as ThreadStatus[]
+        ).map((status) => {
+          const statusThreads = threads.filter((t) => t.status === status);
           if (statusThreads.length === 0) return null;
 
           return statusThreads.map((thread) => (
