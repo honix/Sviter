@@ -40,25 +40,21 @@ This is an AI-powered wiki system with a FastAPI backend and React frontend. The
 
 ## Running the Application
 
-### Backend
-
 ```bash
-cd backend
-python main.py           # Start FastAPI server on port 8000
+make setup    # Create venv + install all dependencies (first time only)
+make run      # Start both backend and frontend
 ```
 
-### Frontend
-
-```bash
-cd frontend
-npm install              # Install dependencies (first time only)
-npm run dev             # Start Vite dev server on port 5173
-```
+Other commands:
+- `make backend` - Start backend only (port 8000)
+- `make frontend` - Start frontend only (port 5173)
+- `make clean` - Remove venv and node_modules
 
 ## Project Structure
 
 ```
 ├── CLAUDE.md                 # This file - project instructions
+├── Makefile                  # Build commands (setup, run, clean)
 ├── backend/                  # Python FastAPI backend
 │   ├── main.py               # FastAPI app entry point
 │   ├── requirements.txt      # Python dependencies
@@ -167,11 +163,11 @@ npm run dev             # Start Vite dev server on port 5173
 
 ## Development Workflow
 
-1. **Backend Development**: Run `python main.py` in backend directory
-2. **Frontend Development**: Standard npm workflow in frontend directory
-3. **Testing**: Run backend tests with `python scripts/run_tests.py`
-4. **WebSocket Testing**: Use `python scripts/chat_client.py` for backend testing
-5. **Agentic Testing**: Use Playwright MCP to test the full application autonomously - tests UI navigation, page creation/editing, WebSocket chat, and real-time synchronization
+1. **First time setup**: `make setup`
+2. **Run both servers**: `make run`
+3. **Testing**: Run backend tests with `backend/venv/bin/python scripts/run_tests.py`
+4. **WebSocket Testing**: Use `backend/venv/bin/python scripts/chat_client.py` for backend testing
+5. **Agentic Testing**: Use Playwright MCP to test the full application autonomously
 
 ## Security Notes
 
