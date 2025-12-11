@@ -29,7 +29,8 @@ class WikiTool:
     name: str
     description: str
     parameters: Dict[str, Any]  # JSON Schema format
-    function: Callable[[Dict[str, Any]], str]  # Takes args dict, returns result string
+    # Takes args dict, returns result string
+    function: Callable[[Dict[str, Any]], str]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -86,12 +87,14 @@ def _read_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
 
         # Build header
         header = [f"Page: {page['title']}"]
-        header.append(f"Author: {page['author']} | Created: {_format_datetime(page.get('created_at'))} | Updated: {_format_datetime(page.get('updated_at'))}")
+        header.append(
+            f"Author: {page['author']} | Created: {_format_datetime(page.get('created_at'))} | Updated: {_format_datetime(page.get('updated_at'))}")
         if page.get('tags'):
             header.append(f"Tags: {', '.join(page['tags'])}")
         header.append(f"Total lines: {total_lines}")
         if offset > 1 or end_idx < total_lines:
-            header.append(f"Showing lines {offset}-{start_idx + len(selected_lines)}")
+            header.append(
+                f"Showing lines {offset}-{start_idx + len(selected_lines)}")
         header.append("---")
 
         # Format with line numbers
@@ -136,7 +139,8 @@ def _grep_pages(wiki: GitWiki, args: Dict[str, Any]) -> str:
         return matches[0]["error"]
 
     # Format output
-    lines = [f"Found {len(matches)} match{'es' if len(matches) != 1 else ''} for pattern '{pattern}':\n"]
+    lines = [
+        f"Found {len(matches)} match{'es' if len(matches) != 1 else ''} for pattern '{pattern}':\n"]
 
     current_page = None
     for match in matches:
@@ -181,7 +185,8 @@ def _glob_pages(wiki: GitWiki, args: Dict[str, Any]) -> str:
     if not results:
         return f"No pages found matching pattern '{pattern}'"
 
-    lines = [f"Found {len(results)} page{'s' if len(results) != 1 else ''} matching '{pattern}':\n"]
+    lines = [
+        f"Found {len(results)} page{'s' if len(results) != 1 else ''} matching '{pattern}':\n"]
 
     for i, page in enumerate(results, 1):
         updated = _format_datetime(page.get("updated_at"))
@@ -332,12 +337,15 @@ Either:
         )
 
         result = [f"Page '{title}' edited successfully."]
-        result.append(f"- Replaced {replacements} occurrence{'s' if replacements > 1 else ''}")
+        result.append(
+            f"- Replaced {replacements} occurrence{'s' if replacements > 1 else ''}")
         if affected_lines:
             if len(affected_lines) <= 3:
-                result.append(f"- Lines affected: {', '.join(map(str, affected_lines))}")
+                result.append(
+                    f"- Lines affected: {', '.join(map(str, affected_lines))}")
             else:
-                result.append(f"- Lines affected: {affected_lines[0]}-{affected_lines[-1]}")
+                result.append(
+                    f"- Lines affected: {affected_lines[0]}-{affected_lines[-1]}")
         result.append(f"- New content length: {len(new_content)} characters")
 
         return "\n".join(result)
@@ -453,7 +461,8 @@ def _list_threads(
                 "rejected": "❌"
             }.get(t['status'], "❓")
 
-            lines.append(f"- {status_emoji} [{t['name']}](thread:{t['id']}) - {t['status']}")
+            lines.append(
+                f"- {status_emoji} [{t['name']}](thread:{t['id']}) - {t['status']}")
             if t.get('goal'):
                 lines.append(f"  Goal: {t['goal'][:50]}...")
 
@@ -699,7 +708,8 @@ Note: Line numbers are 1-indexed (first line is 1).""",
                     },
                     "required": ["name", "goal"]
                 },
-                function=lambda args, cb=spawn_callback: _spawn_thread(cb, args)
+                function=lambda args, cb=spawn_callback: _spawn_thread(
+                    cb, args)
             ),
             WikiTool(
                 name="list_threads",
@@ -714,7 +724,7 @@ Note: Line numbers are 1-indexed (first line is 1).""",
         ]
 
     @staticmethod
-    def thread_tools(
+    def worker_tools(
         help_callback: Callable[[str], None],
         review_callback: Callable[[str], None]
     ) -> List[WikiTool]:
@@ -742,7 +752,8 @@ Note: Line numbers are 1-indexed (first line is 1).""",
                     },
                     "required": ["summary"]
                 },
-                function=lambda args, cb=review_callback: _mark_for_review(cb, args)
+                function=lambda args, cb=review_callback: _mark_for_review(
+                    cb, args)
             )
         ]
 
@@ -772,5 +783,5 @@ Note: Line numbers are 1-indexed (first line is 1).""",
         return (
             ToolBuilder.read_tools(wiki) +
             ToolBuilder.write_tools(wiki) +
-            ToolBuilder.thread_tools(help_callback, review_callback)
+            ToolBuilder.worker_tools(help_callback, review_callback)
         )

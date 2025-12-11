@@ -72,8 +72,8 @@ class AgentExecutor:
         self.adapter: Optional[LLMAdapter] = None
         self.start_time: float = 0
         self.iteration_count: int = 0
-        self.current_model: str = "anthropic/claude-sonnet-4"
-        self.current_provider: str = "openrouter"  # "openrouter" or "claude"
+        self.current_model: str = "claude-sonnet-4-5"
+        self.current_provider: str = "claude"  # "openrouter" or "claude"
         self.current_agent_class: Optional[type] = None  # Legacy: agent class
         self.current_agent_name: str = "agent"  # Name for results
         self.branch_created: Optional[str] = None
@@ -90,16 +90,20 @@ class AgentExecutor:
             callback(*args, **kwargs)
 
     async def start_session(self,
-                           agent_class: Optional[type] = None,  # Deprecated: use config dict instead
-                           system_prompt: str = None,
-                           on_message: Union[Callable[[str, str], None], Callable[[str, str], Awaitable[None]]] = None,
-                           on_tool_call: Union[Callable[[Dict], None], Callable[[Dict], Awaitable[None]]] = None,
-                           on_branch_created: Union[Callable[[str], None], Callable[[str], Awaitable[None]]] = None,
-                           # Config dict parameters (preferred over agent_class)
-                           model: str = None,
-                           provider: str = None,
-                           human_in_loop: bool = None,
-                           agent_name: str = None) -> Dict[str, Any]:
+                            # Deprecated: use config dict instead
+                            agent_class: Optional[type] = None,
+                            system_prompt: str = None,
+                            on_message: Union[Callable[[str, str], None], Callable[[
+                                str, str], Awaitable[None]]] = None,
+                            on_tool_call: Union[Callable[[Dict], None], Callable[[
+                                Dict], Awaitable[None]]] = None,
+                            on_branch_created: Union[Callable[[
+                                str], None], Callable[[str], Awaitable[None]]] = None,
+                            # Config dict parameters (preferred over agent_class)
+                            model: str = None,
+                            provider: str = None,
+                            human_in_loop: bool = None,
+                            agent_name: str = None) -> Dict[str, Any]:
         """
         Start a new agent session.
 
@@ -163,8 +167,10 @@ class AgentExecutor:
                 self.human_in_loop = human_in_loop if human_in_loop is not None else True
 
             logs.append(f"Starting session: {self.current_agent_name}")
-            logs.append(f"Mode: {'interactive' if self.human_in_loop else 'autonomous'}")
-            logs.append(f"Provider: {self.current_provider}, Model: {self.current_model}")
+            logs.append(
+                f"Mode: {'interactive' if self.human_in_loop else 'autonomous'}")
+            logs.append(
+                f"Provider: {self.current_provider}, Model: {self.current_model}")
 
             # Reset on_start flag - will be called on first process_turn
             self.on_start_called = False
@@ -238,14 +244,16 @@ class AgentExecutor:
             # Call on_start on first turn (creates branch for AgentOnBranch)
             if not self.on_start_called and self.current_agent_class:
                 self.on_start_called = True
-                self.branch_created = self.current_agent_class.on_start(self.wiki)
+                self.branch_created = self.current_agent_class.on_start(
+                    self.wiki)
                 if self.branch_created:
                     logs.append(f"Created branch: {self.branch_created}")
                     await self._call_callback(self.on_branch_created, self.branch_created)
 
             # Get tools - use custom tools if provided, otherwise default read+edit tools
             wiki_tools = custom_tools if custom_tools is not None else (
-                ToolBuilder.wiki_read_tools(self.wiki) + ToolBuilder.wiki_edit_tools(self.wiki)
+                ToolBuilder.wiki_read_tools(
+                    self.wiki) + ToolBuilder.wiki_edit_tools(self.wiki)
             )
 
             logs.append(f"Processing with {self.current_provider} adapter")
@@ -256,12 +264,15 @@ class AgentExecutor:
                 conversation_history=self.conversation_history,
                 tools=wiki_tools,
                 max_turns=GlobalAgentConfig.max_iterations,
-                on_message=lambda t, c: self._call_callback(self.on_message, t, c),
-                on_tool_call=lambda d: self._call_callback(self.on_tool_call, d),
+                on_message=lambda t, c: self._call_callback(
+                    self.on_message, t, c),
+                on_tool_call=lambda d: self._call_callback(
+                    self.on_tool_call, d),
             )
 
             self.iteration_count += result.iterations
-            logs.append(f"Completed: {result.stop_reason} after {result.iterations} iterations")
+            logs.append(
+                f"Completed: {result.stop_reason} after {result.iterations} iterations")
 
             return ExecutionResult(
                 agent_name=self.current_agent_name,
@@ -336,7 +347,8 @@ class AgentExecutor:
                 changes_made = 0
                 if self.branch_created:
                     try:
-                        diff = self.wiki.get_diff(GlobalAgentConfig.default_base_branch, self.branch_created)
+                        diff = self.wiki.get_diff(
+                            GlobalAgentConfig.default_base_branch, self.branch_created)
                         changes_made = 1 if diff.strip() else 0
                     except Exception:
                         changes_made = 0
