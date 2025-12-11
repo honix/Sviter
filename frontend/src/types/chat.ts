@@ -9,6 +9,7 @@ export interface ChatMessage {
   tool_name?: string;
   tool_args?: Record<string, any>;
   tool_error?: boolean;
+  user_id?: string;  // Who sent this message (for collaborative threads)
 }
 
 export interface ToolCall {
@@ -43,12 +44,14 @@ export interface WebSocketMessage {
   // Thread fields
   thread?: any;
   thread_id?: string;
+  thread_type?: 'assistant' | 'worker';
   threads?: any[];
   history?: any[];
   role?: string;
   content?: string;
   tool_args?: any;
   status?: string;  // Thread status (working, need_help, review, accepted, rejected)
+  user_id?: string;  // Who sent the message (for collaborative threads)
   // Branch fields
   branch?: string;
   branch_created?: string;

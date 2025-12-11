@@ -20,7 +20,8 @@ export type MarkdownProps = {
 }
 
 function parseMarkdownIntoBlocks(markdown: string): string[] {
-  const tokens = marked.lexer(markdown)
+  const text = markdown.replace(/\n\n/g, '\n\n&nbsp;\n\n')
+  const tokens = marked.lexer(text)
   return tokens.map((token) => token.raw)
 }
 

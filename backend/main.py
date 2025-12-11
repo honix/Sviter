@@ -1,12 +1,15 @@
 from fastapi import FastAPI, WebSocket, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from storage import GitWiki, PageNotFoundException, GitWikiException
-from api.session_manager import websocket_endpoint, initialize_session_manager
+from threads.manager import websocket_endpoint, initialize_thread_manager
 from threads import git_operations as git_ops
+from api.threads import router as threads_router
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uvicorn
 from config import WIKI_REPO_PATH, OPENROUTER_API_KEY
+from db import init_db
+from auth import router as auth_router
 
 # Pydantic models for request/response
 class PageCreate(BaseModel):
@@ -48,11 +51,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include auth routes
+app.include_router(auth_router)
+
+# Include threads API routes
+app.include_router(threads_router)
+
 # Startup event
 @app.on_event("startup")
 async def startup_event():
-    """Verify wiki repository and initialize chat manager on startup"""
+    """Verify wiki repository and initialize thread manager on startup"""
     try:
+        # Initialize database
+        init_db()
+        print("✅ Database initialized")
+
         pages = wiki.list_pages(limit=1)
         print(f"✅ Wiki repository loaded successfully ({WIKI_REPO_PATH})")
         print(f"📚 Found {len(wiki.list_pages())} pages")
@@ -61,8 +74,8 @@ async def startup_event():
         git_ops.cleanup_orphaned_worktrees(wiki)
         print("🧹 Cleaned up orphaned worktrees")
 
-        # Initialize session manager with wiki instance
-        initialize_session_manager(wiki, OPENROUTER_API_KEY)
+        # Initialize thread manager with wiki instance
+        initialize_thread_manager(wiki, OPENROUTER_API_KEY)
     except Exception as e:
         print(f"❌ Error loading wiki repository: {e}")
 

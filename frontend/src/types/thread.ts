@@ -1,22 +1,37 @@
 /**
  * Thread types for the wiki agent system.
  *
- * A Thread represents an autonomous agent working on a git branch.
+ * A Thread represents a conversation container - either an assistant (read-only)
+ * or a worker (autonomous agent working on a git branch).
  */
 
-export type ThreadStatus = 'working' | 'need_help' | 'review' | 'accepted' | 'rejected';
+export type ThreadType = 'assistant' | 'worker';
+
+export type ThreadStatus =
+  | 'active'      // Currently usable (assistant)
+  | 'archived'    // User archived
+  | 'working'     // Agent processing (worker)
+  | 'need_help'   // Waiting for user input (worker)
+  | 'review'      // Ready for accept/reject (worker)
+  | 'accepted'    // Changes merged (worker)
+  | 'rejected';   // Changes rejected (worker)
 
 export interface Thread {
   id: string;
   name: string;
-  goal: string;
-  branch: string;
+  type: ThreadType;
+  owner_id: string;
   status: ThreadStatus;
+  goal?: string;           // Required for worker, optional for assistant
+  branch?: string;         // Only workers have branches
+  worktree_path?: string;  // Only workers have worktrees
+  is_generating?: boolean;
   created_at: string;
   updated_at: string;
-  message_count: number;
+  message_count?: number;
   error?: string;
   review_summary?: string;
+  thread_type?: string;    // Legacy compatibility field from backend
 }
 
 export interface ThreadMessage {
@@ -28,6 +43,7 @@ export interface ThreadMessage {
   tool_name?: string;
   tool_args?: Record<string, unknown>;
   tool_result?: string;
+  user_id?: string;  // Who sent this message (for collaborative threads)
 }
 
 export interface ThreadDiffStats {
@@ -79,6 +95,7 @@ export interface ThreadListMessage {
 export interface ThreadSelectedMessage {
   type: 'thread_selected';
   thread_id: string | null;
+  thread_type?: ThreadType;  // 'assistant' or 'worker'
   thread?: Thread;
   history: ThreadMessage[];
 }

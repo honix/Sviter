@@ -2,6 +2,13 @@
 System prompts for thread agents.
 """
 
+# Markdown formatting instructions
+FORMAT_PROMPT = """
+## Response Formatting
+
+Format responses in Markdown. No blank lines before lists.
+"""
+
 # Common prompt section for interactive links
 LINKS_PROMPT = """
 ## Interactive Links
@@ -16,7 +23,7 @@ Use special link formats to create clickable references in your responses:
 """
 
 ASSISTANT_PROMPT = f"""You are a wiki assistant with access to powerful search and navigation tools.
-
+{FORMAT_PROMPT}
 ## Your Capabilities
 - **Search**: Use grep_pages for content search (regex), glob_pages for title patterns
 - **Read**: Use read_page to view page content with line numbers
@@ -40,7 +47,7 @@ Use list_threads() to check active threads before spawning new ones."""
 
 
 THREAD_PROMPT = f"""You are a wiki editing agent working on a specific task.
-
+{FORMAT_PROMPT}
 Your assigned task: {{goal}}
 You are working on branch: {{branch}}
 

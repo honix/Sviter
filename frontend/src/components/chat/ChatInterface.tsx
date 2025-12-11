@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useCallback } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useChat } from '../../hooks/useChat';
 import { useAppContext } from '../../contexts/AppContext';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   ChatContainerRoot,
   ChatContainerContent,
@@ -19,74 +21,83 @@ import {
 } from '@/components/ui/prompt-input';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { Loader } from '@/components/ui/loader';
 import { ArrowUp, GitBranch, Loader2, AlertCircle, CheckCircle, Check, XCircle } from 'lucide-react';
-import type { Thread, ThreadMessage } from '../../types/thread';
-import type { ChatMessage } from '../../types/chat';
+import type { Thread } from '../../types/thread';
 import type { MarkdownLinkHandler } from '@/components/ui/markdown';
 import { ThreadChangesView } from '../threads/ThreadChangesView';
 
+// Generate soft pastel color from string hash
+const stringToColor = (str: string): string => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  // Use HSL with high lightness for pastel colors
+  const h = Math.abs(hash % 360);
+  return `hsl(${h}, 70%, 80%)`;
+};
+
+// Get initials from user ID
+const getInitials = (userId: string | undefined): string => {
+  if (!userId) return 'U';
+  // For guests (guest-xxxxx), use first 2 chars of the ID part
+  if (userId.startsWith('guest-')) {
+    return userId.slice(6, 8).toUpperCase();
+  }
+  // For OAuth users, assume format might be full name or email
+  // Just use first 2 chars for now
+  return userId.slice(0, 2).toUpperCase();
+};
+
 interface ChatInterfaceProps {
-  threadId: string | null;  // null = scout mode
-  thread?: Thread | null;
+  threadId: string;  // Always required - assistant or worker thread ID
+  thread?: Thread | null;  // Worker thread metadata (null for assistant)
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
   const { state, websocket, actions } = useAppContext();
-  const { connectionStatus, threadMessages } = state;
-  const { messages: scoutMessages, sendMessage: sendScoutMessage, clearMessages } = useChat();
+  const { connectionStatus, assistantThreadId } = state;
+  const { messages, sendMessage, clearMessages, isGenerating } = useChat(threadId);
   const [inputValue, setInputValue] = useState('');
+  const [expandedSystemPrompts, setExpandedSystemPrompts] = useState<Set<string>>(new Set());
+  const { userId: currentUserId } = useAuth();
+
+  const toggleSystemPrompt = useCallback((messageId: string) => {
+    setExpandedSystemPrompts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId);
+      } else {
+        newSet.add(messageId);
+      }
+      return newSet;
+    });
+  }, []);
 
   const isConnected = connectionStatus === 'connected';
-  const isScoutMode = threadId === null;
+  const isAssistantMode = threadId === assistantThreadId;
   const isReviewMode = thread?.status === 'review';
   const isWorking = thread?.status === 'working';
 
-  // Convert thread messages to chat messages format for display
-  const displayMessages: ChatMessage[] = useMemo(() => {
-    if (isScoutMode) {
-      return scoutMessages;
-    }
-
-    // Get thread messages and convert to ChatMessage format
-    const threadMsgs = threadMessages[threadId!] || [];
-    return threadMsgs.map((msg: ThreadMessage): ChatMessage => ({
-      id: msg.id,
-      type: msg.role === 'user' ? 'user'
-          : msg.role === 'tool_call' ? 'tool_call'
-          : msg.role.includes('system') ? 'system_prompt'
-          : 'assistant',
-      content: msg.content,
-      timestamp: msg.timestamp,
-      tool_name: msg.tool_name,
-      tool_args: msg.tool_args as Record<string, any>,
-      tool_error: msg.content?.startsWith('Error:')
-    }));
-  }, [isScoutMode, scoutMessages, threadMessages, threadId]);
+  // Messages come directly from useChat hook (already filtered by threadId)
+  const displayMessages = messages;
 
   const handleSend = () => {
     if (!inputValue.trim() || !isConnected) return;
 
     const trimmedInput = inputValue.trim();
 
-    // Handle /restart command (only in scout mode)
-    if (isScoutMode && trimmedInput === '/restart') {
+    // Handle /restart command (only in assistant mode)
+    if (isAssistantMode && trimmedInput === '/restart') {
       clearMessages();
       websocket.sendMessage({ type: 'reset' });
       setInputValue('');
       return;
     }
 
-    // Send message (WebSocket routes to appropriate thread/scout)
-    if (isScoutMode) {
-      sendScoutMessage(trimmedInput);
-    } else {
-      // For threads, send via WebSocket with thread context
-      websocket.sendMessage({
-        type: 'chat',
-        message: trimmedInput,
-        thread_id: threadId
-      });
-    }
+    // Send message via useChat hook (handles both assistant and worker)
+    sendMessage(trimmedInput);
     setInputValue('');
   };
 
@@ -212,7 +223,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
         <ChatContainerContent className="px-4 pt-4 pb-1">
           {displayMessages.length === 0 && (
             <div className="text-center text-muted-foreground text-sm py-8">
-              {isScoutMode
+              {isAssistantMode
                 ? 'Ask a question about your wiki...'
                 : isWorking
                   ? 'Thread is working on the task...'
@@ -221,13 +232,30 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
           )}
           {displayMessages.map((message) => (
             message.type === 'system_prompt' ? (
-              // System prompt - distinct styling, full width
+              // System prompt - collapsible, minimized by default
               <div
                 key={message.id}
-                className="mb-4 p-3 rounded-lg border border-border bg-muted/50 text-sm text-muted-foreground"
+                className="mb-4 rounded-lg border border-border bg-muted/50 text-sm text-muted-foreground cursor-pointer hover:bg-muted/70 transition-colors"
+                onClick={() => toggleSystemPrompt(message.id)}
               >
-                <div className="text-xs font-medium text-muted-foreground/70 mb-2">System Prompt</div>
-                <div className="whitespace-pre-wrap">{message.content}</div>
+                <div className="flex items-center gap-2 p-2 px-3">
+                  {expandedSystemPrompts.has(message.id) ? (
+                    <ChevronDown className="h-3 w-3 flex-shrink-0" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3 flex-shrink-0" />
+                  )}
+                  <span className="text-xs font-medium text-muted-foreground/70">System Prompt</span>
+                  {!expandedSystemPrompts.has(message.id) && (
+                    <span className="text-xs text-muted-foreground/50 truncate">
+                      {message.content.slice(0, 60)}...
+                    </span>
+                  )}
+                </div>
+                {expandedSystemPrompts.has(message.id) && (
+                  <div className="px-3 pb-3 pt-1 whitespace-pre-wrap border-t border-border/50">
+                    {message.content}
+                  </div>
+                )}
               </div>
             ) : message.type === 'tool_call' ? (
               // Tool call - status dot with brief summary (tool calls arrive after completion)
@@ -284,26 +312,52 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
                   </Tooltip>
                 );
               })()
-            ) : (
-              <Message
-                key={message.id}
-                className={`mb-4 ${message.type === 'user' ? 'flex-row-reverse' : ''}`}
-              >
-                <MessageAvatar
-                  src={message.type === 'user' ? '/user-avatar.png' : '/ai-avatar.png'}
-                  alt={message.type === 'user' ? 'User' : 'AI'}
-                  fallback={message.type === 'user' ? 'U' : 'AI'}
-                />
-                <MessageContent
-                  markdown={message.type === 'assistant'}
-                  className={message.type === 'user' ? 'bg-primary text-primary-foreground' : ''}
-                  linkHandlers={message.type === 'assistant' ? linkHandlers : undefined}
-                >
-                  {message.content}
-                </MessageContent>
-              </Message>
-            )
+            ) : (() => {
+              // Unified styling for all threads (assistant + worker)
+              const isUser = message.type === 'user';
+              const isAI = message.type === 'assistant';
+              // Use message's user_id or fall back to current user for messages without user_id
+              const effectiveUserId = message.user_id || currentUserId;
+              // Current user's messages align right, other users align left (like AI)
+              const isCurrentUser = isUser && (!message.user_id || message.user_id === currentUserId);
+
+              // Current user: right-aligned, Other users + AI: left-aligned
+              // All users get primary color bubble
+              const messageClassName = `mb-4 ${isCurrentUser ? 'flex-row-reverse' : ''}`;
+              const contentClassName = isUser
+                ? 'bg-primary text-primary-foreground'
+                : '';
+
+              // Avatar: pastel color + initials for users, AI avatar for assistant
+              const avatarFallback = isAI ? 'AI' : getInitials(effectiveUserId);
+              const avatarStyle = isUser && effectiveUserId
+                ? { backgroundColor: stringToColor(effectiveUserId) }
+                : undefined;
+
+              return (
+                <Message key={message.id} className={messageClassName}>
+                  <MessageAvatar
+                    src={isAI ? '/ai-avatar.png' : undefined}
+                    alt={isAI ? 'AI' : effectiveUserId || 'User'}
+                    fallback={avatarFallback}
+                    style={avatarStyle}
+                  />
+                  <MessageContent
+                    markdown={isAI}
+                    className={contentClassName}
+                    linkHandlers={isAI ? linkHandlers : undefined}
+                  >
+                    {message.content}
+                  </MessageContent>
+                </Message>
+              );
+            })()
           ))}
+          {isGenerating && (
+            <div className="mb-4 px-4">
+              <Loader text="Working..." className="text-sm" />
+            </div>
+          )}
           <ChatContainerScrollAnchor />
         </ChatContainerContent>
       </ChatContainerRoot>
@@ -320,7 +374,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
             placeholder={
               !isConnected
                 ? "Connecting..."
-                : isScoutMode
+                : isAssistantMode
                   ? "Type /restart to reset • Ask about your wiki..."
                   : isReviewMode
                     ? "Request changes or ask questions..."
