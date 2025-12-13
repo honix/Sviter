@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from ai.tools import WikiTool
 
 
-DEFAULT_API_KEY = "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"
 DEFAULT_MODEL = "openai/gpt-oss-20b"
 
 

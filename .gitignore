@@ -98,6 +98,9 @@ config/secrets.json
 # FastAPI
 .pytest_cache/
 
+# Backend data (database, worktrees)
+backend/data/
+
 # Windows
 desktop.ini
 $RECYCLE.BIN/

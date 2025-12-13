@@ -70,14 +70,25 @@ async def startup_event():
         print(f"✅ Wiki repository loaded successfully ({WIKI_REPO_PATH})")
         print(f"📚 Found {len(wiki.list_pages())} pages")
 
-        # Clean up any orphaned worktrees from previous sessions
-        git_ops.cleanup_orphaned_worktrees(wiki)
-        print("🧹 Cleaned up orphaned worktrees")
+        # Initialize thread support (sets up .gitignore, cleans orphaned worktrees)
+        git_ops.init_thread_support(wiki)
+        print("🧵 Thread support initialized")
 
         # Initialize thread manager with wiki instance
         initialize_thread_manager(wiki, OPENROUTER_API_KEY)
     except Exception as e:
         print(f"❌ Error loading wiki repository: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up worktrees on server shutdown"""
+    try:
+        git_ops.cleanup_orphaned_worktrees(wiki)
+        print("🧹 Worktrees cleaned up")
+    except Exception as e:
+        print(f"⚠️ Error cleaning up worktrees: {e}")
+
 
 # WebSocket endpoint
 @app.websocket("/ws/{client_id}")

@@ -9,7 +9,28 @@ from typing import Dict, Any, Optional
 from storage.git_wiki import GitWiki
 
 
-WORKTREES_DIR = ".worktrees"
+# Worktrees stored in backend/data/worktrees/ (next to database)
+WORKTREES_DIR = Path(__file__).parent.parent / "data" / "worktrees"
+
+
+def get_worktrees_path() -> Path:
+    """Get the worktrees directory path, creating it if needed."""
+    WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
+    return WORKTREES_DIR
+
+
+def init_thread_support(wiki: GitWiki) -> None:
+    """
+    Initialize thread support.
+
+    Creates worktrees directory and cleans up orphaned worktrees.
+    Should be called on server startup.
+
+    Args:
+        wiki: GitWiki instance
+    """
+    get_worktrees_path()  # Ensure directory exists
+    cleanup_orphaned_worktrees(wiki)
 
 
 def create_worktree(wiki: GitWiki, branch_name: str) -> Path:
@@ -26,8 +47,7 @@ def create_worktree(wiki: GitWiki, branch_name: str) -> Path:
     Returns:
         Path to the created worktree directory
     """
-    worktrees_path = Path(wiki.repo_path) / WORKTREES_DIR
-    worktrees_path.mkdir(exist_ok=True)
+    worktrees_path = get_worktrees_path()
 
     # Sanitize branch name for directory (replace / with -)
     safe_name = branch_name.replace("/", "-")
@@ -53,7 +73,7 @@ def remove_worktree(wiki: GitWiki, branch_name: str) -> bool:
     Returns:
         True if worktree removed successfully, False otherwise
     """
-    worktrees_path = Path(wiki.repo_path) / WORKTREES_DIR
+    worktrees_path = get_worktrees_path()
     safe_name = branch_name.replace("/", "-")
     worktree_path = worktrees_path / safe_name
 
@@ -94,33 +114,51 @@ def remove_worktree(wiki: GitWiki, branch_name: str) -> bool:
 
 def cleanup_orphaned_worktrees(wiki: GitWiki) -> None:
     """
-    Remove any orphaned worktrees from previous crashed sessions.
+    Remove worktrees not associated with active threads in the database.
 
-    Should be called on server startup.
+    Should be called on server startup/shutdown.
 
     Args:
         wiki: GitWiki instance
     """
+    from db import list_worker_threads
+
     try:
-        # git worktree prune removes stale worktree entries
-        wiki.repo.git.worktree("prune")
+        # Get active worktree paths from database
+        active_threads = list_worker_threads()
+        active_worktree_paths = {
+            t['worktree_path'] for t in active_threads
+            if t.get('worktree_path')
+        }
 
-        # Also clean up the .worktrees directory
-        worktrees_path = Path(wiki.repo_path) / WORKTREES_DIR
-        if worktrees_path.exists():
-            # List current valid worktrees
-            worktree_list = wiki.repo.git.worktree("list", "--porcelain")
-            valid_paths = set()
-            for line in worktree_list.split('\n'):
-                if line.startswith('worktree '):
-                    valid_paths.add(Path(line[9:]))
+        # Get all worktrees in data/worktrees directory
+        worktrees_path = get_worktrees_path()
+        if not worktrees_path.exists():
+            return
 
-            # Remove directories that aren't valid worktrees
-            for item in worktrees_path.iterdir():
-                if item.is_dir() and item not in valid_paths:
+        # Remove worktrees not in database
+        for item in worktrees_path.iterdir():
+            if not item.is_dir():
+                continue
+
+            item_str = str(item)
+            if item_str not in active_worktree_paths:
+                # Remove from git first
+                try:
+                    wiki.repo.git.worktree("remove", "--force", str(item))
+                except Exception:
+                    pass  # May already be invalid
+
+                # Then remove directory if still exists
+                if item.exists():
                     import shutil
                     shutil.rmtree(item)
-                    print(f"Cleaned up orphaned worktree directory: {item}")
+
+                print(f"Cleaned up orphaned worktree: {item.name}")
+
+        # Prune any stale git worktree entries
+        wiki.repo.git.worktree("prune")
+
     except Exception as e:
         print(f"Warning: Error during worktree cleanup: {e}")
 
