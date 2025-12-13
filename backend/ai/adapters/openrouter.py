@@ -5,7 +5,7 @@ Uses OpenAI-compatible API via OpenRouter.
 """
 
 import json
-from openai import OpenAI
+from openai import AsyncOpenAI
 from typing import Dict, List, Any, Optional, Callable, Awaitable, TYPE_CHECKING
 
 from .base import LLMAdapter, CompletionResult, ConversationResult, ToolCall
@@ -35,13 +35,13 @@ class OpenRouterAdapter(LLMAdapter):
             api_key: OpenRouter API key (optional, uses default)
             model: Model name (optional, uses default)
         """
-        self.client = OpenAI(
+        self.client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key or DEFAULT_API_KEY,
         )
         self.model_name = model or DEFAULT_MODEL
 
-    def _create_completion(
+    async def _create_completion(
         self,
         messages: List[Dict[str, Any]],
         tools: List[Dict] = None
@@ -55,7 +55,7 @@ class OpenRouterAdapter(LLMAdapter):
             params["tools"] = tools
             params["tool_choice"] = "auto"
 
-        return self.client.chat.completions.create(**params)
+        return await self.client.chat.completions.create(**params)
 
     def _convert_tools(self, tools: List['WikiTool']) -> List[Dict[str, Any]]:
         """Convert WikiTool list to OpenAI function format"""
@@ -68,7 +68,7 @@ class OpenRouterAdapter(LLMAdapter):
             }
         } for t in tools]
 
-    def create_completion(
+    async def create_completion(
         self,
         messages: List[Dict[str, Any]],
         tools: List['WikiTool'],
@@ -82,7 +82,7 @@ class OpenRouterAdapter(LLMAdapter):
         full_messages = [{"role": "system", "content": system_prompt}] + messages
         openai_tools = self._convert_tools(tools) if tools else None
 
-        completion = self._create_completion(full_messages, openai_tools)
+        completion = await self._create_completion(full_messages, openai_tools)
         message = completion.choices[0].message
 
         # Parse tool calls
@@ -154,7 +154,21 @@ class OpenRouterAdapter(LLMAdapter):
             iteration += 1
 
             full_messages = [{"role": "system", "content": system_prompt}] + non_system_messages
-            completion = self._create_completion(full_messages, openai_tools)
+
+            try:
+                completion = await self._create_completion(full_messages, openai_tools)
+            except Exception as e:
+                error_msg = str(e)
+                if on_message:
+                    await on_message("assistant", error_msg)
+
+                return ConversationResult(
+                    status='error',
+                    stop_reason='api_error',
+                    iterations=iteration,
+                    final_response=error_msg,
+                    error=error_msg
+                )
 
             message = completion.choices[0].message
             content = message.content or ""
