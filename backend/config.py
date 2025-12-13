@@ -18,3 +18,10 @@ if not WIKI_REPO_PATH:
 
 # OpenRouter API key (required if using OpenRouter adapter)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+# LLM Configuration
+# Model to use (e.g., "claude-sonnet-4-5", "anthropic/claude-sonnet-4")
+LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-4-5")
+
+# Provider: "claude" (Claude SDK) or "openrouter"
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "claude")

@@ -11,6 +11,7 @@ from ai.tools import WikiTool, ToolBuilder
 from ai.adapters import OpenRouterAdapter, LLMAdapter
 from ai.adapters.claude_sdk import ClaudeSDKAdapter, CLAUDE_SDK_AVAILABLE
 from .config import GlobalAgentConfig
+from config import LLM_MODEL, LLM_PROVIDER
 
 
 class ExecutionResult:
@@ -72,8 +73,8 @@ class AgentExecutor:
         self.adapter: Optional[LLMAdapter] = None
         self.start_time: float = 0
         self.iteration_count: int = 0
-        self.current_model: str = "claude-sonnet-4-5"
-        self.current_provider: str = "claude"  # "openrouter" or "claude"
+        self.current_model: str = LLM_MODEL
+        self.current_provider: str = LLM_PROVIDER
         self.current_agent_class: Optional[type] = None  # Legacy: agent class
         self.current_agent_name: str = "agent"  # Name for results
         self.branch_created: Optional[str] = None
@@ -162,8 +163,8 @@ class AgentExecutor:
 
                 self.current_agent_name = agent_name or "agent"
                 agent_prompt = system_prompt
-                self.current_model = model or "claude-sonnet-4-5"
-                self.current_provider = provider or "claude"
+                self.current_model = model or LLM_MODEL
+                self.current_provider = provider or LLM_PROVIDER
                 self.human_in_loop = human_in_loop if human_in_loop is not None else True
 
             logs.append(f"Starting session: {self.current_agent_name}")
@@ -299,22 +300,6 @@ class AgentExecutor:
     def get_conversation_history(self) -> List[Dict[str, Any]]:
         """Get current conversation history"""
         return self.conversation_history.copy()
-
-    async def reset_conversation(self):
-        """Reset conversation to initial state"""
-        # Disconnect Claude SDK client if active
-        if self.adapter and hasattr(self.adapter, 'disconnect'):
-            await self.adapter.disconnect()
-        self.conversation_history = []
-        self.adapter = None
-        self.iteration_count = 0
-        self.current_model = "anthropic/claude-sonnet-4"
-        self.current_provider = "openrouter"
-        self.current_agent_class = None
-        self.current_agent_name = "agent"
-        self.branch_created = None
-        self.human_in_loop = True
-        self.on_start_called = False
 
     async def end_session(self, call_on_finish: bool = True) -> Dict[str, Any]:
         """

@@ -16,6 +16,7 @@ import json
 import asyncio
 import os
 
+from config import LLM_MODEL, LLM_PROVIDER
 from storage import GitWiki
 from agents.executor import AgentExecutor
 from threads.base import Thread, ThreadStatus
@@ -302,8 +303,8 @@ class ThreadManager:
         # Start session
         result = await executor.start_session(
             system_prompt=thread.get_prompt(),
-            model="claude-sonnet-4-5",
-            provider="claude",
+            model=LLM_MODEL,
+            provider=LLM_PROVIDER,
             human_in_loop=True,  # All threads are human-in-loop
             agent_name=thread.name,
             on_message=on_message,
