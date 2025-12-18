@@ -121,9 +121,19 @@ export function createCollabSession(
 /**
  * Get the Yjs XmlFragment for ProseMirror content.
  * This is the shared type that y-prosemirror binds to.
+ * @deprecated Use getSharedText() for new code - both editors should use the same Y.Text
  */
 export function getXmlFragment(doc: Y.Doc, name: string = 'prosemirror'): Y.XmlFragment {
   return doc.getXmlFragment(name);
+}
+
+/**
+ * Get the shared Yjs Text for content.
+ * Both CodeMirror and ProseMirror editors use this same Y.Text,
+ * which contains the raw markdown content.
+ */
+export function getSharedText(doc: Y.Doc): Y.Text {
+  return doc.getText('content');
 }
 
 /**

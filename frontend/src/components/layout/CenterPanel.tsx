@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../../contexts/AppContext';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { Button } from '@/components/ui/button';
@@ -7,23 +7,19 @@ import { Card, CardContent } from '@/components/ui/card';
 import { AlertCircle, FileText, GitBranch, Code, Eye } from 'lucide-react';
 import { RevisionHistory } from '../revisions/RevisionHistory';
 import type { PageRevision } from '../../types/page';
-import { ProseMirrorEditor, type ProseMirrorEditorHandle } from '../editor/ProseMirrorEditor';
+import { ProseMirrorEditor } from '../editor/ProseMirrorEditor';
 import { CollaborativeEditor } from '../editor/CollaborativeEditor';
-import { EditorToolbar } from '../editor/EditorToolbar';
+import { CollaborativeCodeMirrorEditor } from '../editor/CollaborativeCodeMirrorEditor';
 import { CodeMirrorEditor } from '../editor/CodeMirrorEditor';
 import { CodeMirrorDiffView } from '../editor/CodeMirrorDiffView';
 
 const CenterPanel: React.FC = () => {
   const { state, actions } = useAppContext();
   const { currentPage, viewMode, isLoading, error, currentBranch, pageUpdateCounter } = state;
-  const { setViewMode, updatePage } = actions;
+  const { setViewMode } = actions;
 
-  const [editContent, setEditContent] = useState('');
-  const [editContentJson, setEditContentJson] = useState<any>(null);
   const [viewingRevision, setViewingRevision] = useState<PageRevision | null>(null);
   const [viewingRevisionContent, setViewingRevisionContent] = useState<string | null>(null);
-  const editorRef = useRef<ProseMirrorEditorHandle>(null);
-  const [editorView, setEditorView] = useState<any>(null);
 
   // For main branch: 'view' | 'edit' | 'history'
   // For other branches: 'diff' | 'history'
@@ -35,11 +31,9 @@ const CenterPanel: React.FC = () => {
 
   const isMainBranch = currentBranch === 'main';
 
-  // Sync edit content when page changes
+  // Reset revision view when page changes
   useEffect(() => {
     if (currentPage) {
-      setEditContent(currentPage.content);
-      setEditContentJson(currentPage.content_json);
       setViewingRevision(null);
       setViewingRevisionContent(null);
     }
@@ -55,40 +49,6 @@ const CenterPanel: React.FC = () => {
       }
     }
   }, [viewMode, isMainBranch]);
-
-  const handleEditorViewReady = (view: any) => {
-    setEditorView(view);
-  };
-
-  const handleSave = async () => {
-    if (currentPage) {
-      await updatePage(currentPage.title, {
-        content: editContent,
-        content_json: editContentJson,
-      });
-    }
-    setViewMode('view');
-    setMainTab('view');
-  };
-
-  const handleCancel = () => {
-    if (currentPage) {
-      setEditContent(currentPage.content);
-      setEditContentJson(currentPage.content_json);
-    }
-    setViewMode('view');
-    setMainTab('view');
-  };
-
-  const handleEditorChange = (docJson: any, markdown: string) => {
-    setEditContentJson(docJson);
-    setEditContent(markdown);
-  };
-
-  const handleCodeMirrorChange = (content: string) => {
-    setEditContent(content);
-    setEditContentJson(null);
-  };
 
   const handleRevisionSelect = async (revision: PageRevision) => {
     setViewingRevision(revision);
@@ -181,22 +141,9 @@ const CenterPanel: React.FC = () => {
       <div className="h-full bg-background flex flex-col">
         {/* Header */}
         <div className="border-b border-border p-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-foreground">
-              {currentPage.title}
-            </h1>
-            {/* Save/Cancel only for raw edit mode - collaborative mode auto-saves */}
-            {viewMode === 'edit' && formatMode === 'raw' && (
-              <div className="flex gap-2">
-                <Button onClick={handleSave} size="sm">
-                  Save
-                </Button>
-                <Button onClick={handleCancel} variant="outline" size="sm">
-                  Cancel
-                </Button>
-              </div>
-            )}
-          </div>
+          <h1 className="text-2xl font-bold text-foreground">
+            {currentPage.title}
+          </h1>
         </div>
 
         {/* Content Area with Tabs */}
@@ -276,17 +223,16 @@ const CenterPanel: React.FC = () => {
             <TabsContent value="edit" className="flex-1 overflow-hidden mt-0 flex flex-col">
               <div className="flex-1 overflow-hidden min-h-0">
                 {formatMode === 'raw' ? (
-                  <>
-                    <EditorToolbar editorView={null} />
-                    <CodeMirrorEditor
-                      content={editContent}
-                      editable={true}
-                      onChange={handleCodeMirrorChange}
-                      className="h-full"
-                    />
-                  </>
+                  /* Collaborative CodeMirror editor for raw markdown */
+                  <CollaborativeCodeMirrorEditor
+                    key={`collab-cm-${currentPage.path}`}
+                    pagePath={currentPage.path}
+                    pageTitle={currentPage.title}
+                    initialContent={currentPage.content || ''}
+                    className="h-full"
+                  />
                 ) : (
-                  /* Collaborative editor with Yjs - auto-saves, no manual save needed */
+                  /* Collaborative ProseMirror editor for formatted view */
                   <CollaborativeEditor
                     key={`collab-${currentPage.path}`}
                     pagePath={currentPage.path}

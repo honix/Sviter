@@ -1,20 +1,25 @@
 /**
  * Collaborative ProseMirror editor using Yjs for real-time synchronization.
- * This component manages the Yjs document and binds it to ProseMirror.
+ * Uses the shared Y.Text that is also used by CollaborativeCodeMirrorEditor.
+ *
+ * Unlike y-prosemirror's direct binding, this manually syncs between Y.Text (markdown)
+ * and ProseMirror's document model to ensure both editors stay in sync.
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { EditorState } from 'prosemirror-state';
-import { EditorView } from 'prosemirror-view';
+import { EditorState, Transaction, Plugin, PluginKey } from 'prosemirror-state';
+import { EditorView, Decoration, DecorationSet } from 'prosemirror-view';
 import { keymap } from 'prosemirror-keymap';
 import { baseKeymap } from 'prosemirror-commands';
+import { history, undo, redo } from 'prosemirror-history';
 import { inputRules, wrappingInputRule, textblockTypeInputRule, smartQuotes, emDash, ellipsis } from 'prosemirror-inputrules';
-import { ySyncPlugin, yCursorPlugin, yUndoPlugin, undo, redo, prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
+import * as Y from 'yjs';
+import type { Awareness } from 'y-protocols/awareness';
 
 import { schema } from '../../editor/schema';
 import { buildKeymap } from '../../editor/keymap';
 import { markdownToProseMirror, prosemirrorToMarkdown } from '../../editor/conversion';
-import { createCollabSession, destroyCollabSession, getXmlFragment, type CollabUser, type ConnectionStatus } from '../../services/collab';
+import { createCollabSession, destroyCollabSession, getSharedText, type CollabUser, type ConnectionStatus } from '../../services/collab';
 import { updatePage } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { EditorToolbar } from './EditorToolbar';
@@ -24,6 +29,168 @@ import { stringToColor, getInitials } from '../../utils/colors';
 // Debounce delay for auto-save (milliseconds)
 const SAVE_DEBOUNCE_MS = 2000;
 import './prosemirror.css';
+
+// Plugin key for remote cursor decorations
+const remoteCursorPluginKey = new PluginKey('remoteCursors');
+
+// Editor mode type for filtering cursors
+type EditorMode = 'formatted' | 'raw';
+
+interface RelativeCursorState {
+  anchor: Y.RelativePosition;
+  head: Y.RelativePosition;
+  mode?: EditorMode;
+}
+
+/**
+ * Convert Y.Text character offset to approximate ProseMirror position.
+ */
+function textOffsetToPmPos(doc: ReturnType<typeof markdownToProseMirror>, targetOffset: number): number {
+  let offset = 0;
+  let resultPos = 0;
+  let lastBlockEnd = 0;
+  let found = false;
+
+  doc.descendants((node, pos) => {
+    if (found) return false;
+
+    if (node.isBlock && pos > 0 && pos > lastBlockEnd) {
+      if (offset >= targetOffset) {
+        resultPos = pos;
+        found = true;
+        return false;
+      }
+      offset += 1;
+      lastBlockEnd = pos + node.nodeSize;
+    }
+
+    if (node.isText) {
+      const nodeLen = node.nodeSize;
+      if (offset + nodeLen >= targetOffset) {
+        resultPos = pos + (targetOffset - offset);
+        found = true;
+        return false;
+      }
+      offset += nodeLen;
+    }
+
+    return true;
+  });
+
+  if (!found) {
+    resultPos = doc.content.size;
+  }
+
+  return Math.max(0, Math.min(resultPos, doc.content.size));
+}
+
+/**
+ * Convert ProseMirror position to approximate Y.Text character offset.
+ */
+function pmPosToTextOffset(doc: ReturnType<typeof markdownToProseMirror>, pos: number): number {
+  let offset = 0;
+  let lastBlockEnd = 0;
+
+  doc.nodesBetween(0, Math.min(pos, doc.content.size), (node, nodePos) => {
+    if (node.isBlock && nodePos > 0 && nodePos > lastBlockEnd) {
+      offset += 1;
+      lastBlockEnd = nodePos + node.nodeSize;
+    }
+    if (node.isText) {
+      const textStart = nodePos;
+      const textEnd = nodePos + node.nodeSize;
+      const relevantStart = Math.max(textStart, 0);
+      const relevantEnd = Math.min(textEnd, pos);
+      if (relevantEnd > relevantStart) {
+        offset += relevantEnd - relevantStart;
+      }
+    }
+    return true;
+  });
+
+  return offset;
+}
+
+/**
+ * Create a ProseMirror plugin that renders remote user cursors and selections.
+ * Only shows cursors from users in the same editor mode (formatted).
+ */
+function createRemoteCursorPlugin(
+  awareness: Awareness,
+  yText: Y.Text,
+  localClientId: number
+): Plugin {
+  return new Plugin({
+    key: remoteCursorPluginKey,
+    state: {
+      init() {
+        return DecorationSet.empty;
+      },
+      apply(tr, decorationSet, _oldState, newState) {
+        // Only rebuild on doc changes or meta trigger
+        if (!tr.docChanged && !tr.getMeta(remoteCursorPluginKey)) {
+          return decorationSet.map(tr.mapping, newState.doc);
+        }
+
+        const decorations: Decoration[] = [];
+        const markdown = yText.toString();
+
+        awareness.getStates().forEach((state, clientId) => {
+          if (clientId === localClientId) return;
+          if (!state.cursor) return;
+
+          const cursor = state.cursor as RelativeCursorState;
+          const user = state.user as { name: string; color: string } | undefined;
+
+          if (!user) return;
+
+          // Only show cursors from users in the same mode (formatted)
+          if (cursor.mode !== 'formatted') return;
+
+          // Convert Y.RelativePosition to absolute index in Y.Text
+          const anchorAbs = Y.createAbsolutePositionFromRelativePosition(cursor.anchor, yText.doc!);
+          const headAbs = Y.createAbsolutePositionFromRelativePosition(cursor.head, yText.doc!);
+
+          if (!anchorAbs || !headAbs) return;
+
+          // Convert Y.Text positions to ProseMirror positions
+          const anchor = textOffsetToPmPos(newState.doc, Math.min(anchorAbs.index, markdown.length));
+          const head = textOffsetToPmPos(newState.doc, Math.min(headAbs.index, markdown.length));
+
+          // Add selection highlight if there's a range
+          if (anchor !== head) {
+            const from = Math.min(anchor, head);
+            const to = Math.max(anchor, head);
+            decorations.push(
+              Decoration.inline(from, to, {
+                class: 'yRemoteSelection',
+                style: `background-color: ${user.color}33;`, // 20% opacity
+              })
+            );
+          }
+
+          // Add cursor caret at head position
+          decorations.push(
+            Decoration.widget(head, () => {
+              const cursorEl = document.createElement('span');
+              cursorEl.className = 'collaboration-cursor';
+              cursorEl.style.setProperty('--cursor-color', user.color);
+              cursorEl.setAttribute('data-user', user.name);
+              return cursorEl;
+            }, { side: 1 })
+          );
+        });
+
+        return DecorationSet.create(newState.doc, decorations);
+      },
+    },
+    props: {
+      decorations(state) {
+        return remoteCursorPluginKey.getState(state);
+      },
+    },
+  });
+}
 
 interface CollaborativeEditorProps {
   pagePath: string;
@@ -49,7 +216,11 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
   const initializedRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedContentRef = useRef<string>('');
-  const isInitialLoadRef = useRef(true); // Skip save on initial load
+  const isInitialLoadRef = useRef(true);
+  const yTextRef = useRef<Y.Text | null>(null);
+  // Flag to prevent update loops
+  const isUpdatingFromYjsRef = useRef(false);
+  const isUpdatingYjsRef = useRef(false);
 
   // Handle status changes
   const handleStatusChange = useCallback((status: ConnectionStatus) => {
@@ -63,9 +234,9 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
 
   // Save document to backend
   const saveDocument = useCallback(async () => {
-    if (!viewRef.current) return;
+    if (!yTextRef.current) return;
 
-    const markdown = prosemirrorToMarkdown(viewRef.current.state.doc);
+    const markdown = yTextRef.current.toString();
 
     // Skip if content hasn't changed
     if (markdown === lastSavedContentRef.current) {
@@ -121,21 +292,16 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
     );
     sessionRef.current = session;
 
-    // Get Yjs XML fragment for ProseMirror
-    const yXmlFragment = getXmlFragment(session.doc);
+    // Get shared Y.Text (same as used by CodeMirror editor)
+    const yText = getSharedText(session.doc);
+    yTextRef.current = yText;
 
     // Initialize content after a short delay to allow for sync
-    // This gives time for existing content to arrive from other clients
     setTimeout(() => {
-      if (yXmlFragment.length === 0 && initialContent) {
-        // Parse markdown to ProseMirror document
-        const doc = markdownToProseMirror(initialContent);
-
-        // Convert ProseMirror doc to Yjs XmlFragment
-        // This populates the shared Y.XmlFragment with the ProseMirror content
-        prosemirrorJSONToYXmlFragment(schema, doc.toJSON(), yXmlFragment);
+      if (yText.length === 0 && initialContent) {
+        yText.insert(0, initialContent);
       }
-    }, 100); // Small delay to allow sync
+    }, 100);
 
     // Build input rules for markdown shortcuts
     const buildInputRulesPlugin = () => {
@@ -153,24 +319,26 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       return inputRules({ rules });
     };
 
-    // Custom cursor builder for better cursor styling
-    const cursorBuilder = (user: { name?: string; color?: string }) => {
-      const cursor = document.createElement('span');
-      cursor.classList.add('collaboration-cursor');
-      cursor.setAttribute('data-user', user.name || 'Anonymous');
-      const color = user.color || '#6495ED';
-      cursor.style.setProperty('--cursor-color', color);
-      cursor.style.borderLeftColor = color;
-      return cursor;
-    };
+    // Parse initial content from Y.Text
+    const initialMarkdown = yText.toString() || initialContent;
+    const doc = markdownToProseMirror(initialMarkdown);
 
-    // Create editor state with Yjs plugins
+    // Get awareness for cursor tracking
+    const awareness = session.provider.awareness;
+
+    // Create remote cursor plugin
+    const remoteCursorPlugin = createRemoteCursorPlugin(
+      awareness,
+      yText,
+      awareness.clientID
+    );
+
+    // Create editor state
     const state = EditorState.create({
+      doc,
       schema,
       plugins: [
-        ySyncPlugin(yXmlFragment),
-        yCursorPlugin(session.provider.awareness, { cursorBuilder }),
-        yUndoPlugin(),
+        history(),
         keymap({
           'Mod-z': undo,
           'Mod-y': redo,
@@ -179,14 +347,56 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
         buildKeymap(),
         keymap(baseKeymap),
         buildInputRulesPlugin(),
+        remoteCursorPlugin,
       ],
     });
 
-    // Create editor view
+    // Create editor view with dispatch interceptor
     const view = new EditorView(editorRef.current, {
       state,
       editable: () => true,
+      dispatchTransaction(tr: Transaction) {
+        const newState = view.state.apply(tr);
+        view.updateState(newState);
+
+        // If document changed and we're not updating from Yjs, sync to Y.Text
+        if (tr.docChanged && !isUpdatingFromYjsRef.current) {
+          isUpdatingYjsRef.current = true;
+          const markdown = prosemirrorToMarkdown(newState.doc);
+
+          // Update Y.Text with the new markdown
+          if (yText.toString() !== markdown) {
+            session.doc.transact(() => {
+              yText.delete(0, yText.length);
+              yText.insert(0, markdown);
+            });
+          }
+          isUpdatingYjsRef.current = false;
+        }
+
+        // Broadcast local selection to awareness for other users
+        if (tr.selectionSet || tr.docChanged) {
+          const { anchor, head } = newState.selection;
+          // Convert ProseMirror positions to Y.Text character offsets
+          const anchorOffset = pmPosToTextOffset(newState.doc, anchor);
+          const headOffset = pmPosToTextOffset(newState.doc, head);
+          // Use Y.RelativePosition for CRDT-safe cursor positions (compatible with y-codemirror.next)
+          // Include mode so other editors can filter by mode
+          awareness.setLocalStateField('cursor', {
+            anchor: Y.createRelativePositionFromTypeIndex(yText, anchorOffset),
+            head: Y.createRelativePositionFromTypeIndex(yText, headOffset),
+            mode: 'formatted' as EditorMode,
+          });
+        }
+      },
     });
+
+    // Clear cursor from awareness when editor loses focus
+    // (new cursor position will be broadcast via dispatchTransaction when user clicks back)
+    const handleBlur = () => {
+      awareness.setLocalStateField('cursor', null);
+    };
+    view.dom.addEventListener('blur', handleBlur);
 
     viewRef.current = view;
     setEditorView(view);
@@ -200,11 +410,35 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       isInitialLoadRef.current = false;
     }, 500);
 
+    // Observe Y.Text changes and update ProseMirror
+    const handleYTextChange = () => {
+      // Skip if we're the one updating Y.Text
+      if (isUpdatingYjsRef.current) return;
+
+      const markdown = yText.toString();
+      const newDoc = markdownToProseMirror(markdown);
+
+      // Only update if content is different
+      if (!view.state.doc.eq(newDoc)) {
+        isUpdatingFromYjsRef.current = true;
+        const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, newDoc.content);
+        view.dispatch(tr);
+        isUpdatingFromYjsRef.current = false;
+      }
+    };
+    yText.observe(handleYTextChange);
+
+    // Listen for awareness changes to update remote cursor decorations
+    const handleAwarenessChange = () => {
+      // Trigger decoration rebuild by dispatching an empty transaction with meta
+      const tr = view.state.tr.setMeta(remoteCursorPluginKey, true);
+      view.dispatch(tr);
+    };
+    awareness.on('change', handleAwarenessChange);
+
     // Set up Yjs document observer for auto-save (only on LOCAL changes)
-    const handleYjsUpdate = (_update: Uint8Array, origin: any) => {
+    const handleYjsUpdate = (_update: Uint8Array, origin: unknown) => {
       // Only save if the change originated locally (not from remote sync)
-      // Remote synced changes have origin === WebsocketProvider
-      // Local changes have other origins (ySyncPlugin, null, etc.)
       if (origin !== session.provider) {
         scheduleSave();
       }
@@ -220,10 +454,17 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       clearTimeout(enableSaveTimer);
       // Reset for next mount
       isInitialLoadRef.current = true;
-      // Remove Yjs observer
+      // Remove event listeners
+      view.dom.removeEventListener('blur', handleBlur);
+      // Remove observers
+      yText.unobserve(handleYTextChange);
+      awareness.off('change', handleAwarenessChange);
       session.doc.off('update', handleYjsUpdate);
+      // Clear cursor before destroying
+      awareness.setLocalStateField('cursor', null);
       view.destroy();
       viewRef.current = null;
+      yTextRef.current = null;
       setEditorView(null);
       initializedRef.current = false;
       destroyCollabSession(pagePath);
@@ -269,13 +510,13 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
 
         {/* Cloud status icon */}
         {!isConnected ? (
-          <CloudOff className="h-4 w-4 text-muted-foreground animate-pulse" title="Connecting..." />
+          <span title="Connecting..."><CloudOff className="h-4 w-4 text-muted-foreground animate-pulse" /></span>
         ) : saveStatus === 'saving' ? (
-          <CloudUpload className="h-4 w-4 text-blue-500 animate-pulse" title="Saving..." />
+          <span title="Saving..."><CloudUpload className="h-4 w-4 text-blue-500 animate-pulse" /></span>
         ) : saveStatus === 'dirty' ? (
-          <CloudUpload className="h-4 w-4 text-yellow-500" title="Unsaved changes" />
+          <span title="Unsaved changes"><CloudUpload className="h-4 w-4 text-yellow-500" /></span>
         ) : (
-          <Cloud className="h-4 w-4 text-green-500" title="Saved" />
+          <span title="Saved"><Cloud className="h-4 w-4 text-green-500" /></span>
         )}
       </div>
     );
