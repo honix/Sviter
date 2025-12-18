@@ -23,8 +23,6 @@ import { createCollabSession, destroyCollabSession, getSharedText, type CollabUs
 import { updatePage } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { EditorToolbar } from './EditorToolbar';
-import { Cloud, CloudOff, CloudUpload } from 'lucide-react';
-import { stringToColor, getInitials } from '../../utils/colors';
 
 // Debounce delay for auto-save (milliseconds)
 const SAVE_DEBOUNCE_MS = 2000;
@@ -192,11 +190,19 @@ function createRemoteCursorPlugin(
   });
 }
 
+export interface CollabStatus {
+  connectionStatus: ConnectionStatus;
+  remoteUsers: CollabUser[];
+  saveStatus: 'saved' | 'saving' | 'dirty';
+}
+
 interface CollaborativeEditorProps {
   pagePath: string;
   pageTitle: string;
   initialContent: string;
   className?: string;
+  editable?: boolean;
+  onCollabStatusChange?: (status: CollabStatus) => void;
 }
 
 export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
@@ -204,6 +210,8 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
   pageTitle,
   initialContent,
   className,
+  editable = true,
+  onCollabStatusChange,
 }) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -354,63 +362,80 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
     // Create editor view with dispatch interceptor
     const view = new EditorView(editorRef.current, {
       state,
-      editable: () => true,
+      editable: () => editable,
       dispatchTransaction(tr: Transaction) {
         const newState = view.state.apply(tr);
         view.updateState(newState);
 
-        // If document changed and we're not updating from Yjs, sync to Y.Text
-        if (tr.docChanged && !isUpdatingFromYjsRef.current) {
-          isUpdatingYjsRef.current = true;
-          const markdown = prosemirrorToMarkdown(newState.doc);
+        // Only sync changes if editable
+        if (editable) {
+          // If document changed and we're not updating from Yjs, sync to Y.Text
+          if (tr.docChanged && !isUpdatingFromYjsRef.current) {
+            isUpdatingYjsRef.current = true;
+            const markdown = prosemirrorToMarkdown(newState.doc);
 
-          // Update Y.Text with the new markdown
-          if (yText.toString() !== markdown) {
-            session.doc.transact(() => {
-              yText.delete(0, yText.length);
-              yText.insert(0, markdown);
+            // Update Y.Text with the new markdown
+            if (yText.toString() !== markdown) {
+              session.doc.transact(() => {
+                yText.delete(0, yText.length);
+                yText.insert(0, markdown);
+              });
+            }
+            isUpdatingYjsRef.current = false;
+          }
+
+          // Broadcast local selection to awareness for other users
+          if (tr.selectionSet || tr.docChanged) {
+            const { anchor, head } = newState.selection;
+            // Convert ProseMirror positions to Y.Text character offsets
+            const anchorOffset = pmPosToTextOffset(newState.doc, anchor);
+            const headOffset = pmPosToTextOffset(newState.doc, head);
+            // Use Y.RelativePosition for CRDT-safe cursor positions (compatible with y-codemirror.next)
+            // Include mode so other editors can filter by mode
+            awareness.setLocalStateField('cursor', {
+              anchor: Y.createRelativePositionFromTypeIndex(yText, anchorOffset),
+              head: Y.createRelativePositionFromTypeIndex(yText, headOffset),
+              mode: 'formatted' as EditorMode,
             });
           }
-          isUpdatingYjsRef.current = false;
-        }
-
-        // Broadcast local selection to awareness for other users
-        if (tr.selectionSet || tr.docChanged) {
-          const { anchor, head } = newState.selection;
-          // Convert ProseMirror positions to Y.Text character offsets
-          const anchorOffset = pmPosToTextOffset(newState.doc, anchor);
-          const headOffset = pmPosToTextOffset(newState.doc, head);
-          // Use Y.RelativePosition for CRDT-safe cursor positions (compatible with y-codemirror.next)
-          // Include mode so other editors can filter by mode
-          awareness.setLocalStateField('cursor', {
-            anchor: Y.createRelativePositionFromTypeIndex(yText, anchorOffset),
-            head: Y.createRelativePositionFromTypeIndex(yText, headOffset),
-            mode: 'formatted' as EditorMode,
-          });
         }
       },
     });
 
-    // Clear cursor from awareness when editor loses focus
-    // (new cursor position will be broadcast via dispatchTransaction when user clicks back)
-    const handleBlur = () => {
-      awareness.setLocalStateField('cursor', null);
-    };
-    view.dom.addEventListener('blur', handleBlur);
+    // Only set up cursor/save handlers when editable
+    let handleBlur: (() => void) | null = null;
+    let enableSaveTimer: ReturnType<typeof setTimeout> | null = null;
+    let handleYjsUpdate: ((update: Uint8Array, origin: unknown) => void) | null = null;
+
+    if (editable) {
+      // Clear cursor from awareness when editor loses focus
+      handleBlur = () => {
+        awareness.setLocalStateField('cursor', null);
+      };
+      view.dom.addEventListener('blur', handleBlur);
+
+      // Store initial content for comparison
+      lastSavedContentRef.current = initialContent;
+
+      // Allow saves after initial load settles
+      enableSaveTimer = setTimeout(() => {
+        isInitialLoadRef.current = false;
+      }, 500);
+
+      // Set up Yjs document observer for auto-save (only on LOCAL changes)
+      handleYjsUpdate = (_update: Uint8Array, origin: unknown) => {
+        if (origin !== session.provider) {
+          scheduleSave();
+        }
+      };
+      session.doc.on('update', handleYjsUpdate);
+    }
 
     viewRef.current = view;
     setEditorView(view);
     initializedRef.current = true;
 
-    // Store initial content for comparison
-    lastSavedContentRef.current = initialContent;
-
-    // Allow saves after initial load settles (longer than content init delay)
-    const enableSaveTimer = setTimeout(() => {
-      isInitialLoadRef.current = false;
-    }, 500);
-
-    // Observe Y.Text changes and update ProseMirror
+    // Observe Y.Text changes and update ProseMirror (needed for both edit and view modes)
     const handleYTextChange = () => {
       // Skip if we're the one updating Y.Text
       if (isUpdatingYjsRef.current) return;
@@ -430,20 +455,10 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
 
     // Listen for awareness changes to update remote cursor decorations
     const handleAwarenessChange = () => {
-      // Trigger decoration rebuild by dispatching an empty transaction with meta
       const tr = view.state.tr.setMeta(remoteCursorPluginKey, true);
       view.dispatch(tr);
     };
     awareness.on('change', handleAwarenessChange);
-
-    // Set up Yjs document observer for auto-save (only on LOCAL changes)
-    const handleYjsUpdate = (_update: Uint8Array, origin: unknown) => {
-      // Only save if the change originated locally (not from remote sync)
-      if (origin !== session.provider) {
-        scheduleSave();
-      }
-    };
-    session.doc.on('update', handleYjsUpdate);
 
     // Cleanup on unmount
     return () => {
@@ -451,17 +466,25 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
       }
-      clearTimeout(enableSaveTimer);
+      if (enableSaveTimer) {
+        clearTimeout(enableSaveTimer);
+      }
       // Reset for next mount
       isInitialLoadRef.current = true;
       // Remove event listeners
-      view.dom.removeEventListener('blur', handleBlur);
+      if (handleBlur) {
+        view.dom.removeEventListener('blur', handleBlur);
+      }
       // Remove observers
       yText.unobserve(handleYTextChange);
       awareness.off('change', handleAwarenessChange);
-      session.doc.off('update', handleYjsUpdate);
-      // Clear cursor before destroying
-      awareness.setLocalStateField('cursor', null);
+      if (handleYjsUpdate) {
+        session.doc.off('update', handleYjsUpdate);
+      }
+      // Clear cursor before destroying (only if we were broadcasting)
+      if (editable) {
+        awareness.setLocalStateField('cursor', null);
+      }
       view.destroy();
       viewRef.current = null;
       yTextRef.current = null;
@@ -470,70 +493,28 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       destroyCollabSession(pagePath);
       sessionRef.current = null;
     };
-  }, [pagePath, userId, initialContent, handleStatusChange, handleUsersChange, scheduleSave]);
+  }, [pagePath, userId, initialContent, editable, handleStatusChange, handleUsersChange, scheduleSave]);
 
-  // Combined status indicator - avatars + cloud icon
-  const StatusBar = () => {
-    const isConnected = connectionStatus === 'connected';
-    const currentUserColor = userId ? stringToColor(userId) : '#888';
-    const currentUserInitials = userId ? getInitials(userId) : '?';
-
-    return (
-      <div className="flex items-center gap-2">
-        {/* All users avatars (current + remote) */}
-        <div className="flex -space-x-1.5">
-          {/* Current user */}
-          <div
-            className="w-5 h-5 rounded-full border-2 border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm ring-1 ring-primary/30"
-            style={{ backgroundColor: currentUserColor }}
-            title="You"
-          >
-            {currentUserInitials}
-          </div>
-          {/* Remote users */}
-          {remoteUsers.slice(0, 3).map((user) => (
-            <div
-              key={user.id}
-              className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm"
-              style={{ backgroundColor: user.color }}
-              title={user.name}
-            >
-              {user.initials}
-            </div>
-          ))}
-          {remoteUsers.length > 3 && (
-            <div className="w-5 h-5 rounded-full border border-background bg-muted flex items-center justify-center text-[9px] font-medium shadow-sm">
-              +{remoteUsers.length - 3}
-            </div>
-          )}
-        </div>
-
-        {/* Cloud status icon */}
-        {!isConnected ? (
-          <span title="Connecting..."><CloudOff className="h-4 w-4 text-muted-foreground animate-pulse" /></span>
-        ) : saveStatus === 'saving' ? (
-          <span title="Saving..."><CloudUpload className="h-4 w-4 text-blue-500 animate-pulse" /></span>
-        ) : saveStatus === 'dirty' ? (
-          <span title="Unsaved changes"><CloudUpload className="h-4 w-4 text-yellow-500" /></span>
-        ) : (
-          <span title="Saved"><Cloud className="h-4 w-4 text-green-500" /></span>
-        )}
-      </div>
-    );
-  };
+  // Notify parent of status changes
+  useEffect(() => {
+    if (onCollabStatusChange) {
+      onCollabStatusChange({ connectionStatus, remoteUsers, saveStatus });
+    }
+  }, [connectionStatus, remoteUsers, saveStatus, onCollabStatusChange]);
 
   return (
     <div className={`flex flex-col h-full ${className || ''}`}>
-      {/* Toolbar with status indicators */}
-      <div className="flex items-center justify-between border-b border-border px-2 py-1 bg-muted/30">
-        <EditorToolbar editorView={editorView} />
-        <StatusBar />
-      </div>
+      {/* Toolbar - only show when editable */}
+      {editable && (
+        <div className="flex items-center border-b border-border px-2 py-1 bg-muted/30">
+          <EditorToolbar editorView={editorView} />
+        </div>
+      )}
 
       {/* Editor */}
       <div
         ref={editorRef}
-        className="prosemirror-editor editable flex-1 overflow-auto"
+        className={`prosemirror-editor flex-1 overflow-auto ${editable ? 'editable' : 'readonly'}`}
       />
     </div>
   );

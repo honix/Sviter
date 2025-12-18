@@ -6,7 +6,8 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { EditorState, StateField, StateEffect, RangeSetBuilder } from '@codemirror/state';
-import { EditorView, Decoration, DecorationSet, WidgetType } from '@codemirror/view';
+import { EditorView, Decoration, WidgetType } from '@codemirror/view';
+import type { DecorationSet } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -17,8 +18,6 @@ import type { Awareness } from 'y-protocols/awareness';
 import { createCollabSession, destroyCollabSession, getSharedText, type CollabUser, type ConnectionStatus } from '../../services/collab';
 import { updatePage } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { Cloud, CloudOff, CloudUpload } from 'lucide-react';
-import { stringToColor, getInitials } from '../../utils/colors';
 
 import './codemirror-collab.css';
 
@@ -33,8 +32,13 @@ const updateCursorsEffect = StateEffect.define<null>();
 
 // Cursor widget for remote users
 class CursorWidget extends WidgetType {
-  constructor(readonly color: string, readonly name: string) {
+  color: string;
+  name: string;
+
+  constructor(color: string, name: string) {
     super();
+    this.color = color;
+    this.name = name;
   }
 
   toDOM() {
@@ -145,11 +149,19 @@ function createRawModeCursorExtension(
   return cursorField;
 }
 
+export interface CollabStatus {
+  connectionStatus: ConnectionStatus;
+  remoteUsers: CollabUser[];
+  saveStatus: 'saved' | 'saving' | 'dirty';
+}
+
 interface CollaborativeCodeMirrorEditorProps {
   pagePath: string;
   pageTitle: string;
   initialContent: string;
   className?: string;
+  editable?: boolean;
+  onCollabStatusChange?: (status: CollabStatus) => void;
 }
 
 export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEditorProps> = ({
@@ -157,6 +169,8 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
   pageTitle,
   initialContent,
   className,
+  editable = true,
+  onCollabStatusChange,
 }) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -261,6 +275,7 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
       basicSetup,
       markdown(),
       EditorView.lineWrapping,
+      EditorView.editable.of(editable), // Set editable state
       yCollab(yText, null), // null = no cursor sync from yCollab
       createRawModeCursorExtension(awareness, yText, awareness.clientID), // our filtered cursor sync
       EditorView.theme({
@@ -310,46 +325,52 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
       isInitialLoadRef.current = false;
     }, 500);
 
-    // Broadcast local selection to awareness with mode:'raw'
-    const broadcastSelection = () => {
-      const selection = view.state.selection.main;
-      awareness.setLocalStateField('cursor', {
-        anchor: Y.createRelativePositionFromTypeIndex(yText, selection.anchor),
-        head: Y.createRelativePositionFromTypeIndex(yText, selection.head),
-        mode: 'raw' as EditorMode,
-      });
-    };
-
-    // Listen for selection changes
-    const selectionListener = EditorView.updateListener.of((update) => {
-      if (update.selectionSet || update.docChanged) {
-        broadcastSelection();
-      }
-    });
-    view.dispatch({ effects: StateEffect.appendConfig.of(selectionListener) });
-
-    // Broadcast initial selection
-    broadcastSelection();
-
-    // Listen for awareness changes to update cursor decorations
+    // Listen for awareness changes to update cursor decorations (always, for viewing others)
     const handleAwarenessChange = () => {
       view.dispatch({ effects: updateCursorsEffect.of(null) });
     };
     awareness.on('change', handleAwarenessChange);
 
-    // Clear cursor on blur
-    const handleBlur = () => {
-      awareness.setLocalStateField('cursor', null);
-    };
-    view.dom.addEventListener('blur', handleBlur);
+    // Only set up cursor broadcasting, blur handler, and save when editable
+    let handleBlur: (() => void) | null = null;
+    let handleYjsUpdate: ((_update: Uint8Array, origin: unknown) => void) | null = null;
 
-    // Set up Yjs document observer for auto-save (only on LOCAL changes)
-    const handleYjsUpdate = (_update: Uint8Array, origin: unknown) => {
-      if (origin !== session.provider) {
-        scheduleSave();
-      }
-    };
-    session.doc.on('update', handleYjsUpdate);
+    if (editable) {
+      // Broadcast local selection to awareness with mode:'raw'
+      const broadcastSelection = () => {
+        const selection = view.state.selection.main;
+        awareness.setLocalStateField('cursor', {
+          anchor: Y.createRelativePositionFromTypeIndex(yText, selection.anchor),
+          head: Y.createRelativePositionFromTypeIndex(yText, selection.head),
+          mode: 'raw' as EditorMode,
+        });
+      };
+
+      // Listen for selection changes
+      const selectionListener = EditorView.updateListener.of((update) => {
+        if (update.selectionSet || update.docChanged) {
+          broadcastSelection();
+        }
+      });
+      view.dispatch({ effects: StateEffect.appendConfig.of(selectionListener) });
+
+      // Broadcast initial selection
+      broadcastSelection();
+
+      // Clear cursor on blur
+      handleBlur = () => {
+        awareness.setLocalStateField('cursor', null);
+      };
+      view.dom.addEventListener('blur', handleBlur);
+
+      // Set up Yjs document observer for auto-save (only on LOCAL changes)
+      handleYjsUpdate = (_update: Uint8Array, origin: unknown) => {
+        if (origin !== session.provider) {
+          scheduleSave();
+        }
+      };
+      session.doc.on('update', handleYjsUpdate);
+    }
 
     // Cleanup on unmount
     return () => {
@@ -358,10 +379,16 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
       }
       clearTimeout(enableSaveTimer);
       isInitialLoadRef.current = true;
-      view.dom.removeEventListener('blur', handleBlur);
+      if (handleBlur) {
+        view.dom.removeEventListener('blur', handleBlur);
+      }
       awareness.off('change', handleAwarenessChange);
-      awareness.setLocalStateField('cursor', null);
-      session.doc.off('update', handleYjsUpdate);
+      if (editable) {
+        awareness.setLocalStateField('cursor', null);
+      }
+      if (handleYjsUpdate) {
+        session.doc.off('update', handleYjsUpdate);
+      }
       view.destroy();
       viewRef.current = null;
       yTextRef.current = null;
@@ -369,66 +396,17 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
       destroyCollabSession(pagePath);
       sessionRef.current = null;
     };
-  }, [pagePath, userId, initialContent, handleStatusChange, handleUsersChange, scheduleSave]);
+  }, [pagePath, userId, initialContent, handleStatusChange, handleUsersChange, scheduleSave, editable]);
 
-  // Status bar component
-  const StatusBar = () => {
-    const isConnected = connectionStatus === 'connected';
-    const currentUserColor = userId ? stringToColor(userId) : '#888';
-    const currentUserInitials = userId ? getInitials(userId) : '?';
-
-    return (
-      <div className="flex items-center gap-2">
-        {/* All users avatars (current + remote) */}
-        <div className="flex -space-x-1.5">
-          {/* Current user */}
-          <div
-            className="w-5 h-5 rounded-full border-2 border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm ring-1 ring-primary/30"
-            style={{ backgroundColor: currentUserColor }}
-            title="You"
-          >
-            {currentUserInitials}
-          </div>
-          {/* Remote users */}
-          {remoteUsers.slice(0, 3).map((user) => (
-            <div
-              key={user.id}
-              className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm"
-              style={{ backgroundColor: user.color }}
-              title={user.name}
-            >
-              {user.initials}
-            </div>
-          ))}
-          {remoteUsers.length > 3 && (
-            <div className="w-5 h-5 rounded-full border border-background bg-muted flex items-center justify-center text-[9px] font-medium shadow-sm">
-              +{remoteUsers.length - 3}
-            </div>
-          )}
-        </div>
-
-        {/* Cloud status icon */}
-        {!isConnected ? (
-          <span title="Connecting..."><CloudOff className="h-4 w-4 text-muted-foreground animate-pulse" /></span>
-        ) : saveStatus === 'saving' ? (
-          <span title="Saving..."><CloudUpload className="h-4 w-4 text-blue-500 animate-pulse" /></span>
-        ) : saveStatus === 'dirty' ? (
-          <span title="Unsaved changes"><CloudUpload className="h-4 w-4 text-yellow-500" /></span>
-        ) : (
-          <span title="Saved"><Cloud className="h-4 w-4 text-green-500" /></span>
-        )}
-      </div>
-    );
-  };
+  // Notify parent of status changes
+  useEffect(() => {
+    if (onCollabStatusChange) {
+      onCollabStatusChange({ connectionStatus, remoteUsers, saveStatus });
+    }
+  }, [connectionStatus, remoteUsers, saveStatus, onCollabStatusChange]);
 
   return (
     <div className={`flex flex-col h-full ${className || ''}`}>
-      {/* Header with status */}
-      <div className="flex items-center justify-between border-b border-border px-3 py-1.5 bg-muted/30">
-        <span className="text-sm text-muted-foreground font-mono">Raw Markdown</span>
-        <StatusBar />
-      </div>
-
       {/* Editor */}
       <div
         ref={editorRef}
