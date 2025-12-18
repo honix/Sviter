@@ -8,6 +8,7 @@ import { AlertCircle, FileText, GitBranch, Code, Eye } from 'lucide-react';
 import { RevisionHistory } from '../revisions/RevisionHistory';
 import type { PageRevision } from '../../types/page';
 import { ProseMirrorEditor, type ProseMirrorEditorHandle } from '../editor/ProseMirrorEditor';
+import { CollaborativeEditor } from '../editor/CollaborativeEditor';
 import { EditorToolbar } from '../editor/EditorToolbar';
 import { CodeMirrorEditor } from '../editor/CodeMirrorEditor';
 import { CodeMirrorDiffView } from '../editor/CodeMirrorDiffView';
@@ -184,7 +185,8 @@ const CenterPanel: React.FC = () => {
             <h1 className="text-2xl font-bold text-foreground">
               {currentPage.title}
             </h1>
-            {viewMode === 'edit' && (
+            {/* Save/Cancel only for raw edit mode - collaborative mode auto-saves */}
+            {viewMode === 'edit' && formatMode === 'raw' && (
               <div className="flex gap-2">
                 <Button onClick={handleSave} size="sm">
                   Save
@@ -272,23 +274,24 @@ const CenterPanel: React.FC = () => {
             </TabsContent>
 
             <TabsContent value="edit" className="flex-1 overflow-hidden mt-0 flex flex-col">
-              {formatMode === 'formatted' && <EditorToolbar editorView={editorView} />}
               <div className="flex-1 overflow-hidden min-h-0">
                 {formatMode === 'raw' ? (
-                  <CodeMirrorEditor
-                    content={editContent}
-                    editable={true}
-                    onChange={handleCodeMirrorChange}
-                    className="h-full"
-                  />
+                  <>
+                    <EditorToolbar editorView={null} />
+                    <CodeMirrorEditor
+                      content={editContent}
+                      editable={true}
+                      onChange={handleCodeMirrorChange}
+                      className="h-full"
+                    />
+                  </>
                 ) : (
-                  <ProseMirrorEditor
-                    key={`edit-${currentPage.title}`}
-                    ref={editorRef}
+                  /* Collaborative editor with Yjs - auto-saves, no manual save needed */
+                  <CollaborativeEditor
+                    key={`collab-${currentPage.path}`}
+                    pagePath={currentPage.path}
+                    pageTitle={currentPage.title}
                     initialContent={currentPage.content || ''}
-                    editable={true}
-                    onChange={handleEditorChange}
-                    onViewReady={handleEditorViewReady}
                     className="h-full"
                   />
                 )}
