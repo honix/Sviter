@@ -13,6 +13,7 @@ export type ThreadStatus =
   | 'working'     // Agent processing (worker)
   | 'need_help'   // Waiting for user input (worker)
   | 'review'      // Ready for accept/reject (worker)
+  | 'resolving'   // Resolving merge conflicts (worker)
   | 'accepted'    // Changes merged (worker)
   | 'rejected';   // Changes rejected (worker)
 
@@ -32,6 +33,8 @@ export interface Thread {
   error?: string;
   review_summary?: string;
   thread_type?: string;    // Legacy compatibility field from backend
+  merge_blocked?: boolean; // True if merge is blocked by active editors
+  blocked_pages?: Record<string, string[]>; // Page path -> list of client IDs editing
 }
 
 export interface ThreadMessage {

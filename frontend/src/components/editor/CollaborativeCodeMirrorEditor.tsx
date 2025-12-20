@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { EditorState, StateField, StateEffect, RangeSetBuilder } from '@codemirror/state';
+import { EditorState, StateField, StateEffect, RangeSetBuilder, Compartment } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType } from '@codemirror/view';
 import type { DecorationSet } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
@@ -184,6 +184,11 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
   const lastSavedContentRef = useRef<string>('');
   const isInitialLoadRef = useRef(true);
   const yTextRef = useRef<ReturnType<typeof getSharedText> | null>(null);
+  // Use ref for editable to avoid re-running useEffect when it changes
+  const editableRef = useRef(editable);
+  editableRef.current = editable;
+  // Compartment for dynamic editable reconfiguration
+  const editableCompartment = useRef(new Compartment());
 
   // Handle status changes
   const handleStatusChange = useCallback((status: ConnectionStatus) => {
@@ -224,7 +229,8 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
 
   // Schedule debounced save
   const scheduleSave = useCallback(() => {
-    if (isInitialLoadRef.current) {
+    // Skip save during initial load or if not editable
+    if (isInitialLoadRef.current || !editableRef.current) {
       return;
     }
 
@@ -275,7 +281,7 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
       basicSetup,
       markdown(),
       EditorView.lineWrapping,
-      EditorView.editable.of(editable), // Set editable state
+      editableCompartment.current.of(EditorView.editable.of(editableRef.current)), // Compartment for dynamic editable
       yCollab(yText, null), // null = no cursor sync from yCollab
       createRawModeCursorExtension(awareness, yText, awareness.clientID), // our filtered cursor sync
       EditorView.theme({
@@ -331,11 +337,12 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
     };
     awareness.on('change', handleAwarenessChange);
 
-    // Only set up cursor broadcasting, blur handler, and save when editable
+    // Set up cursor broadcasting, blur handler, and save (always set up, check editableRef at runtime)
     let handleBlur: (() => void) | null = null;
     let handleYjsUpdate: ((_update: Uint8Array, origin: unknown) => void) | null = null;
 
-    if (editable) {
+    // Always set up - handlers check editableRef at runtime
+    {
       // Broadcast local selection to awareness with mode:'raw'
       const broadcastSelection = () => {
         const selection = view.state.selection.main;
@@ -383,9 +390,8 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
         view.dom.removeEventListener('blur', handleBlur);
       }
       awareness.off('change', handleAwarenessChange);
-      if (editable) {
-        awareness.setLocalStateField('cursor', null);
-      }
+      // Clear cursor before destroying
+      awareness.setLocalStateField('cursor', null);
       if (handleYjsUpdate) {
         session.doc.off('update', handleYjsUpdate);
       }
@@ -396,7 +402,19 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
       destroyCollabSession(pagePath);
       sessionRef.current = null;
     };
-  }, [pagePath, userId, initialContent, handleStatusChange, handleUsersChange, scheduleSave, editable]);
+    // Note: editable is NOT in deps - we use editableRef to avoid remounting on edit/view switch
+  }, [pagePath, userId, initialContent, handleStatusChange, handleUsersChange, scheduleSave]);
+
+  // Dynamically reconfigure editable state when prop changes
+  useEffect(() => {
+    if (viewRef.current) {
+      viewRef.current.dispatch({
+        effects: editableCompartment.current.reconfigure(
+          EditorView.editable.of(editable)
+        )
+      });
+    }
+  }, [editable]);
 
   // Notify parent of status changes
   useEffect(() => {

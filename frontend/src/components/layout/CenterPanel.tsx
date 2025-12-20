@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAppContext } from '../../contexts/AppContext';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
-import { AlertCircle, FileText, GitBranch, Code, Eye, Cloud, CloudOff, CloudUpload } from 'lucide-react';
+import { AlertCircle, FileText, GitBranch, Code, Eye, Cloud, CloudOff, CloudUpload, AlertTriangle, Loader2 } from 'lucide-react';
 import { RevisionHistory } from '../revisions/RevisionHistory';
 import type { PageRevision } from '../../types/page';
 import { ProseMirrorEditor } from '../editor/ProseMirrorEditor';
@@ -14,10 +14,12 @@ import { CollaborativeCodeMirrorEditor } from '../editor/CollaborativeCodeMirror
 import { CodeMirrorEditor } from '../editor/CodeMirrorEditor';
 import { CodeMirrorDiffView } from '../editor/CodeMirrorDiffView';
 import { stringToColor, getInitials } from '../../utils/colors';
+import { setEditingState } from '../../services/collab';
+import { ThreadsAPI, type ThreadFile } from '../../services/threads-api';
 
 const CenterPanel: React.FC = () => {
   const { state, actions } = useAppContext();
-  const { currentPage, viewMode, isLoading, error, currentBranch, pageUpdateCounter } = state;
+  const { currentPage, viewMode, isLoading, error, currentBranch, pageUpdateCounter, threads } = state;
   const { setViewMode } = actions;
   const { userId } = useAuth();
 
@@ -34,6 +36,14 @@ const CenterPanel: React.FC = () => {
 
   // Collaborative editing status (from editor components)
   const [collabStatus, setCollabStatus] = useState<CollabStatus | null>(null);
+
+  // Conflict resolution state
+  const [conflictFiles, setConflictFiles] = useState<ThreadFile[]>([]);
+  const [conflictLoading, setConflictLoading] = useState(false);
+
+  // Find thread for current branch
+  const currentThread = threads.find(t => t.branch === currentBranch);
+  const isResolving = currentThread?.status === 'resolving';
 
   // Handle collab status changes from editors
   const handleCollabStatusChange = useCallback((status: CollabStatus) => {
@@ -95,6 +105,30 @@ const CenterPanel: React.FC = () => {
 
   const isMainBranch = currentBranch === 'main';
 
+  // Load conflict files when thread is resolving
+  useEffect(() => {
+    if (isResolving && currentThread?.id && userId) {
+      const loadConflictFiles = async () => {
+        try {
+          setConflictLoading(true);
+          const response = await ThreadsAPI.getThreadFiles(currentThread.id, userId);
+          setConflictFiles(response.files);
+        } catch (err) {
+          console.error('Failed to load conflict files:', err);
+        } finally {
+          setConflictLoading(false);
+        }
+      };
+
+      loadConflictFiles();
+      // Poll for updates while resolving
+      const interval = setInterval(loadConflictFiles, 2000);
+      return () => clearInterval(interval);
+    } else {
+      setConflictFiles([]);
+    }
+  }, [isResolving, currentThread?.id, userId, pageUpdateCounter]);
+
   // Reset revision view when page changes
   useEffect(() => {
     if (currentPage) {
@@ -113,6 +147,43 @@ const CenterPanel: React.FC = () => {
       }
     }
   }, [viewMode, isMainBranch]);
+
+  // Track current editing page to properly clean up on page change
+  const editingPageRef = useRef<string | null>(null);
+
+  // Update editing state for merge blocking when switching tabs or pages
+  useEffect(() => {
+    // Only manage editing state when on main branch
+    if (!currentPage || !userId || !isMainBranch) return;
+
+    const isEditing = mainTab === 'edit';
+    const currentPath = currentPage.path;
+
+    if (isEditing) {
+      // If we were editing a different page, clear that first
+      if (editingPageRef.current && editingPageRef.current !== currentPath) {
+        setEditingState(editingPageRef.current, userId, false);
+      }
+      // Set editing state for current page
+      setEditingState(currentPath, userId, true);
+      editingPageRef.current = currentPath;
+    } else {
+      // Switched to view mode - clear editing state
+      if (editingPageRef.current) {
+        setEditingState(editingPageRef.current, userId, false);
+        editingPageRef.current = null;
+      }
+    }
+  }, [mainTab, currentPage?.path, userId, isMainBranch]);
+
+  // Cleanup on unmount only
+  useEffect(() => {
+    return () => {
+      if (editingPageRef.current && userId) {
+        setEditingState(editingPageRef.current, userId, false);
+      }
+    };
+  }, [userId]);
 
   const handleRevisionSelect = async (revision: PageRevision) => {
     setViewingRevision(revision);
@@ -243,8 +314,38 @@ const CenterPanel: React.FC = () => {
               )}
             </div>
 
-            <TabsContent value="view" className="flex-1 overflow-hidden mt-0 flex flex-col">
-              {viewingRevision && (
+            {/* Single collaborative editor for both View and Edit modes - prevents remounting */}
+            {(mainTab === 'view' || mainTab === 'edit') && !viewingRevision && (
+              <div className="flex-1 overflow-hidden mt-0 flex flex-col">
+                <div className="flex-1 overflow-auto min-h-0">
+                  {formatMode === 'raw' ? (
+                    <CollaborativeCodeMirrorEditor
+                      key={`collab-cm-${currentPage.path}`}
+                      pagePath={currentPage.path}
+                      pageTitle={currentPage.title}
+                      initialContent={currentPage.content || ''}
+                      editable={mainTab === 'edit'}
+                      onCollabStatusChange={handleCollabStatusChange}
+                      className="h-full"
+                    />
+                  ) : (
+                    <CollaborativeEditor
+                      key={`collab-${currentPage.path}`}
+                      pagePath={currentPage.path}
+                      pageTitle={currentPage.title}
+                      initialContent={currentPage.content || ''}
+                      editable={mainTab === 'edit'}
+                      onCollabStatusChange={handleCollabStatusChange}
+                      className="h-full"
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Historical revision viewer - non-collaborative */}
+            {mainTab === 'view' && viewingRevision && (
+              <div className="flex-1 overflow-hidden mt-0 flex flex-col">
                 <div className="px-6 pt-4 pb-2">
                   <div className="p-3 bg-accent rounded-lg border border-accent-foreground/20">
                     <div className="flex items-center justify-between">
@@ -265,13 +366,10 @@ const CenterPanel: React.FC = () => {
                     </div>
                   </div>
                 </div>
-              )}
-              <div className="flex-1 overflow-auto min-h-0">
-                {viewingRevision && viewingRevisionContent === null ? (
-                  <div className="p-4 text-muted-foreground">Loading revision...</div>
-                ) : viewingRevision ? (
-                  /* Non-collaborative viewer for historical revisions */
-                  formatMode === 'raw' ? (
+                <div className="flex-1 overflow-auto min-h-0">
+                  {viewingRevisionContent === null ? (
+                    <div className="p-4 text-muted-foreground">Loading revision...</div>
+                  ) : formatMode === 'raw' ? (
                     <CodeMirrorEditor
                       content={viewingRevisionContent ?? ''}
                       editable={false}
@@ -284,59 +382,14 @@ const CenterPanel: React.FC = () => {
                       editable={false}
                       className="h-full"
                     />
-                  )
-                ) : (
-                  /* Collaborative viewer for current content - shows real-time updates */
-                  formatMode === 'raw' ? (
-                    <CollaborativeCodeMirrorEditor
-                      key={`collab-cm-view-${currentPage.path}`}
-                      pagePath={currentPage.path}
-                      pageTitle={currentPage.title}
-                      initialContent={currentPage.content || ''}
-                      editable={false}
-                      onCollabStatusChange={handleCollabStatusChange}
-                      className="h-full"
-                    />
-                  ) : (
-                    <CollaborativeEditor
-                      key={`collab-view-${currentPage.path}`}
-                      pagePath={currentPage.path}
-                      pageTitle={currentPage.title}
-                      initialContent={currentPage.content || ''}
-                      editable={false}
-                      onCollabStatusChange={handleCollabStatusChange}
-                      className="h-full"
-                    />
-                  )
-                )}
+                  )}
+                </div>
               </div>
-            </TabsContent>
+            )}
 
-            <TabsContent value="edit" className="flex-1 overflow-hidden mt-0 flex flex-col">
-              <div className="flex-1 overflow-hidden min-h-0">
-                {formatMode === 'raw' ? (
-                  /* Collaborative CodeMirror editor for raw markdown */
-                  <CollaborativeCodeMirrorEditor
-                    key={`collab-cm-${currentPage.path}`}
-                    pagePath={currentPage.path}
-                    pageTitle={currentPage.title}
-                    initialContent={currentPage.content || ''}
-                    onCollabStatusChange={handleCollabStatusChange}
-                    className="h-full"
-                  />
-                ) : (
-                  /* Collaborative ProseMirror editor for formatted view */
-                  <CollaborativeEditor
-                    key={`collab-${currentPage.path}`}
-                    pagePath={currentPage.path}
-                    pageTitle={currentPage.title}
-                    initialContent={currentPage.content || ''}
-                    onCollabStatusChange={handleCollabStatusChange}
-                    className="h-full"
-                  />
-                )}
-              </div>
-            </TabsContent>
+            {/* Hidden TabsContent for View/Edit - needed for Radix Tabs structure */}
+            <TabsContent value="view" className="hidden" />
+            <TabsContent value="edit" className="hidden" />
 
             <TabsContent value="history" className="flex-1 overflow-hidden mt-0 flex flex-col">
               <div className="flex-1 overflow-hidden">
@@ -380,23 +433,101 @@ const CenterPanel: React.FC = () => {
               <TabsTrigger value="history">History</TabsTrigger>
             </TabsList>
 
-            {/* Branch indicator */}
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 rounded-lg border border-blue-500/20">
-              <GitBranch className="h-4 w-4 text-blue-500" />
-              <span className="text-sm text-blue-600 dark:text-blue-400">
-                <code className="font-mono">{currentBranch}</code> vs main
-              </span>
-            </div>
+            {/* Branch indicator or resolving indicator */}
+            {isResolving ? (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+                <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                <span className="text-sm text-yellow-600 dark:text-yellow-400 font-medium">
+                  Resolving Merge Conflicts
+                </span>
+                {conflictLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 rounded-lg border border-blue-500/20">
+                <GitBranch className="h-4 w-4 text-blue-500" />
+                <span className="text-sm text-blue-600 dark:text-blue-400">
+                  <code className="font-mono">{currentBranch}</code> vs main
+                </span>
+              </div>
+            )}
           </div>
 
           <TabsContent value="diff" className="flex-1 overflow-hidden mt-0 flex flex-col">
             <div className="flex-1 overflow-auto min-h-0">
-              <CodeMirrorDiffView
-                pagePath={currentPage.path}
-                branchName={currentBranch}
-                refreshTrigger={pageUpdateCounter}
-                className="h-full"
-              />
+              {isResolving ? (
+                // Conflict resolution view - same style as diff view
+                <div className="h-full p-4">
+                  {conflictFiles.length === 0 ? (
+                    <div className="text-muted-foreground">
+                      {conflictLoading ? 'Loading files...' : 'No files found'}
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {conflictFiles.map((file) => (
+                        <div key={file.path} className="border rounded-lg overflow-hidden bg-background">
+                          {/* File header - same style as diff */}
+                          <div className={`flex items-center gap-2 px-4 py-2 text-sm font-mono border-b ${
+                            file.has_conflicts
+                              ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+                              : 'bg-muted/50'
+                          }`}>
+                            {file.has_conflicts && <AlertTriangle className="h-4 w-4" />}
+                            <span className="font-medium">{file.path}</span>
+                            {file.has_conflicts && (
+                              <span className="ml-auto text-xs uppercase font-semibold">
+                                Has Conflicts
+                              </span>
+                            )}
+                          </div>
+
+                          {/* File content - CodeMirror-like styling */}
+                          <div className="font-mono text-sm overflow-x-auto">
+                            {file.content.split('\n').map((line, i) => {
+                              const isConflictStart = line.startsWith('<<<<<<<');
+                              const isConflictSep = line.startsWith('=======');
+                              const isConflictEnd = line.startsWith('>>>>>>>');
+
+                              let bgClass = '';
+                              let textClass = '';
+                              if (isConflictStart) {
+                                bgClass = 'bg-red-500/20';
+                                textClass = 'text-red-600 dark:text-red-400 font-bold';
+                              } else if (isConflictSep) {
+                                bgClass = 'bg-yellow-500/20';
+                                textClass = 'text-yellow-600 dark:text-yellow-400 font-bold';
+                              } else if (isConflictEnd) {
+                                bgClass = 'bg-green-500/20';
+                                textClass = 'text-green-600 dark:text-green-400 font-bold';
+                              }
+
+                              return (
+                                <div
+                                  key={i}
+                                  className={`flex ${bgClass}`}
+                                >
+                                  <span className="w-12 px-2 py-0.5 text-right text-muted-foreground select-none border-r bg-muted/30 flex-shrink-0">
+                                    {i + 1}
+                                  </span>
+                                  <pre className={`px-4 py-0.5 whitespace-pre flex-1 ${textClass}`}>
+                                    {line || ' '}
+                                  </pre>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <CodeMirrorDiffView
+                  pagePath={currentPage.path}
+                  branchName={currentBranch}
+                  refreshTrigger={pageUpdateCounter}
+                  className="h-full"
+                />
+              )}
             </div>
           </TabsContent>
 

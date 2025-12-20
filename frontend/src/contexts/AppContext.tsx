@@ -5,6 +5,7 @@ import type { WebSocketMessage } from '../types/chat';
 import { treeApi } from '../services/tree-api';
 import type { Thread, ThreadMessage, ThreadStatus } from '../types/thread';
 import { useAuth } from './AuthContext';
+import { invalidateSessions } from '../services/collab';
 
 interface AppState {
   pages: Page[];
@@ -301,7 +302,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const wsService = useRef<WebSocketService | null>(null);
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
   const messageHandlers = useRef<Set<(message: WebSocketMessage) => void>>(new Set());
-  const reloadFunctionsRef = useRef<{ loadPages: () => void; loadTree: () => void; refreshCurrentPage: (title: string) => void } | null>(null);
+  const reloadFunctionsRef = useRef<{ loadPages: () => void; loadTree: () => void; refreshCurrentPage: (title: string) => void; forceRefreshCurrentPage: () => void } | null>(null);
   const currentPageRef = useRef<Page | null>(null);
   const pagesRef = useRef<Page[]>([]);
   const pageTreeRef = useRef<TreeItem[]>([]);
@@ -364,6 +365,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dispatch({ type: 'REMOVE_THREAD', payload: message.thread_id });
       } else if (message.type === 'thread_list' && message.threads) {
         dispatch({ type: 'SET_THREADS', payload: message.threads as Thread[] });
+      } else if (message.type === 'collab_room_change') {
+        // When collab room changes, request fresh thread list to update merge_blocked status
+        wsService.current?.send({ type: 'get_thread_list' });
       } else if (message.type === 'thread_selected') {
         // Set assistant thread ID if this is the assistant thread
         if (message.thread_type === 'assistant' && message.thread_id) {
@@ -371,6 +375,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         // Always set selected thread to the received thread_id
         dispatch({ type: 'SELECT_THREAD', payload: message.thread_id ?? null });
+        // Update thread data if provided (includes fresh merge_blocked status)
+        if (message.thread && message.thread_id) {
+          dispatch({
+            type: 'UPDATE_THREAD',
+            payload: {
+              id: message.thread_id,
+              updates: message.thread as Partial<Thread>
+            }
+          });
+        }
         // Only replace messages if history has content (avoid wiping out system_prompt)
         if (message.history && message.history.length > 0 && message.thread_id) {
           dispatch({
@@ -449,11 +463,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Trigger diff view refresh
         dispatch({ type: 'INCREMENT_PAGE_UPDATE_COUNTER' });
       } else if (message.type === 'pages_changed') {
-        // Reload pages and tree when content changes
+        // Reload pages and tree when content changes (e.g., after thread merge)
         if (reloadFunctionsRef.current) {
           reloadFunctionsRef.current.loadPages();
           reloadFunctionsRef.current.loadTree();
+          // Force refresh current page to show merged content
+          reloadFunctionsRef.current.forceRefreshCurrentPage();
         }
+        // Trigger diff view refresh for thread change views
+        dispatch({ type: 'INCREMENT_PAGE_UPDATE_COUNTER' });
+      } else if (message.type === 'pages_content_changed') {
+        // Pages were changed outside of collaborative editing (e.g., thread merge)
+        // Invalidate collab sessions so they reconnect with fresh content
+        const pages = (message as { pages?: string[] }).pages || [];
+        if (pages.length > 0) {
+          console.log('Invalidating collab sessions for merged pages:', pages);
+          invalidateSessions(pages);
+        }
+        // Also reload pages and tree
+        if (reloadFunctionsRef.current) {
+          reloadFunctionsRef.current.loadPages();
+          reloadFunctionsRef.current.loadTree();
+          reloadFunctionsRef.current.forceRefreshCurrentPage();
+        }
+        dispatch({ type: 'INCREMENT_PAGE_UPDATE_COUNTER' });
       }
 
       // Notify all registered handlers
@@ -596,6 +629,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
+  // Force refresh current page content (for after merges when content may have changed)
+  const forceRefreshCurrentPage = useCallback(async () => {
+    if (!currentPageRef.current) {
+      return;
+    }
+
+    try {
+      const pageResponse = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(currentPageRef.current.title)}`);
+      if (pageResponse.ok) {
+        const fullPage = await pageResponse.json();
+        currentPageRef.current = fullPage;
+        dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
+      }
+    } catch (err) {
+      console.error('Error force refreshing current page:', err);
+    }
+  }, []);
+
   // Update ref with reload functions
   useEffect(() => {
     reloadFunctionsRef.current = {
@@ -619,9 +670,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           isLoadingTreeRef.current = false;
         }
       },
-      refreshCurrentPage
+      refreshCurrentPage,
+      forceRefreshCurrentPage
     };
-  }, [loadPages, areTreesEqual, refreshCurrentPage]);
+  }, [loadPages, areTreesEqual, refreshCurrentPage, forceRefreshCurrentPage]);
 
 
   // Handle page updates from lastMessage

@@ -171,3 +171,42 @@ export function getSessionUsers(pagePath: string): CollabUser[] {
 export function hasActiveSession(pagePath: string): boolean {
   return activeSessions.has(pagePath);
 }
+
+/**
+ * Invalidate sessions for specific pages.
+ * This destroys the session, forcing a fresh reconnect with new content.
+ * Used when git content changes outside of collaborative editing (e.g., thread merge).
+ */
+export function invalidateSessions(pagePaths: string[]): void {
+  for (const pagePath of pagePaths) {
+    const session = activeSessions.get(pagePath);
+    if (session) {
+      console.log(`Invalidating collab session for: ${pagePath}`);
+      session.destroy();
+    }
+  }
+}
+
+/**
+ * Update editing state for merge blocking.
+ * Only editors (not viewers) are counted for merge blocking.
+ */
+export async function setEditingState(
+  pagePath: string,
+  userId: string,
+  editing: boolean
+): Promise<void> {
+  try {
+    const params = new URLSearchParams({
+      room_name: pagePath,
+      client_id: userId,
+      editing: String(editing),
+    });
+    await fetch(`http://localhost:8000/api/collab/editing-state?${params}`, {
+      method: 'POST',
+    });
+    console.log(`Editing state: ${pagePath} = ${editing}`);
+  } catch (error) {
+    console.error('Failed to update editing state:', error);
+  }
+}
