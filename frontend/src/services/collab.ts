@@ -6,8 +6,10 @@
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { stringToColor, getInitials, getDisplayName } from '../utils/colors';
+import { updatePage } from './api';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
+export type SaveStatus = 'saved' | 'saving' | 'dirty';
 
 export interface CollabUser {
   id: string;
@@ -25,9 +27,95 @@ export interface CollabSession {
 
 type StatusHandler = (status: ConnectionStatus) => void;
 type UsersHandler = (users: CollabUser[]) => void;
+type SaveStatusHandler = (status: SaveStatus) => void;
+
+// Debounce delay for auto-save (milliseconds)
+const SAVE_DEBOUNCE_MS = 2000;
 
 // Active sessions by page path
 const activeSessions = new Map<string, CollabSession>();
+
+// Status handler registrations for each session
+const statusHandlers = new Map<string, Set<StatusHandler>>();
+const usersHandlers = new Map<string, Set<UsersHandler>>();
+const saveStatusHandlers = new Map<string, Set<SaveStatusHandler>>();
+
+// Save state per session
+interface SaveState {
+  status: SaveStatus;
+  lastSavedContent: string;
+  saveTimer: ReturnType<typeof setTimeout> | null;
+  isInitialLoad: boolean;
+}
+const saveStates = new Map<string, SaveState>();
+
+/**
+ * Notify all save status handlers for a page.
+ */
+function notifySaveStatus(pagePath: string, status: SaveStatus): void {
+  const state = saveStates.get(pagePath);
+  if (state) {
+    state.status = status;
+  }
+  const handlers = saveStatusHandlers.get(pagePath);
+  if (handlers) {
+    handlers.forEach(handler => handler(status));
+  }
+}
+
+/**
+ * Save document content to backend.
+ */
+async function saveDocument(pagePath: string, pageTitle: string): Promise<void> {
+  const session = activeSessions.get(pagePath);
+  const state = saveStates.get(pagePath);
+  if (!session || !state) return;
+
+  const yText = session.doc.getText('content');
+  const content = yText.toString();
+
+  // Skip if content hasn't changed
+  if (content === state.lastSavedContent) {
+    notifySaveStatus(pagePath, 'saved');
+    return;
+  }
+
+  notifySaveStatus(pagePath, 'saving');
+  try {
+    await updatePage(pageTitle, {
+      content,
+      author: 'collaborative',
+    });
+    state.lastSavedContent = content;
+    notifySaveStatus(pagePath, 'saved');
+    console.log(`Saved document: ${pagePath}`);
+  } catch (error) {
+    console.error(`Failed to save ${pagePath}:`, error);
+    // Revert to dirty so it will retry
+    notifySaveStatus(pagePath, 'dirty');
+  }
+}
+
+/**
+ * Schedule a debounced save for a page.
+ */
+function scheduleSave(pagePath: string, pageTitle: string): void {
+  const state = saveStates.get(pagePath);
+  if (!state || state.isInitialLoad) return;
+
+  notifySaveStatus(pagePath, 'dirty');
+
+  // Clear existing timer
+  if (state.saveTimer) {
+    clearTimeout(state.saveTimer);
+  }
+
+  // Schedule new save
+  state.saveTimer = setTimeout(() => {
+    saveDocument(pagePath, pageTitle);
+    state.saveTimer = null;
+  }, SAVE_DEBOUNCE_MS);
+}
 
 /**
  * Create or get an existing collaborative editing session for a page.
@@ -37,16 +125,61 @@ export function createCollabSession(
   pagePath: string,
   userId: string,
   onStatusChange?: StatusHandler,
-  onUsersChange?: UsersHandler
+  onUsersChange?: UsersHandler,
+  onSaveStatusChange?: SaveStatusHandler,
+  pageTitle?: string // Used for saving - defaults to pagePath
 ): CollabSession {
+  const title = pageTitle || pagePath;
+
+  // Register handlers
+  if (onStatusChange) {
+    if (!statusHandlers.has(pagePath)) {
+      statusHandlers.set(pagePath, new Set());
+    }
+    statusHandlers.get(pagePath)!.add(onStatusChange);
+  }
+  if (onUsersChange) {
+    if (!usersHandlers.has(pagePath)) {
+      usersHandlers.set(pagePath, new Set());
+    }
+    usersHandlers.get(pagePath)!.add(onUsersChange);
+  }
+  if (onSaveStatusChange) {
+    if (!saveStatusHandlers.has(pagePath)) {
+      saveStatusHandlers.set(pagePath, new Set());
+    }
+    saveStatusHandlers.get(pagePath)!.add(onSaveStatusChange);
+  }
+
   // Return existing session if already connected to this page
   const existing = activeSessions.get(pagePath);
   if (existing) {
     console.log(`Reusing existing collab session for: ${pagePath}`);
+    // Immediately call handlers with current status
+    if (onStatusChange) {
+      const status = existing.provider.wsconnected ? 'connected' : 'connecting';
+      onStatusChange(status);
+    }
+    if (onUsersChange) {
+      const users: CollabUser[] = [];
+      existing.provider.awareness.getStates().forEach((state, clientId) => {
+        if (state.user && clientId !== existing.provider.awareness.clientID) {
+          users.push(state.user as CollabUser);
+        }
+      });
+      onUsersChange(users);
+    }
+    if (onSaveStatusChange) {
+      const saveState = saveStates.get(pagePath);
+      onSaveStatusChange(saveState?.status || 'saved');
+    }
     return existing;
   }
 
   console.log(`Creating new collab session for: ${pagePath}`);
+
+  // Clean up sessions for other pages
+  cleanupOtherSessions(pagePath);
 
   // Create Yjs document
   const doc = new Y.Doc();
@@ -73,31 +206,57 @@ export function createCollabSession(
     initials: getInitials(userId),
   });
 
-  // Handle connection status changes
+  // Handle connection status changes - notify all registered handlers
   provider.on('status', (event: { status: string }) => {
     console.log(`Collab status for ${pagePath}:`, event.status);
-    if (onStatusChange) {
-      const status: ConnectionStatus =
-        event.status === 'connected' ? 'connected' :
-        event.status === 'connecting' ? 'connecting' :
-        'disconnected';
-      onStatusChange(status);
+    const status: ConnectionStatus =
+      event.status === 'connected' ? 'connected' :
+      event.status === 'connecting' ? 'connecting' :
+      'disconnected';
+    const handlers = statusHandlers.get(pagePath);
+    if (handlers) {
+      handlers.forEach(handler => handler(status));
     }
   });
 
-  // Handle awareness changes (user presence)
+  // Handle awareness changes (user presence) - notify all registered handlers
   awareness.on('change', () => {
-    if (onUsersChange) {
-      const users: CollabUser[] = [];
-      awareness.getStates().forEach((state, clientId) => {
-        // Skip if no user info or if it's the local user
-        if (state.user && clientId !== awareness.clientID) {
-          users.push(state.user as CollabUser);
-        }
-      });
-      onUsersChange(users);
+    const users: CollabUser[] = [];
+    awareness.getStates().forEach((state, clientId) => {
+      // Skip if no user info or if it's the local user
+      if (state.user && clientId !== awareness.clientID) {
+        users.push(state.user as CollabUser);
+      }
+    });
+    const handlers = usersHandlers.get(pagePath);
+    if (handlers) {
+      handlers.forEach(handler => handler(users));
     }
   });
+
+  // Initialize save state
+  const saveState: SaveState = {
+    status: 'saved',
+    lastSavedContent: '',
+    saveTimer: null,
+    isInitialLoad: true,
+  };
+  saveStates.set(pagePath, saveState);
+
+  // Set up Y.Text observer for auto-save
+  const yText = doc.getText('content');
+  yText.observe(() => {
+    // Skip during initial load (sync from server)
+    if (saveState.isInitialLoad) return;
+    scheduleSave(pagePath, title);
+  });
+
+  // Mark initial load as complete after sync settles
+  setTimeout(() => {
+    saveState.isInitialLoad = false;
+    saveState.lastSavedContent = yText.toString();
+    console.log(`Initial load complete for: ${pagePath}`);
+  }, 500);
 
   // Create session object
   const session: CollabSession = {
@@ -106,6 +265,13 @@ export function createCollabSession(
     pagePath,
     destroy: () => {
       console.log(`Destroying collab session for: ${pagePath}`);
+      // Clear any pending save timer
+      const state = saveStates.get(pagePath);
+      if (state?.saveTimer) {
+        clearTimeout(state.saveTimer);
+      }
+      saveStates.delete(pagePath);
+      saveStatusHandlers.delete(pagePath);
       awareness.setLocalState(null);
       provider.disconnect();
       provider.destroy();
@@ -137,13 +303,39 @@ export function getSharedText(doc: Y.Doc): Y.Text {
 }
 
 /**
- * Destroy a collaborative session for a page.
+ * Release a collaborative session.
+ * Sessions persist to allow seamless switching between formatted/raw views.
+ * Only truly destroyed when navigating to a different page.
  */
 export function destroyCollabSession(pagePath: string): void {
-  const session = activeSessions.get(pagePath);
-  if (session) {
-    session.destroy();
-  }
+  // Don't destroy - sessions persist for view switching
+  // They'll be cleaned up when navigating to a different page
+  console.log(`Session release requested for: ${pagePath} (keeping alive)`);
+}
+
+/**
+ * Force destroy all sessions except the current one.
+ * Called when navigating to a new page.
+ */
+function cleanupOtherSessions(currentPagePath: string): void {
+  const toDelete: string[] = [];
+  activeSessions.forEach((session, path) => {
+    if (path !== currentPagePath) {
+      console.log(`Cleaning up old session for: ${path}`);
+      session.destroy(); // This now cleans up saveStates and saveStatusHandlers too
+      statusHandlers.delete(path);
+      usersHandlers.delete(path);
+      toDelete.push(path);
+    }
+  });
+  toDelete.forEach(path => activeSessions.delete(path));
+}
+
+/**
+ * Get the current save status for a session.
+ */
+export function getSaveStatus(pagePath: string): SaveStatus {
+  return saveStates.get(pagePath)?.status || 'saved';
 }
 
 /**

@@ -26,6 +26,22 @@ import { Plus, FileText, FolderPlus, GripVertical, ChevronRight, ChevronDown, Fo
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
 
+// Render filename with dimmed extension
+const FileName: React.FC<{ name: string }> = ({ name }) => {
+  const lastDot = name.lastIndexOf('.');
+  if (lastDot === -1 || lastDot === 0) {
+    return <>{name}</>;
+  }
+  const baseName = name.slice(0, lastDot);
+  const ext = name.slice(lastDot);
+  return (
+    <>
+      {baseName}
+      <span className="opacity-30">{ext}</span>
+    </>
+  );
+};
+
 // Per-page diff stats (matches backend format)
 interface PageDiffStats {
   [pagePath: string]: {
@@ -43,7 +59,7 @@ interface PageTreeProps {
   pageUpdateCounter: number;
   onPageSelect: (page: Page | null) => void;
   onCreatePage: (title: string) => void;
-  onDeletePage: (title: string) => void;
+  onDeletePage: (path: string) => void;
   onCreateFolder: (name: string) => void;
   onDeleteFolder: (path: string) => void;
   onToggleFolder: (folderId: string) => void;
@@ -162,6 +178,7 @@ const PageTree: React.FC<PageTreeProps> = ({
   );
 
   // Build flat list with drop zones
+  // Items are already sorted alphabetically by the backend
   const items = useMemo(() => {
     const result: Array<{
       type: 'item' | 'dropzone';
@@ -170,7 +187,7 @@ const PageTree: React.FC<PageTreeProps> = ({
       indent: number;
       dropId?: string;
       parentPath: string | null;
-      order: number;
+      index: number; // Position index for drag-drop
     }> = [];
 
     // Root drop zone at top
@@ -179,7 +196,7 @@ const PageTree: React.FC<PageTreeProps> = ({
       indent: 0,
       dropId: 'drop:root:0',
       parentPath: null,
-      order: 0
+      index: 0
     });
 
     const processItems = (items: TreeItem[], indent: number, parentPath: string | null) => {
@@ -195,7 +212,7 @@ const PageTree: React.FC<PageTreeProps> = ({
           page,
           indent,
           parentPath,
-          order: item.order
+          index: index + 1 // 1-indexed for drag-drop
         });
 
         // If folder is expanded, process children
@@ -206,7 +223,7 @@ const PageTree: React.FC<PageTreeProps> = ({
             indent: indent + 1,
             dropId: `drop:${item.path}:0`,
             parentPath: item.path,
-            order: 0
+            index: 0
           });
 
           if (item.children && item.children.length > 0) {
@@ -218,9 +235,9 @@ const PageTree: React.FC<PageTreeProps> = ({
         result.push({
           type: 'dropzone',
           indent,
-          dropId: `drop:${parentPath || 'root'}:${item.order + 1}`,
+          dropId: `drop:${parentPath || 'root'}:${index + 1}`,
           parentPath,
-          order: item.order + 1
+          index: index + 1
         });
       });
     };
@@ -358,7 +375,7 @@ const PageTree: React.FC<PageTreeProps> = ({
       >
         <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab flex-shrink-0" />
         <FileText className="h-4 w-4 flex-shrink-0" />
-        <span className="text-sm flex-1 truncate">{item.title}</span>
+        <span className="text-sm flex-1 truncate"><FileName name={item.title} /></span>
         {pageStats && (pageStats.additions > 0 || pageStats.deletions > 0) && (
           <span className="text-xs font-mono flex gap-1 px-1.5 py-0.5 rounded bg-background/80 border border-border/50">
             {pageStats.additions > 0 && (
@@ -380,7 +397,7 @@ const PageTree: React.FC<PageTreeProps> = ({
             onClick={(e) => {
               e.stopPropagation();
               if (confirm(`Delete page "${item.title}"?`)) {
-                onDeletePage(item.title);
+                onDeletePage(item.path);
               }
             }}
           >
@@ -470,7 +487,9 @@ const PageTree: React.FC<PageTreeProps> = ({
                       ) : (
                         <FileText className="h-4 w-4" />
                       )}
-                      <span className="text-sm font-medium">{draggedItem.title}</span>
+                      <span className="text-sm font-medium">
+                        {draggedItem.type === 'folder' ? draggedItem.title : <FileName name={draggedItem.title} />}
+                      </span>
                     </div>
                   </div>
                 )}

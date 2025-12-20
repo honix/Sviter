@@ -19,13 +19,10 @@ import type { Awareness } from 'y-protocols/awareness';
 import { schema } from '../../editor/schema';
 import { buildKeymap } from '../../editor/keymap';
 import { markdownToProseMirror, prosemirrorToMarkdown } from '../../editor/conversion';
-import { createCollabSession, destroyCollabSession, getSharedText, type CollabUser, type ConnectionStatus } from '../../services/collab';
-import { updatePage } from '../../services/api';
+import { createCollabSession, destroyCollabSession, getSharedText, type CollabUser, type ConnectionStatus, type SaveStatus } from '../../services/collab';
 import { useAuth } from '../../contexts/AuthContext';
 import { EditorToolbar } from './EditorToolbar';
 
-// Debounce delay for auto-save (milliseconds)
-const SAVE_DEBOUNCE_MS = 2000;
 import './prosemirror.css';
 
 // Plugin key for remote cursor decorations
@@ -218,13 +215,10 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [remoteUsers, setRemoteUsers] = useState<CollabUser[]>([]);
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'dirty'>('saved');
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const { userId } = useAuth();
   const sessionRef = useRef<ReturnType<typeof createCollabSession> | null>(null);
   const initializedRef = useRef(false);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSavedContentRef = useRef<string>('');
-  const isInitialLoadRef = useRef(true);
   const yTextRef = useRef<Y.Text | null>(null);
   // Flag to prevent update loops
   const isUpdatingFromYjsRef = useRef(false);
@@ -243,52 +237,10 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
     setRemoteUsers(users);
   }, []);
 
-  // Save document to backend
-  const saveDocument = useCallback(async () => {
-    if (!yTextRef.current) return;
-
-    const markdown = yTextRef.current.toString();
-
-    // Skip if content hasn't changed
-    if (markdown === lastSavedContentRef.current) {
-      setSaveStatus('saved');
-      return;
-    }
-
-    setSaveStatus('saving');
-    try {
-      await updatePage(pageTitle, {
-        content: markdown,
-        author: userId || 'collaborative',
-      });
-      lastSavedContentRef.current = markdown;
-      setSaveStatus('saved');
-      console.log(`Auto-saved ${pageTitle}`);
-    } catch (error) {
-      console.error('Failed to save:', error);
-      setSaveStatus('dirty'); // Mark as dirty so user knows save failed
-    }
-  }, [pageTitle, userId]);
-
-  // Schedule debounced save
-  const scheduleSave = useCallback(() => {
-    // Skip save during initial load or if not editable
-    if (isInitialLoadRef.current || !editableRef.current) {
-      return;
-    }
-
-    setSaveStatus('dirty');
-
-    // Clear existing timer
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-    }
-
-    // Schedule new save
-    saveTimerRef.current = setTimeout(() => {
-      saveDocument();
-    }, SAVE_DEBOUNCE_MS);
-  }, [saveDocument]);
+  // Handle save status changes (from collab service)
+  const handleSaveStatusChange = useCallback((status: SaveStatus) => {
+    setSaveStatus(status);
+  }, []);
 
   // Initialize editor with Yjs
   useEffect(() => {
@@ -299,7 +251,9 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       pagePath,
       userId,
       handleStatusChange,
-      handleUsersChange
+      handleUsersChange,
+      handleSaveStatusChange,
+      pageTitle
     );
     sessionRef.current = session;
 
@@ -405,35 +359,14 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       },
     });
 
-    // Set up cursor/save handlers (always set up, but check editableRef at runtime)
+    // Set up cursor handlers
     let handleBlur: (() => void) | null = null;
-    let enableSaveTimer: ReturnType<typeof setTimeout> | null = null;
-    let handleYjsUpdate: ((update: Uint8Array, origin: unknown) => void) | null = null;
 
-    // Always set up handlers - they will check editableRef at runtime
-    {
-      // Clear cursor from awareness when editor loses focus
-      handleBlur = () => {
-        awareness.setLocalStateField('cursor', null);
-      };
-      view.dom.addEventListener('blur', handleBlur);
-
-      // Store initial content for comparison
-      lastSavedContentRef.current = initialContent;
-
-      // Allow saves after initial load settles
-      enableSaveTimer = setTimeout(() => {
-        isInitialLoadRef.current = false;
-      }, 500);
-
-      // Set up Yjs document observer for auto-save (only on LOCAL changes)
-      handleYjsUpdate = (_update: Uint8Array, origin: unknown) => {
-        if (origin !== session.provider) {
-          scheduleSave();
-        }
-      };
-      session.doc.on('update', handleYjsUpdate);
-    }
+    // Clear cursor from awareness when editor loses focus
+    handleBlur = () => {
+      awareness.setLocalStateField('cursor', null);
+    };
+    view.dom.addEventListener('blur', handleBlur);
 
     viewRef.current = view;
     setEditorView(view);
@@ -466,15 +399,6 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
 
     // Cleanup on unmount
     return () => {
-      // Cancel pending timers
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-      }
-      if (enableSaveTimer) {
-        clearTimeout(enableSaveTimer);
-      }
-      // Reset for next mount
-      isInitialLoadRef.current = true;
       // Remove event listeners
       if (handleBlur) {
         view.dom.removeEventListener('blur', handleBlur);
@@ -482,9 +406,6 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       // Remove observers
       yText.unobserve(handleYTextChange);
       awareness.off('change', handleAwarenessChange);
-      if (handleYjsUpdate) {
-        session.doc.off('update', handleYjsUpdate);
-      }
       // Clear cursor before destroying
       awareness.setLocalStateField('cursor', null);
       view.destroy();
@@ -496,7 +417,7 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       sessionRef.current = null;
     };
     // Note: editable is NOT in deps - we use editableRef to avoid remounting on edit/view switch
-  }, [pagePath, userId, initialContent, handleStatusChange, handleUsersChange, scheduleSave]);
+  }, [pagePath, userId, initialContent, handleStatusChange, handleUsersChange, handleSaveStatusChange, pageTitle]);
 
   // Notify parent of status changes
   useEffect(() => {

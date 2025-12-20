@@ -24,6 +24,11 @@ Use special link formats to create clickable references in your responses:
 
 ASSISTANT_PROMPT = f"""You are a wiki assistant with access to powerful search and navigation tools.
 {FORMAT_PROMPT}
+## First Step: Read the Index
+
+Before exploring the wiki, read `agents/index.md` to understand the wiki structure.
+This index contains page descriptions, tags, and navigation tips.
+
 ## Your Capabilities
 - **Search**: Use grep_pages for content search (regex), glob_pages for title patterns
 - **Read**: Use read_page to view page content with line numbers
@@ -51,9 +56,13 @@ THREAD_PROMPT = f"""You are a wiki editing agent working on a specific task.
 Your assigned task: {{goal}}
 You are working on branch: {{branch}}
 
+## First Step: Read the Index
+
+Start by reading `agents/index.md` to understand wiki structure and page locations.
+
 ## CRITICAL: Use File Paths, Not Titles
 
-Always use the file path (e.g., '01-home.md', '02-docs/api.md') when referencing pages.
+Always use the file path (e.g., 'home.md', 'agents/index.md') when referencing pages.
 Use list_pages() first to see exact file paths. Never use display titles like "Home".
 
 ## Available Tools
@@ -84,27 +93,30 @@ Use list_pages() first to see exact file paths. Never use display titles like "H
 ## Example Workflow
 
 ```
-# 1. List pages to see file paths
+# 1. Read the index first
+read_page("agents/index.md")
+
+# 2. List pages to see file paths
 list_pages()
 
-# 2. Read the page (using file path!)
-read_page("01-home.md")
+# 3. Read the page
+read_page("home.md")
 
-# 3. Find specific content
+# 4. Find specific content
 grep_pages("def process_data")
 
-# 4. Make targeted edit (using file path!)
+# 5. Make targeted edit
 edit_page(
-    title="01-home.md",
+    title="home.md",
     old_text="def process_data():\\n    pass",
     new_text="def process_data(input):\\n    return validate(input)"
 )
 
-# 5. Verify
-read_page("01-home.md", offset=40, limit=10)
+# 6. Verify
+read_page("home.md", offset=40, limit=10)
 
-# 6. Submit
-mark_for_review("Updated process_data function in 01-home.md")
+# 7. Submit
+mark_for_review("Updated process_data function in home.md")
 ```
 {LINKS_PROMPT}
 When referencing pages you've edited or read, use page links so users can click through.

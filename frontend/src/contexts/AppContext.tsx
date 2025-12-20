@@ -264,8 +264,9 @@ interface AppContextType {
     setPages: (pages: Page[]) => void;
     addPage: (page: Page) => void;
     updatePage: (title: string, updates: Partial<Page>) => Promise<void>;
-    deletePage: (title: string) => Promise<void>;
+    deletePage: (path: string) => Promise<void>;
     setCurrentPage: (page: Page | null) => Promise<void>;
+    setCurrentPageDirect: (page: Page | null) => void;
     setViewMode: (mode: ViewMode) => void;
     setLoading: (loading: boolean) => void;
     setError: (error: string | null) => void;
@@ -582,7 +583,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // The page content will be updated when the user navigates or refreshes
       if (!currentPageRef.current && backendPages.length > 0) {
         try {
-          const pageResponse = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(backendPages[0].title)}`);
+          const pageResponse = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(backendPages[0].path)}`);
           if (pageResponse.ok) {
             const fullPage = await pageResponse.json();
             currentPageRef.current = fullPage; // Update ref immediately to prevent duplicate dispatches
@@ -636,7 +637,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      const pageResponse = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(currentPageRef.current.title)}`);
+      const pageResponse = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(currentPageRef.current.path)}`);
       if (pageResponse.ok) {
         const fullPage = await pageResponse.json();
         currentPageRef.current = fullPage;
@@ -735,12 +736,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dispatch({ type: 'SET_LOADING', payload: false });
       }
     },
-    deletePage: async (title: string) => {
+    deletePage: async (path: string) => {
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'SET_ERROR', payload: null });
 
       try {
-        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(title)}?author=user`, {
+        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(path)}?author=user`, {
           method: 'DELETE',
         });
 
@@ -748,7 +749,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        dispatch({ type: 'DELETE_PAGE', payload: title });
+        dispatch({ type: 'DELETE_PAGE', payload: path });
         const tree = await treeApi.getTree();
         dispatch({ type: 'SET_PAGE_TREE', payload: tree });
       } catch (err) {
@@ -768,7 +769,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatch({ type: 'SET_ERROR', payload: null });
 
       try {
-        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(page.title)}`);
+        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(page.path)}`);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -782,6 +783,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
       }
+    },
+    setCurrentPageDirect: (page: Page | null) => {
+      dispatch({ type: 'SET_CURRENT_PAGE', payload: page });
     },
     setViewMode: (mode: ViewMode) => dispatch({ type: 'SET_VIEW_MODE', payload: mode }),
     setLoading: (loading: boolean) => dispatch({ type: 'SET_LOADING', payload: loading }),
