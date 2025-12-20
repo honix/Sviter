@@ -48,7 +48,7 @@ export const stringToColorDark = (str: string): string => {
  * For guests (guest-xxxxx), uses first 2 chars of the ID part.
  * For other users, uses first 2 chars.
  */
-export const getInitials = (userId: string | undefined): string => {
+export const getInitials = (userId: string | undefined | null): string => {
   if (!userId) return 'U';
   // For guests (guest-xxxxx), use first 2 chars of the ID part
   if (userId.startsWith('guest-')) {

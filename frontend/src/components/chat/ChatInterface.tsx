@@ -212,7 +212,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
           )}
 
           {/* Changes view - show in review mode */}
-          {isReviewMode && (
+          {isReviewMode && thread?.branch && (
             <div className="mt-3 border-t border-border pt-3">
               <ThreadChangesView
                 branch={thread.branch}
