@@ -229,6 +229,9 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
   // Flag to prevent update loops
   const isUpdatingFromYjsRef = useRef(false);
   const isUpdatingYjsRef = useRef(false);
+  // Use ref for editable to avoid re-running useEffect when it changes
+  const editableRef = useRef(editable);
+  editableRef.current = editable;
 
   // Handle status changes
   const handleStatusChange = useCallback((status: ConnectionStatus) => {
@@ -269,8 +272,8 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
 
   // Schedule debounced save
   const scheduleSave = useCallback(() => {
-    // Skip save during initial load
-    if (isInitialLoadRef.current) {
+    // Skip save during initial load or if not editable
+    if (isInitialLoadRef.current || !editableRef.current) {
       return;
     }
 
@@ -362,13 +365,13 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
     // Create editor view with dispatch interceptor
     const view = new EditorView(editorRef.current, {
       state,
-      editable: () => editable,
+      editable: () => editableRef.current,
       dispatchTransaction(tr: Transaction) {
         const newState = view.state.apply(tr);
         view.updateState(newState);
 
-        // Only sync changes if editable
-        if (editable) {
+        // Only sync changes if editable (read from ref for current value)
+        if (editableRef.current) {
           // If document changed and we're not updating from Yjs, sync to Y.Text
           if (tr.docChanged && !isUpdatingFromYjsRef.current) {
             isUpdatingYjsRef.current = true;
@@ -402,12 +405,13 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       },
     });
 
-    // Only set up cursor/save handlers when editable
+    // Set up cursor/save handlers (always set up, but check editableRef at runtime)
     let handleBlur: (() => void) | null = null;
     let enableSaveTimer: ReturnType<typeof setTimeout> | null = null;
     let handleYjsUpdate: ((update: Uint8Array, origin: unknown) => void) | null = null;
 
-    if (editable) {
+    // Always set up handlers - they will check editableRef at runtime
+    {
       // Clear cursor from awareness when editor loses focus
       handleBlur = () => {
         awareness.setLocalStateField('cursor', null);
@@ -481,10 +485,8 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       if (handleYjsUpdate) {
         session.doc.off('update', handleYjsUpdate);
       }
-      // Clear cursor before destroying (only if we were broadcasting)
-      if (editable) {
-        awareness.setLocalStateField('cursor', null);
-      }
+      // Clear cursor before destroying
+      awareness.setLocalStateField('cursor', null);
       view.destroy();
       viewRef.current = null;
       yTextRef.current = null;
@@ -493,7 +495,8 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       destroyCollabSession(pagePath);
       sessionRef.current = null;
     };
-  }, [pagePath, userId, initialContent, editable, handleStatusChange, handleUsersChange, scheduleSave]);
+    // Note: editable is NOT in deps - we use editableRef to avoid remounting on edit/view switch
+  }, [pagePath, userId, initialContent, handleStatusChange, handleUsersChange, scheduleSave]);
 
   // Notify parent of status changes
   useEffect(() => {

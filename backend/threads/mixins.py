@@ -186,6 +186,24 @@ class ReviewMixin:
     def mark_for_review(self, summary: str) -> None:
         """Mark this thread as ready for review."""
         from threads.base import ThreadStatus
+        from pathlib import Path
+
+        # Commit any pending merge before marking for review
+        wiki = self.get_wiki()
+        if wiki:
+            # Use repo.git_dir for worktrees (wiki.repo_path / '.git' is a file in worktrees)
+            git_dir = Path(wiki.repo.git_dir)
+            merge_head = git_dir / 'MERGE_HEAD'
+            if merge_head.exists():
+                try:
+                    # Use git commit directly to properly complete the merge
+                    # index.commit() doesn't handle merge state correctly
+                    wiki.repo.git.commit("-m", f"Merge main into {self.branch} (conflict resolved)")
+                    print(f"✅ Committed merge resolution for {self.branch}")
+                except Exception as e:
+                    # Log but don't fail - maybe there are still conflicts
+                    import logging
+                    logging.getLogger(__name__).warning(f"Failed to commit merge: {e}")
 
         self.review_summary = summary
         self.status = ThreadStatus.REVIEW

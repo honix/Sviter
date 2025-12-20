@@ -2,6 +2,7 @@ from fastapi import FastAPI, WebSocket, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from storage import GitWiki, PageNotFoundException, GitWikiException
 from threads.manager import websocket_endpoint, initialize_thread_manager
+from threads import manager as threads_module  # Access thread_manager at runtime
 from threads import git_operations as git_ops
 from api.threads import router as threads_router
 from collab import initialize_collab_manager
@@ -83,6 +84,11 @@ async def startup_event():
         collab_mgr = initialize_collab_manager(wiki)
         await collab_mgr.start()
         print("🤝 Collaborative editing manager started")
+
+        # Connect collab manager to thread manager for merge blocking
+        if threads_module.thread_manager and collab_mgr:
+            threads_module.thread_manager.set_collab_manager(collab_mgr)
+            print("🔗 Thread manager connected to collab manager")
     except Exception as e:
         print(f"❌ Error loading wiki repository: {e}")
 
@@ -118,6 +124,20 @@ async def collab_websocket_handler(websocket: WebSocket, room_name: str):
     client_id = websocket.query_params.get("userId", "anonymous")
 
     await collab_module.collab_manager.connect(websocket, client_id, room_name)
+
+
+# API endpoint to update editing state (for merge blocking)
+@app.post("/api/collab/editing-state")
+async def set_editing_state(room_name: str, client_id: str, editing: bool):
+    """
+    Update a client's editing state for a room.
+    Only editors (not viewers) are counted for merge blocking.
+    """
+    if not collab_module.collab_manager:
+        return {"error": "Collaboration manager not initialized"}
+
+    await collab_module.collab_manager.set_editing_state(room_name, client_id, editing)
+    return {"success": True, "room": room_name, "client_id": client_id, "editing": editing}
 
 
 # WebSocket endpoint for chat/threads

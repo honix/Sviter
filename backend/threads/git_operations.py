@@ -276,6 +276,97 @@ def merge_thread(wiki: GitWiki, branch: str) -> Dict[str, Any]:
             return {"success": False, "conflict": False, "error": str(merge_error)}
 
 
+def check_merge_conflicts(wiki: GitWiki, thread_branch: str) -> bool:
+    """
+    Check if merging thread branch into main would result in conflicts.
+
+    Uses git merge-tree to check for conflicts without modifying the working tree.
+
+    Args:
+        wiki: GitWiki instance (main wiki)
+        thread_branch: Thread branch to check
+
+    Returns:
+        True if there would be conflicts, False otherwise
+    """
+    try:
+        # First check: if thread branch already contains main's HEAD, no conflicts possible
+        # This happens after conflict resolution when main was merged into thread
+        try:
+            main_head = wiki.repo.git.rev_parse("main")
+            # Check if main's HEAD is an ancestor of thread branch
+            # merge-base --is-ancestor returns 0 if ancestor, 1 if not
+            wiki.repo.git.execute(["git", "merge-base", "--is-ancestor", main_head, thread_branch])
+            # If we get here (no exception), main is already in thread - no conflicts
+            print(f"✅ Main ({main_head[:8]}) is already merged into {thread_branch} - no conflicts")
+            return False
+        except Exception:
+            # main is not an ancestor of thread, need to check for conflicts
+            pass
+
+        # Find merge base
+        merge_base = wiki.repo.git.merge_base("main", thread_branch)
+
+        # Use merge-tree to check for conflicts (git 2.38+)
+        # This does a "virtual merge" without touching the working tree
+        try:
+            result = wiki.repo.git.execute(
+                ["git", "merge-tree", "--write-tree", "--no-messages", merge_base, "main", thread_branch],
+                with_extended_output=True
+            )
+            # If successful with exit code 0, no conflicts
+            return False
+        except Exception as e:
+            error_str = str(e).lower()
+            # merge-tree returns non-zero if there are conflicts
+            if "conflict" in error_str or "would be overwritten" in error_str:
+                return True
+            # For older git versions, fall back to dry-run merge
+            pass
+
+        # Fallback for older git: try a dry-run merge using git merge --no-commit --no-ff
+        # This is more accurate than the heuristic approach
+        try:
+            # Save current branch
+            current_branch = wiki.repo.active_branch.name
+
+            # Checkout main
+            wiki.repo.git.checkout("main")
+
+            try:
+                # Try merge with --no-commit to see if it would conflict
+                wiki.repo.git.merge("--no-commit", "--no-ff", thread_branch)
+                # If we get here, no conflicts - abort and return False
+                wiki.repo.git.merge("--abort")
+                return False
+            except Exception as merge_error:
+                # Abort the failed merge
+                try:
+                    wiki.repo.git.merge("--abort")
+                except Exception:
+                    pass
+
+                error_str = str(merge_error).lower()
+                if "conflict" in error_str:
+                    return True
+                # Other error - assume no conflicts
+                return False
+            finally:
+                # Restore original branch
+                if wiki.repo.active_branch.name != current_branch:
+                    wiki.repo.git.checkout(current_branch)
+
+        except Exception as e:
+            print(f"Fallback merge check failed: {e}")
+            # If fallback also fails, assume no conflicts
+            return False
+
+    except Exception as e:
+        print(f"Error checking merge conflicts: {e}")
+        # If we can't check, assume no conflicts and let the actual merge handle it
+        return False
+
+
 def merge_main_into_thread(wiki: GitWiki, branch: str) -> Optional[str]:
     """
     Merge main into thread branch (for conflict resolution).

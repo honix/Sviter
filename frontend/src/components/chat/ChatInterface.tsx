@@ -99,6 +99,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
         return <AlertCircle className="h-4 w-4 text-yellow-500" />;
       case 'review':
         return <CheckCircle className="h-4 w-4 text-green-500" />;
+      case 'resolving':
+        return <Loader2 className="h-4 w-4 animate-spin text-orange-500" />;
       case 'accepted':
         return <Check className="h-4 w-4 text-green-600" />;
       case 'rejected':
@@ -110,6 +112,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
     'working': 'Working...',
     'need_help': 'Needs your help',
     'review': 'Ready for review',
+    'resolving': 'Resolving conflicts...',
     'accepted': 'Accepted',
     'rejected': 'Rejected'
   };
@@ -154,7 +157,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
 
             {/* Accept/Reject buttons - only in review mode */}
             {isReviewMode && (
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
@@ -163,14 +166,39 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
                 >
                   Reject
                 </Button>
-                <Button
-                  size="sm"
-                  onClick={handleAcceptChanges}
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  <Check className="h-4 w-4 mr-1" />
-                  Accept Changes
-                </Button>
+                {thread?.merge_blocked ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <Button
+                          size="sm"
+                          disabled
+                          className="bg-muted text-muted-foreground cursor-not-allowed"
+                        >
+                          <AlertCircle className="h-4 w-4 mr-1" />
+                          Accept Blocked
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      <p className="font-medium">Pages being edited:</p>
+                      <ul className="text-xs mt-1">
+                        {Object.entries(thread.blocked_pages || {}).map(([page, editors]) => (
+                          <li key={page}>• {page} ({(editors as string[]).length} editor{(editors as string[]).length > 1 ? 's' : ''})</li>
+                        ))}
+                      </ul>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={handleAcceptChanges}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    <Check className="h-4 w-4 mr-1" />
+                    Accept Changes
+                  </Button>
+                )}
               </div>
             )}
           </div>

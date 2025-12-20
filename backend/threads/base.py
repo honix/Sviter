@@ -37,6 +37,7 @@ class ThreadStatus(Enum):
     WORKING = "working"      # Agent actively processing
     NEED_HELP = "need_help"  # Agent stuck, needs user input
     REVIEW = "review"        # Agent done, changes ready for review
+    RESOLVING = "resolving"  # Agent resolving merge conflicts
     ACCEPTED = "accepted"    # Changes merged to main
     REJECTED = "rejected"    # Changes rejected
 

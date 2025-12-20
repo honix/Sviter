@@ -354,3 +354,61 @@ async def reject_thread(
         raise HTTPException(status_code=400, detail=result.get("message"))
 
     return result
+
+
+@router.get("/{thread_id}/files")
+async def get_thread_files(
+    thread_id: str,
+    user_id: str = Depends(get_current_user)
+):
+    """
+    Get raw file content from thread's worktree.
+
+    Used to display merge conflict markers during resolution.
+    Returns files with their raw content (including conflict markers if present).
+    """
+    thread_data = db_get_thread(thread_id)
+    if not thread_data:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    if thread_data['type'] != 'worker':
+        raise HTTPException(status_code=400, detail="Only worker threads have worktrees")
+
+    worktree_path = thread_data.get('worktree_path')
+    if not worktree_path:
+        raise HTTPException(status_code=400, detail="Thread has no worktree")
+
+    from pathlib import Path
+    import os
+
+    worktree = Path(worktree_path)
+    pages_dir = worktree / 'pages'
+
+    if not pages_dir.exists():
+        return {"files": [], "has_conflicts": False}
+
+    files = []
+    has_conflicts = False
+
+    for filepath in pages_dir.glob('**/*.md'):
+        try:
+            content = filepath.read_text(encoding='utf-8')
+            file_has_conflicts = '<<<<<<< ' in content or '=======' in content or '>>>>>>> ' in content
+            if file_has_conflicts:
+                has_conflicts = True
+
+            rel_path = str(filepath.relative_to(pages_dir))
+            files.append({
+                "path": rel_path,
+                "content": content,
+                "has_conflicts": file_has_conflicts
+            })
+        except Exception as e:
+            files.append({
+                "path": str(filepath.relative_to(pages_dir)),
+                "content": f"Error reading file: {e}",
+                "has_conflicts": False,
+                "error": True
+            })
+
+    return {"files": files, "has_conflicts": has_conflicts}

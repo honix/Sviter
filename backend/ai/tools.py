@@ -85,8 +85,11 @@ def _read_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
         end_idx = min(len(lines), start_idx + limit)
         selected_lines = lines[start_idx:end_idx]
 
+        # Use path as primary identifier for agents
+        page_path = page.get('path', title)
+
         # Build header
-        header = [f"Page: {page['title']}"]
+        header = [f"Page: {page_path}"]
         header.append(
             f"Author: {page['author']} | Created: {_format_datetime(page.get('created_at'))} | Updated: {_format_datetime(page.get('updated_at'))}")
         if page.get('tags'):
@@ -144,10 +147,10 @@ def _grep_pages(wiki: GitWiki, args: Dict[str, Any]) -> str:
 
     current_page = None
     for match in matches:
-        # Group by page
-        if match["page_title"] != current_page:
-            current_page = match["page_title"]
-            lines.append(f"\n[{current_page}] ({match['page_path']})")
+        # Group by page (use path as primary identifier)
+        if match["page_path"] != current_page:
+            current_page = match["page_path"]
+            lines.append(f"\n[{current_page}]")
 
         line_num = match["line_number"]
 
@@ -190,7 +193,8 @@ def _glob_pages(wiki: GitWiki, args: Dict[str, Any]) -> str:
 
     for i, page in enumerate(results, 1):
         updated = _format_datetime(page.get("updated_at"))
-        lines.append(f"{i}. {page['title']} ({page['path']})")
+        # Use path as primary identifier for agents
+        lines.append(f"{i}. {page.get('path', page['title'])}")
         lines.append(f"   Updated: {updated}")
 
     return "\n".join(lines)
@@ -221,9 +225,10 @@ def _list_pages(wiki: GitWiki, args: Dict[str, Any]) -> str:
     lines = [f"Found {len(pages)} page{'s' if len(pages) != 1 else ''}:\n"]
 
     for i, page in enumerate(pages, 1):
-        lines.append(f"{i}. **{page['title']}** (by {page['author']})")
-        lines.append(f"   Path: {page.get('path', 'N/A')}")
-        lines.append(f"   Updated: {_format_datetime(page.get('updated_at'))}")
+        # Use path as primary identifier for agents
+        page_path = page.get('path', page['title'])
+        lines.append(f"{i}. {page_path}")
+        lines.append(f"   Author: {page['author']} | Updated: {_format_datetime(page.get('updated_at'))}")
         if page.get('tags'):
             lines.append(f"   Tags: {', '.join(page['tags'])}")
 
@@ -538,11 +543,13 @@ Features:
 - Returns content with line numbers (1-indexed)
 - Supports offset/limit for reading specific sections
 - Shows metadata (author, dates, tags)
-- Lines longer than 2000 chars are truncated""",
+- Lines longer than 2000 chars are truncated
+
+IMPORTANT: Use the file path (e.g., '01-home.md', '02-docs/api.md') not the display title.""",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "title": {"type": "string", "description": "Page title or path (e.g., 'Python Guide' or '01-docs/02-api.md')"},
+                        "title": {"type": "string", "description": "Page file path (e.g., '01-home.md', '02-docs/api.md')"},
                         "offset": {"type": "integer", "description": "Starting line number (1-indexed). Omit to start from beginning."},
                         "limit": {"type": "integer", "description": "Max lines to return (default: 2000)."}
                     },
@@ -620,6 +627,7 @@ Use this to get an overview of wiki content. For searching specific content, use
                 description="""Create a new wiki page or completely overwrite an existing one.
 
 IMPORTANT: This REPLACES the entire page content. For targeted edits, use edit_page instead.
+IMPORTANT: Use the file path (e.g., '01-home.md') not the display title.
 
 Use cases:
 - Creating new pages
@@ -628,7 +636,7 @@ Use cases:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "title": {"type": "string", "description": "Page title (will be created if doesn't exist)"},
+                        "title": {"type": "string", "description": "Page file path (e.g., '01-home.md', '02-docs/api.md')"},
                         "content": {"type": "string", "description": "Complete page content in markdown format"},
                         "author": {"type": "string", "description": "Author name (default: 'AI Agent')"},
                         "tags": {"type": "array", "items": {"type": "string"}, "description": "Page tags for categorization"}
@@ -642,6 +650,7 @@ Use cases:
                 description="""Edit a wiki page by replacing exact text matches. This is the primary tool for making targeted changes.
 
 CRITICAL: The old_text must match EXACTLY including whitespace, newlines, and indentation. Use read_page first to see exact content.
+IMPORTANT: Use the file path (e.g., '01-home.md') not the display title.
 
 Behavior:
 - Finds exact match of old_text in page content
@@ -656,7 +665,7 @@ Tips:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "title": {"type": "string", "description": "Page title"},
+                        "title": {"type": "string", "description": "Page file path (e.g., '01-home.md', '02-docs/api.md')"},
                         "old_text": {"type": "string", "description": "Exact text to find and replace (must be unique unless replace_all=true)"},
                         "new_text": {"type": "string", "description": "Replacement text"},
                         "replace_all": {"type": "boolean", "description": "Replace all occurrences (default: false - requires unique match)"},
@@ -675,11 +684,12 @@ The content is inserted BEFORE the specified line. Use this for:
 - Inserting content when exact text matching is difficult
 - Adding content at the start (line 1) or end (line > total lines)
 
+IMPORTANT: Use the file path (e.g., '01-home.md') not the display title.
 Note: Line numbers are 1-indexed (first line is 1).""",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "title": {"type": "string", "description": "Page title"},
+                        "title": {"type": "string", "description": "Page file path (e.g., '01-home.md', '02-docs/api.md')"},
                         "line": {"type": "integer", "description": "Line number to insert before (1-indexed). Use line > total_lines to append."},
                         "content": {"type": "string", "description": "Content to insert (can be multiple lines)"},
                         "author": {"type": "string", "description": "Author name for commit (default: 'AI Agent')"}

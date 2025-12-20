@@ -288,18 +288,33 @@ class GitWiki:
         Returns:
             Dictionary with page data
         """
-        post = frontmatter.load(filepath)
-
-        return {
-            "title": post.metadata.get("title", self.filename_to_title(filepath.name)),
-            "content": post.content,
-            "author": post.metadata.get("author", "Unknown"),
-            "created_at": post.metadata.get("created"),
-            "updated_at": post.metadata.get("updated"),
-            "tags": post.metadata.get("tags", []),
-            "metadata": post.metadata,
-            "path": str(filepath.relative_to(self.pages_dir))
-        }
+        try:
+            post = frontmatter.load(filepath)
+            return {
+                "title": post.metadata.get("title", self.filename_to_title(filepath.name)),
+                "content": post.content,
+                "author": post.metadata.get("author", "Unknown"),
+                "created_at": post.metadata.get("created"),
+                "updated_at": post.metadata.get("updated"),
+                "tags": post.metadata.get("tags", []),
+                "metadata": post.metadata,
+                "path": str(filepath.relative_to(self.pages_dir))
+            }
+        except Exception as e:
+            # Handle corrupted frontmatter (e.g., merge conflict markers)
+            # Return raw content with minimal metadata
+            raw_content = filepath.read_text(encoding='utf-8')
+            return {
+                "title": self.filename_to_title(filepath.name),
+                "content": raw_content,
+                "author": "Unknown",
+                "created_at": None,
+                "updated_at": None,
+                "tags": [],
+                "metadata": {"parse_error": str(e)},
+                "path": str(filepath.relative_to(self.pages_dir)),
+                "has_conflicts": "<<<<<<" in raw_content or "=======" in raw_content
+            }
 
     def _create_page_content(self, title: str, content: str, author: str = "AI Agent",
                             tags: Optional[List[str]] = None) -> str:
@@ -413,8 +428,28 @@ class GitWiki:
             raise PageNotFoundException(f"Page '{title}' not found. Use create_page() to create it.")
 
         # Read existing frontmatter to preserve created date
-        existing = frontmatter.load(filepath)
-        created_at = existing.metadata.get("created", datetime.now().isoformat())
+        try:
+            existing = frontmatter.load(filepath)
+            created_at = existing.metadata.get("created", datetime.now().isoformat())
+            existing_tags = existing.metadata.get("tags", [])
+        except Exception:
+            # Handle corrupted frontmatter (e.g., merge conflict markers)
+            created_at = datetime.now().isoformat()
+            existing_tags = []
+
+        # If content already has frontmatter, extract just the body
+        # This happens when agent resolves conflicts and passes full file content
+        if content.strip().startswith('---'):
+            try:
+                parsed = frontmatter.loads(content)
+                content = parsed.content
+                # Preserve metadata from the passed content if available
+                if parsed.metadata.get("created"):
+                    created_at = parsed.metadata["created"]
+                if parsed.metadata.get("tags"):
+                    existing_tags = parsed.metadata["tags"]
+            except Exception:
+                pass  # Keep content as-is if parsing fails
 
         # Create updated content
         post = frontmatter.Post(content)
@@ -423,7 +458,7 @@ class GitWiki:
             "created": created_at,
             "updated": datetime.now().isoformat(),
             "author": author,
-            "tags": tags or existing.metadata.get("tags", [])
+            "tags": tags or existing_tags
         }
 
         # Write file
@@ -432,9 +467,18 @@ class GitWiki:
         # Git add and commit
         try:
             relative_path = filepath.relative_to(self.repo_path)
-            self.repo.index.add([str(relative_path)])
-            message = commit_msg or f"Update page: {title}"
-            self.repo.index.commit(message, author=self._create_author(author))
+            # Use git.add() instead of index.add() - works for both normal and unmerged files
+            self.repo.git.add(str(relative_path))
+
+            # Check if we're in a merge state - if so, don't commit yet
+            # The merge commit should be done explicitly via mark_for_review
+            merge_head = self.repo_path / '.git' / 'MERGE_HEAD'
+            if merge_head.exists():
+                # In merge state - file is staged, commit will happen later
+                pass
+            else:
+                message = commit_msg or f"Update page: {title}"
+                self.repo.index.commit(message, author=self._create_author(author))
         except GitCommandError as e:
             raise GitWikiException(f"Git commit failed: {e}")
 
@@ -635,18 +679,31 @@ class GitWiki:
             content = self.repo.git.show(f"{commit_sha}:{relative_path}")
 
             # Parse frontmatter
-            post = frontmatter.loads(content)
-
-            return {
-                "title": post.metadata.get("title", title),
-                "content": post.content,
-                "author": post.metadata.get("author", "Unknown"),
-                "created_at": post.metadata.get("created"),
-                "updated_at": post.metadata.get("updated"),
-                "tags": post.metadata.get("tags", []),
-                "metadata": post.metadata,
-                "revision": commit_sha[:7]
-            }
+            try:
+                post = frontmatter.loads(content)
+                return {
+                    "title": post.metadata.get("title", title),
+                    "content": post.content,
+                    "author": post.metadata.get("author", "Unknown"),
+                    "created_at": post.metadata.get("created"),
+                    "updated_at": post.metadata.get("updated"),
+                    "tags": post.metadata.get("tags", []),
+                    "metadata": post.metadata,
+                    "revision": commit_sha[:7]
+                }
+            except Exception:
+                # Handle corrupted frontmatter (e.g., merge conflict markers)
+                return {
+                    "title": title,
+                    "content": content,
+                    "author": "Unknown",
+                    "created_at": None,
+                    "updated_at": None,
+                    "tags": [],
+                    "metadata": {},
+                    "revision": commit_sha[:7],
+                    "has_conflicts": "<<<<<<" in content or "=======" in content
+                }
 
         except GitCommandError as e:
             raise GitWikiException(f"Failed to get revision {commit_sha}: {e}")
@@ -1258,8 +1315,12 @@ class GitWiki:
             # Get file content at specific ref
             raw_content = self.repo.git.show(f"{ref}:{relative_path}")
             # Parse frontmatter to extract just the content
-            post = frontmatter.loads(raw_content)
-            return post.content
+            try:
+                post = frontmatter.loads(raw_content)
+                return post.content
+            except Exception:
+                # Handle corrupted frontmatter - return raw content
+                return raw_content
         except GitCommandError:
             return ""  # Page doesn't exist at ref
 
@@ -1338,12 +1399,17 @@ class GitWiki:
             try:
                 content = filepath.read_text(encoding='utf-8')
                 # Skip frontmatter for search
-                post = frontmatter.loads(content)
-                page_content = post.content
+                try:
+                    post = frontmatter.loads(content)
+                    page_content = post.content
+                    page_title = post.metadata.get("title", self.filename_to_title(filepath.name))
+                except Exception:
+                    # Handle corrupted frontmatter - search raw content
+                    page_content = content
+                    page_title = self.filename_to_title(filepath.name)
                 lines = page_content.split('\n')
 
                 page_path = str(filepath.relative_to(self.pages_dir))
-                page_title = post.metadata.get("title", self.filename_to_title(filepath.name))
 
                 for line_num, line in enumerate(lines, start=1):
                     if compiled.search(line):

@@ -1,12 +1,18 @@
 /**
  * ThreadChangesView - displays file changes for a thread
  * V1: Simple file summary + expandable diff view
+ *
+ * Refreshes when:
+ * - branch changes
+ * - baseBranch changes
+ * - refreshTrigger changes (for when main branch is updated)
  */
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight, FilePlus, FileEdit, Trash2 } from 'lucide-react';
 import { GitAPI } from '../../services/git-api';
 import { DiffViewer } from '../agents/DiffViewer';
 import { cn } from '@/lib/utils';
+import { useAppContext } from '../../contexts/AppContext';
 import type { ThreadDiffStats } from '../../types/thread';
 
 interface ThreadChangesViewProps {
@@ -22,6 +28,9 @@ export function ThreadChangesView({
   className,
   compact = false
 }: ThreadChangesViewProps) {
+  const { state } = useAppContext();
+  const { pageUpdateCounter } = state;
+
   const [stats, setStats] = useState<ThreadDiffStats | null>(null);
   const [diff, setDiff] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -29,9 +38,10 @@ export function ThreadChangesView({
   const [expanded, setExpanded] = useState(false);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
 
+  // Refresh diff when branch changes or when main branch is updated (via pageUpdateCounter)
   useEffect(() => {
     loadDiffData();
-  }, [branch, baseBranch]);
+  }, [branch, baseBranch, pageUpdateCounter]);
 
   const loadDiffData = async () => {
     try {

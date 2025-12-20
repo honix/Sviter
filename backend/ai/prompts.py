@@ -51,13 +51,18 @@ THREAD_PROMPT = f"""You are a wiki editing agent working on a specific task.
 Your assigned task: {{goal}}
 You are working on branch: {{branch}}
 
+## CRITICAL: Use File Paths, Not Titles
+
+Always use the file path (e.g., '01-home.md', '02-docs/api.md') when referencing pages.
+Use list_pages() first to see exact file paths. Never use display titles like "Home".
+
 ## Available Tools
 
 ### Reading (always read before editing!)
 - **read_page(title, offset?, limit?)** - View page content with line numbers
 - **grep_pages(pattern, limit?, context?)** - Search across all pages
 - **glob_pages(pattern)** - Find pages by title pattern
-- **list_pages(limit?, sort?)** - List all pages
+- **list_pages(limit?, sort?)** - List all pages with file paths
 
 ### Writing
 - **write_page(title, content)** - Create or overwrite entire page
@@ -70,32 +75,36 @@ You are working on branch: {{branch}}
 
 ## Edit Strategy
 
-1. **Always read first**: Use read_page before editing to see exact content
-2. **Use edit_page for changes**: Find exact text, replace with new text
-3. **Include context**: Make old_text unique by including surrounding lines
-4. **Verify changes**: Read again after editing to confirm
+1. **List pages first**: Use list_pages to see available file paths
+2. **Always read first**: Use read_page before editing to see exact content
+3. **Use edit_page for changes**: Find exact text, replace with new text
+4. **Include context**: Make old_text unique by including surrounding lines
+5. **Verify changes**: Read again after editing to confirm
 
 ## Example Workflow
 
 ```
-# 1. Read the page
-read_page("Python Guide")
+# 1. List pages to see file paths
+list_pages()
 
-# 2. Find specific content
+# 2. Read the page (using file path!)
+read_page("01-home.md")
+
+# 3. Find specific content
 grep_pages("def process_data")
 
-# 3. Make targeted edit
+# 4. Make targeted edit (using file path!)
 edit_page(
-    title="Python Guide",
+    title="01-home.md",
     old_text="def process_data():\\n    pass",
     new_text="def process_data(input):\\n    return validate(input)"
 )
 
-# 4. Verify
-read_page("Python Guide", offset=40, limit=10)
+# 5. Verify
+read_page("01-home.md", offset=40, limit=10)
 
-# 5. Submit
-mark_for_review("Updated process_data function")
+# 6. Submit
+mark_for_review("Updated process_data function in 01-home.md")
 ```
 {LINKS_PROMPT}
 When referencing pages you've edited or read, use page links so users can click through.

@@ -40,12 +40,14 @@ class ThreadManager:
     All thread state is persisted to SQLite via Thread classes.
     """
 
-    def __init__(self, wiki: GitWiki, api_key: str = None):
+    def __init__(self, wiki: GitWiki, api_key: str = None, collab_manager=None):
         self.wiki = wiki  # Main wiki (on main branch)
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+        self.collab_manager = collab_manager  # For checking active editors
 
-        # WebSocket connections: client_id -> WebSocket
-        self.connections: Dict[str, WebSocket] = {}
+        # WebSocket connections: client_id -> List[WebSocket]
+        # Supports multiple windows/tabs per user
+        self.connections: Dict[str, List[WebSocket]] = {}
 
         # Active executors: thread_id -> AgentExecutor
         self.executors: Dict[str, AgentExecutor] = {}
@@ -59,6 +61,23 @@ class ThreadManager:
         # In-memory thread cache: thread_id -> Thread instance
         # Threads are loaded from DB on demand and cached here
         self._thread_cache: Dict[str, Thread] = {}
+
+    def set_collab_manager(self, collab_manager):
+        """Set the collab manager reference (for late binding)."""
+        self.collab_manager = collab_manager
+        # Register for room change events
+        if collab_manager:
+            collab_manager.on_room_change(self._on_collab_room_change)
+
+    async def _on_collab_room_change(self, room_name: str, client_id: str, action: str):
+        """Handle collab room changes - broadcast to all clients."""
+        await self.broadcast({
+            "type": "collab_room_change",
+            "room": room_name,
+            "client_id": client_id,
+            "action": action,  # "join" or "leave"
+            "active_rooms": self.collab_manager.get_active_rooms() if self.collab_manager else {}
+        })
 
     # ─────────────────────────────────────────────────────────────────────────
     # Thread Cache Management
@@ -98,6 +117,60 @@ class ThreadManager:
             if wiki:
                 return wiki
         return self.wiki
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Merge Blocking (Collab Integration)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def get_thread_affected_pages(self, thread_id: str) -> List[str]:
+        """Get list of page paths affected by a thread's changes."""
+        thread = self._get_thread(thread_id)
+        if not thread or not hasattr(thread, 'branch') or not thread.branch:
+            return []
+
+        try:
+            diff_stats = self.wiki.get_diff_stats_by_page("main", thread.branch)
+            return list(diff_stats.keys())
+        except Exception as e:
+            print(f"Error getting affected pages for thread {thread_id}: {e}")
+            return []
+
+    def get_merge_block_status(self, thread_id: str) -> Dict[str, Any]:
+        """
+        Check if a thread's merge is blocked by active editors.
+
+        Returns:
+            {
+                "blocked": bool,
+                "affected_pages": [str],  # pages affected by thread
+                "blocked_pages": {page: [client_ids]},  # pages being edited
+            }
+        """
+        affected_pages = self.get_thread_affected_pages(thread_id)
+
+        if not self.collab_manager:
+            print(f"🔍 Merge status: No collab manager, not blocked")
+            return {
+                "blocked": False,
+                "affected_pages": affected_pages,
+                "blocked_pages": {}
+            }
+
+        # Debug: show active editors (not just viewers)
+        active_editors = self.collab_manager.get_active_editors()
+        print(f"🔍 Merge status for thread {thread_id}:")
+        print(f"   Affected pages: {affected_pages}")
+        print(f"   Active editors: {active_editors}")
+
+        # Check which affected pages have active editors
+        blocked_pages = self.collab_manager.get_editors_for_pages(affected_pages)
+        print(f"   Blocked pages: {blocked_pages}")
+
+        return {
+            "blocked": len(blocked_pages) > 0,
+            "affected_pages": affected_pages,
+            "blocked_pages": {k: list(v) for k, v in blocked_pages.items()}
+        }
 
     def _prepare_thread_callbacks(self, thread: Thread, client_id: str) -> Dict[str, Any]:
         """
@@ -145,7 +218,10 @@ class ThreadManager:
         user = get_or_create_guest(client_id)
         print(f"👤 User connected: {user['id']} (type: {user['type']})")
 
-        self.connections[client_id] = websocket
+        # Add to connections list (supports multiple windows per user)
+        if client_id not in self.connections:
+            self.connections[client_id] = []
+        self.connections[client_id].append(websocket)
 
         # Get or create assistant thread for this user
         # Check cache first to preserve executor's thread reference
@@ -189,36 +265,53 @@ class ThreadManager:
         # Send thread list
         await self._send_thread_list(client_id)
 
-    async def disconnect(self, client_id: str):
+    async def disconnect(self, client_id: str, websocket: WebSocket = None):
         """Clean up connection but keep threads (they persist in DB)."""
-        # Clear client view
-        self.client_view.pop(client_id, None)
-
-        # Remove WebSocket connection
-        self.connections.pop(client_id, None)
+        if client_id in self.connections:
+            if websocket:
+                # Remove specific websocket
+                try:
+                    self.connections[client_id].remove(websocket)
+                except ValueError:
+                    pass
+                # Remove client_id entry if no more connections
+                if not self.connections[client_id]:
+                    del self.connections[client_id]
+                    # Only clear view if all connections closed
+                    self.client_view.pop(client_id, None)
+            else:
+                # Remove all connections for this client
+                del self.connections[client_id]
+                self.client_view.pop(client_id, None)
 
         print(f"👋 User disconnected: {client_id}")
 
     async def send_message(self, client_id: str, message: Dict[str, Any]):
-        """Send message to specific client."""
+        """Send message to all windows/tabs for a specific client."""
         if client_id in self.connections:
-            try:
-                await self.connections[client_id].send_text(json.dumps(message))
-            except Exception as e:
-                if "connection closed" in str(e).lower():
-                    await self.disconnect(client_id)
+            closed_sockets = []
+            for ws in self.connections[client_id]:
+                try:
+                    await ws.send_text(json.dumps(message))
+                except Exception as e:
+                    if "connection closed" in str(e).lower():
+                        closed_sockets.append(ws)
+            # Clean up closed sockets
+            for ws in closed_sockets:
+                await self.disconnect(client_id, ws)
 
     async def broadcast(self, message: Dict[str, Any]):
-        """Broadcast message to ALL connected clients."""
+        """Broadcast message to ALL connected clients (all windows/tabs)."""
         disconnected = []
-        for client_id, websocket in self.connections.items():
-            try:
-                await websocket.send_text(json.dumps(message))
-            except Exception:
-                disconnected.append(client_id)
+        for client_id, websockets in self.connections.items():
+            for ws in websockets:
+                try:
+                    await ws.send_text(json.dumps(message))
+                except Exception:
+                    disconnected.append((client_id, ws))
 
-        for client_id in disconnected:
-            await self.disconnect(client_id)
+        for client_id, ws in disconnected:
+            await self.disconnect(client_id, ws)
 
     async def broadcast_to_thread_viewers(self, thread_id: str, message: Dict[str, Any]):
         """Broadcast message to clients viewing a specific thread."""
@@ -227,7 +320,7 @@ class ThreadManager:
                 await self.send_message(client_id, message)
 
     async def _send_thread_list(self, client_id: str):
-        """Send thread list to client."""
+        """Send thread list to client with merge status for review threads."""
         # Get user's threads (owned + shared)
         user_threads = list_threads_for_user(client_id)
 
@@ -240,11 +333,17 @@ class ThreadManager:
         for t in user_threads + worker_threads:
             if t['id'] not in thread_ids:
                 thread_ids.add(t['id'])
+                # Add merge status for threads in review
+                if t.get('status') == 'review':
+                    merge_status = self.get_merge_block_status(t['id'])
+                    t['merge_blocked'] = merge_status['blocked']
+                    t['blocked_pages'] = merge_status.get('blocked_pages', {})
                 threads.append(t)
 
         await self.send_message(client_id, {
             "type": "thread_list",
-            "threads": threads
+            "threads": threads,
+            "active_rooms": self.collab_manager.get_active_rooms() if self.collab_manager else {}
         })
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -474,6 +573,17 @@ class ThreadManager:
         elif message_type == "get_thread_diff":
             return await self._handle_get_thread_diff(client_id, message_data.get("thread_id"))
 
+        elif message_type == "get_merge_status":
+            thread_id = message_data.get("thread_id")
+            if not thread_id:
+                return {"type": "error", "message": "thread_id required"}
+            status = self.get_merge_block_status(thread_id)
+            return {"type": "merge_status", "thread_id": thread_id, **status}
+
+        elif message_type == "get_active_rooms":
+            rooms = self.collab_manager.get_active_rooms() if self.collab_manager else {}
+            return {"type": "active_rooms", "rooms": rooms}
+
         elif message_type == "reset":
             return await self._handle_reset(client_id)
 
@@ -630,11 +740,18 @@ class ThreadManager:
         }
         history = [system_prompt_msg] + [m.to_dict() for m in thread.messages]
 
+        # Build thread data with current merge status for review threads
+        thread_data = thread.to_dict()
+        if thread.status == ThreadStatus.REVIEW:
+            merge_status = self.get_merge_block_status(thread_id)
+            thread_data['merge_blocked'] = merge_status['blocked']
+            thread_data['blocked_pages'] = merge_status.get('blocked_pages', {})
+
         await self.send_message(client_id, {
             "type": "thread_selected",
             "thread_id": thread_id,
             "thread_type": thread.type.value,
-            "thread": thread.to_dict(),
+            "thread": thread_data,
             "history": history
         })
 
@@ -648,7 +765,7 @@ class ThreadManager:
         return {"type": "success"}
 
     async def _handle_accept_thread(self, client_id: str, thread_id: str) -> Dict[str, Any]:
-        """Accept thread changes."""
+        """Accept thread changes with merge blocking and conflict detection."""
         thread = self._get_thread(thread_id)
         if not thread:
             return {"type": "error", "message": "Thread not found"}
@@ -656,6 +773,28 @@ class ThreadManager:
         if not thread.can_accept():
             return {"type": "error", "message": "Thread cannot be accepted"}
 
+        # Check if merge is blocked by active editors
+        block_status = self.get_merge_block_status(thread_id)
+        if block_status["blocked"]:
+            blocked_pages = list(block_status["blocked_pages"].keys())
+            return {
+                "type": "error",
+                "message": f"Cannot merge: pages being edited: {', '.join(blocked_pages)}",
+                "blocked_pages": block_status["blocked_pages"]
+            }
+
+        # Check for conflicts by trying to merge main into thread first
+        from threads import git_operations as git_ops
+        if hasattr(thread, 'branch') and thread.branch:
+            # Check if main has diverged from when thread was created
+            has_conflicts = git_ops.check_merge_conflicts(self.wiki, thread.branch)
+
+            if has_conflicts:
+                # Trigger conflict resolution flow
+                await self._trigger_conflict_resolution(client_id, thread)
+                return {"type": "success", "result": "resolving_conflicts"}
+
+        # No conflicts, proceed with merge
         result = thread.accept(self.wiki)
 
         if result == AcceptResult.SUCCESS:
@@ -665,6 +804,22 @@ class ThreadManager:
                 "status": "accepted",
                 "message": "Changes merged to main"
             })
+
+            # Invalidate collab rooms for affected pages so clients reload from git
+            affected_pages = self.get_thread_affected_pages(thread_id)
+            if affected_pages:
+                # Tell clients to reload these specific pages
+                await self.broadcast({
+                    "type": "pages_content_changed",
+                    "pages": affected_pages,
+                    "reason": "thread_merged"
+                })
+                print(f"🔄 Notified clients to reload pages: {affected_pages}")
+
+                # Also invalidate room cache
+                if self.collab_manager:
+                    await self.collab_manager.invalidate_rooms(affected_pages)
+                    print(f"🔄 Invalidated collab rooms for: {affected_pages}")
 
             # Clean up executor
             await self._cleanup_executor(thread_id)
@@ -677,15 +832,93 @@ class ThreadManager:
             return {"type": "success", "result": "accepted"}
 
         elif result == AcceptResult.CONFLICT:
-            await self.broadcast({
-                "type": "accept_conflict",
-                "thread_id": thread_id,
-                "message": "Merge conflict detected. Agent is resolving..."
-            })
-            # TODO: Implement conflict resolution
-            return {"type": "success", "result": "conflict"}
+            # Unexpected conflict (should have been caught above)
+            await self._trigger_conflict_resolution(client_id, thread)
+            return {"type": "success", "result": "resolving_conflicts"}
 
         return {"type": "error", "message": "Failed to accept thread"}
+
+    async def _trigger_conflict_resolution(self, client_id: str, thread: Thread) -> None:
+        """Trigger agent-based conflict resolution for a thread."""
+        from threads import git_operations as git_ops
+
+        await self.broadcast({
+            "type": "thread_status",
+            "thread_id": thread.id,
+            "status": "resolving",
+            "message": "Merge conflicts detected. Agent is resolving..."
+        })
+
+        # Merge main into thread to surface conflicts
+        thread_wiki = self._get_wiki_for_thread(thread)
+        error = git_ops.merge_main_into_thread(thread_wiki, thread.branch)
+
+        if error:
+            await self.broadcast({
+                "type": "thread_error",
+                "thread_id": thread.id,
+                "message": f"Failed to start conflict resolution: {error}"
+            })
+            return
+
+        # Send system message to agent to resolve conflicts
+        conflict_message = """MERGE CONFLICT DETECTED
+
+The main branch has been updated since you started working. I've merged main into your branch.
+
+Please review and resolve any conflicts:
+1. Use read_page to check for conflict markers (<<<<<<< HEAD, =======, >>>>>>> main)
+2. Edit the conflicting pages to resolve the conflicts
+3. When all conflicts are resolved, use mark_for_review again
+
+If the conflicts are complex and you need guidance, use request_help to ask the user."""
+
+        # Add system message to thread
+        thread.add_message("system", conflict_message)
+
+        # Resume thread execution with conflict context
+        if hasattr(thread, 'resume_working'):
+            thread.resume_working()
+
+        # Send updated history to all clients viewing this thread
+        for cid, viewed_tid in self.client_view.items():
+            if viewed_tid == thread.id:
+                await self.send_message(cid, {
+                    "type": "assistant_message",
+                    "thread_id": thread.id,
+                    "content": conflict_message,
+                    "is_system": True
+                })
+
+        # Re-run the executor if available
+        executor = self.executors.get(thread.id)
+        if executor:
+            wiki = self._get_wiki_for_thread(thread)
+            callbacks = self._prepare_thread_callbacks(thread, client_id)
+            tools = thread.get_tools(wiki, **callbacks)
+
+            # Run in background
+            task = asyncio.create_task(
+                self._run_executor_with_message(executor, conflict_message, tools, thread, client_id)
+            )
+            self.tasks[thread.id] = task
+
+    async def _run_executor_with_message(
+        self, executor: AgentExecutor, message: str, tools: List, thread: Thread, client_id: str
+    ):
+        """Run executor with a system message to resolve conflicts."""
+        try:
+            # process_turn takes user_message and custom_tools
+            await executor.process_turn(user_message=message, custom_tools=tools)
+        except Exception as e:
+            print(f"Error in conflict resolution: {e}")
+            import traceback
+            traceback.print_exc()
+            await self.send_message(client_id, {
+                "type": "thread_error",
+                "thread_id": thread.id,
+                "message": f"Conflict resolution failed: {e}"
+            })
 
     async def _handle_reject_thread(self, client_id: str, thread_id: str) -> Dict[str, Any]:
         """Reject thread changes."""
@@ -815,8 +1048,8 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = "default"):
                 await thread_manager.send_message(client_id, response)
 
     except WebSocketDisconnect:
-        await thread_manager.disconnect(client_id)
+        await thread_manager.disconnect(client_id, websocket)
     except Exception:
         import traceback
         traceback.print_exc()
-        await thread_manager.disconnect(client_id)
+        await thread_manager.disconnect(client_id, websocket)
