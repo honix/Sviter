@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useChat } from '../../hooks/useChat';
 import { useAppContext } from '../../contexts/AppContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { stringToColor, getInitials } from '../../utils/colors';
 import {
   ChatContainerRoot,
   ChatContainerContent,
@@ -26,29 +27,6 @@ import { ArrowUp, GitBranch, Loader2, AlertCircle, CheckCircle, Check, XCircle }
 import type { Thread } from '../../types/thread';
 import type { MarkdownLinkHandler } from '@/components/ui/markdown';
 import { ThreadChangesView } from '../threads/ThreadChangesView';
-
-// Generate soft pastel color from string hash
-const stringToColor = (str: string): string => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  // Use HSL with high lightness for pastel colors
-  const h = Math.abs(hash % 360);
-  return `hsl(${h}, 70%, 80%)`;
-};
-
-// Get initials from user ID
-const getInitials = (userId: string | undefined): string => {
-  if (!userId) return 'U';
-  // For guests (guest-xxxxx), use first 2 chars of the ID part
-  if (userId.startsWith('guest-')) {
-    return userId.slice(6, 8).toUpperCase();
-  }
-  // For OAuth users, assume format might be full name or email
-  // Just use first 2 chars for now
-  return userId.slice(0, 2).toUpperCase();
-};
 
 interface ChatInterfaceProps {
   threadId: string;  // Always required - assistant or worker thread ID

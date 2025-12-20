@@ -4,6 +4,8 @@ from storage import GitWiki, PageNotFoundException, GitWikiException
 from threads.manager import websocket_endpoint, initialize_thread_manager
 from threads import git_operations as git_ops
 from api.threads import router as threads_router
+from collab import initialize_collab_manager
+from collab import manager as collab_module  # Access collab_manager at runtime
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uvicorn
@@ -76,25 +78,54 @@ async def startup_event():
 
         # Initialize thread manager with wiki instance
         initialize_thread_manager(wiki, OPENROUTER_API_KEY)
+
+        # Initialize collaborative editing manager
+        collab_mgr = initialize_collab_manager(wiki)
+        await collab_mgr.start()
+        print("🤝 Collaborative editing manager started")
     except Exception as e:
         print(f"❌ Error loading wiki repository: {e}")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Clean up worktrees on server shutdown"""
+    """Clean up worktrees and collab manager on server shutdown"""
     try:
+        # Stop collaborative editing manager
+        if collab_module.collab_manager:
+            await collab_module.collab_manager.stop()
+            print("🤝 Collaborative editing manager stopped")
+
         git_ops.cleanup_orphaned_worktrees(wiki)
         print("🧹 Worktrees cleaned up")
     except Exception as e:
-        print(f"⚠️ Error cleaning up worktrees: {e}")
+        print(f"⚠️ Error cleaning up: {e}")
 
 
-# WebSocket endpoint
+# WebSocket endpoint for collaborative editing (MUST come before general /ws/{client_id})
+@app.websocket("/ws/collab/{room_name:path}")
+async def collab_websocket_handler(websocket: WebSocket, room_name: str):
+    """WebSocket endpoint for collaborative editing with Yjs.
+
+    Clients connect to a room (page path) to collaboratively edit.
+    Uses pycrdt-websocket for Yjs document synchronization.
+    """
+    if not collab_module.collab_manager:
+        await websocket.close(code=1011, reason="Collaboration manager not initialized")
+        return
+
+    # Extract client_id from query params if provided
+    client_id = websocket.query_params.get("userId", "anonymous")
+
+    await collab_module.collab_manager.connect(websocket, client_id, room_name)
+
+
+# WebSocket endpoint for chat/threads
 @app.websocket("/ws/{client_id}")
 async def websocket_handler(websocket: WebSocket, client_id: str):
     """Main WebSocket endpoint for chat communication"""
     await websocket_endpoint(websocket, client_id)
+
 
 # Health check endpoint
 @app.get("/health")

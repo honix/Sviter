@@ -1,28 +1,28 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAppContext } from '../../contexts/AppContext';
+import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
-import { AlertCircle, FileText, GitBranch, Code, Eye } from 'lucide-react';
+import { AlertCircle, FileText, GitBranch, Code, Eye, Cloud, CloudOff, CloudUpload } from 'lucide-react';
 import { RevisionHistory } from '../revisions/RevisionHistory';
 import type { PageRevision } from '../../types/page';
-import { ProseMirrorEditor, type ProseMirrorEditorHandle } from '../editor/ProseMirrorEditor';
-import { EditorToolbar } from '../editor/EditorToolbar';
+import { ProseMirrorEditor } from '../editor/ProseMirrorEditor';
+import { CollaborativeEditor, type CollabStatus } from '../editor/CollaborativeEditor';
+import { CollaborativeCodeMirrorEditor } from '../editor/CollaborativeCodeMirrorEditor';
 import { CodeMirrorEditor } from '../editor/CodeMirrorEditor';
 import { CodeMirrorDiffView } from '../editor/CodeMirrorDiffView';
+import { stringToColor, getInitials } from '../../utils/colors';
 
 const CenterPanel: React.FC = () => {
   const { state, actions } = useAppContext();
   const { currentPage, viewMode, isLoading, error, currentBranch, pageUpdateCounter } = state;
-  const { setViewMode, updatePage } = actions;
+  const { setViewMode } = actions;
+  const { userId } = useAuth();
 
-  const [editContent, setEditContent] = useState('');
-  const [editContentJson, setEditContentJson] = useState<any>(null);
   const [viewingRevision, setViewingRevision] = useState<PageRevision | null>(null);
   const [viewingRevisionContent, setViewingRevisionContent] = useState<string | null>(null);
-  const editorRef = useRef<ProseMirrorEditorHandle>(null);
-  const [editorView, setEditorView] = useState<any>(null);
 
   // For main branch: 'view' | 'edit' | 'history'
   // For other branches: 'diff' | 'history'
@@ -32,13 +32,72 @@ const CenterPanel: React.FC = () => {
   // Format toggle only for main branch: 'formatted' | 'raw'
   const [formatMode, setFormatMode] = useState<'formatted' | 'raw'>('formatted');
 
+  // Collaborative editing status (from editor components)
+  const [collabStatus, setCollabStatus] = useState<CollabStatus | null>(null);
+
+  // Handle collab status changes from editors
+  const handleCollabStatusChange = useCallback((status: CollabStatus) => {
+    setCollabStatus(status);
+  }, []);
+
+  // Status bar component for collaborative editing
+  const CollabStatusBar = () => {
+    if (!collabStatus) return null;
+
+    const { connectionStatus, remoteUsers, saveStatus } = collabStatus;
+    const isConnected = connectionStatus === 'connected';
+    const currentUserColor = userId ? stringToColor(userId) : '#888';
+    const currentUserInitials = userId ? getInitials(userId) : '?';
+
+    return (
+      <div className="flex items-center gap-2">
+        {/* All users avatars (current + remote) */}
+        <div className="flex -space-x-1.5">
+          {/* Current user */}
+          <div
+            className="w-5 h-5 rounded-full border-2 border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm ring-1 ring-primary/30"
+            style={{ backgroundColor: currentUserColor }}
+            title="You"
+          >
+            {currentUserInitials}
+          </div>
+          {/* Remote users */}
+          {remoteUsers.slice(0, 3).map((user) => (
+            <div
+              key={user.id}
+              className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm"
+              style={{ backgroundColor: user.color }}
+              title={user.name}
+            >
+              {user.initials}
+            </div>
+          ))}
+          {remoteUsers.length > 3 && (
+            <div className="w-5 h-5 rounded-full border border-background bg-muted flex items-center justify-center text-[9px] font-medium shadow-sm">
+              +{remoteUsers.length - 3}
+            </div>
+          )}
+        </div>
+
+        {/* Cloud status icon */}
+        {!isConnected ? (
+          <span title="Connecting..."><CloudOff className="h-4 w-4 text-muted-foreground animate-pulse" /></span>
+        ) : saveStatus === 'saving' ? (
+          <span title="Saving..."><CloudUpload className="h-4 w-4 text-blue-500 animate-pulse" /></span>
+        ) : saveStatus === 'dirty' ? (
+          <span title="Unsaved changes"><CloudUpload className="h-4 w-4 text-yellow-500" /></span>
+        ) : (
+          <span title="Saved"><Cloud className="h-4 w-4 text-green-500" /></span>
+        )}
+      </div>
+    );
+  };
+
   const isMainBranch = currentBranch === 'main';
 
-  // Sync edit content when page changes
+  // Reset revision view when page changes
   useEffect(() => {
     if (currentPage) {
-      setEditContent(currentPage.content);
-      setEditContentJson(currentPage.content_json);
       setViewingRevision(null);
       setViewingRevisionContent(null);
     }
@@ -54,40 +113,6 @@ const CenterPanel: React.FC = () => {
       }
     }
   }, [viewMode, isMainBranch]);
-
-  const handleEditorViewReady = (view: any) => {
-    setEditorView(view);
-  };
-
-  const handleSave = async () => {
-    if (currentPage) {
-      await updatePage(currentPage.title, {
-        content: editContent,
-        content_json: editContentJson,
-      });
-    }
-    setViewMode('view');
-    setMainTab('view');
-  };
-
-  const handleCancel = () => {
-    if (currentPage) {
-      setEditContent(currentPage.content);
-      setEditContentJson(currentPage.content_json);
-    }
-    setViewMode('view');
-    setMainTab('view');
-  };
-
-  const handleEditorChange = (docJson: any, markdown: string) => {
-    setEditContentJson(docJson);
-    setEditContent(markdown);
-  };
-
-  const handleCodeMirrorChange = (content: string) => {
-    setEditContent(content);
-    setEditContentJson(null);
-  };
 
   const handleRevisionSelect = async (revision: PageRevision) => {
     setViewingRevision(revision);
@@ -179,22 +204,12 @@ const CenterPanel: React.FC = () => {
     return (
       <div className="h-full bg-background flex flex-col">
         {/* Header */}
-        <div className="border-b border-border p-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-foreground">
-              {currentPage.title}
-            </h1>
-            {viewMode === 'edit' && (
-              <div className="flex gap-2">
-                <Button onClick={handleSave} size="sm">
-                  Save
-                </Button>
-                <Button onClick={handleCancel} variant="outline" size="sm">
-                  Cancel
-                </Button>
-              </div>
-            )}
-          </div>
+        <div className="border-b border-border p-4 flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-foreground">
+            {currentPage.title}
+          </h1>
+          {/* Show collab status in View and Edit modes */}
+          {(mainTab === 'view' || mainTab === 'edit') && <CollabStatusBar />}
         </div>
 
         {/* Content Area with Tabs */}
@@ -254,41 +269,69 @@ const CenterPanel: React.FC = () => {
               <div className="flex-1 overflow-auto min-h-0">
                 {viewingRevision && viewingRevisionContent === null ? (
                   <div className="p-4 text-muted-foreground">Loading revision...</div>
-                ) : formatMode === 'raw' ? (
-                  <CodeMirrorEditor
-                    content={viewingRevisionContent ?? currentPage.content ?? ''}
-                    editable={false}
-                    className="h-full"
-                  />
+                ) : viewingRevision ? (
+                  /* Non-collaborative viewer for historical revisions */
+                  formatMode === 'raw' ? (
+                    <CodeMirrorEditor
+                      content={viewingRevisionContent ?? ''}
+                      editable={false}
+                      className="h-full"
+                    />
+                  ) : (
+                    <ProseMirrorEditor
+                      key={`view-${currentPage.title}-${viewingRevision.sha}`}
+                      initialContent={viewingRevisionContent ?? ''}
+                      editable={false}
+                      className="h-full"
+                    />
+                  )
                 ) : (
-                  <ProseMirrorEditor
-                    key={`view-${currentPage.title}-${viewingRevision?.sha || 'current'}`}
-                    initialContent={viewingRevisionContent ?? currentPage.content ?? ''}
-                    editable={false}
-                    className="h-full"
-                  />
+                  /* Collaborative viewer for current content - shows real-time updates */
+                  formatMode === 'raw' ? (
+                    <CollaborativeCodeMirrorEditor
+                      key={`collab-cm-view-${currentPage.path}`}
+                      pagePath={currentPage.path}
+                      pageTitle={currentPage.title}
+                      initialContent={currentPage.content || ''}
+                      editable={false}
+                      onCollabStatusChange={handleCollabStatusChange}
+                      className="h-full"
+                    />
+                  ) : (
+                    <CollaborativeEditor
+                      key={`collab-view-${currentPage.path}`}
+                      pagePath={currentPage.path}
+                      pageTitle={currentPage.title}
+                      initialContent={currentPage.content || ''}
+                      editable={false}
+                      onCollabStatusChange={handleCollabStatusChange}
+                      className="h-full"
+                    />
+                  )
                 )}
               </div>
             </TabsContent>
 
             <TabsContent value="edit" className="flex-1 overflow-hidden mt-0 flex flex-col">
-              {formatMode === 'formatted' && <EditorToolbar editorView={editorView} />}
               <div className="flex-1 overflow-hidden min-h-0">
                 {formatMode === 'raw' ? (
-                  <CodeMirrorEditor
-                    content={editContent}
-                    editable={true}
-                    onChange={handleCodeMirrorChange}
+                  /* Collaborative CodeMirror editor for raw markdown */
+                  <CollaborativeCodeMirrorEditor
+                    key={`collab-cm-${currentPage.path}`}
+                    pagePath={currentPage.path}
+                    pageTitle={currentPage.title}
+                    initialContent={currentPage.content || ''}
+                    onCollabStatusChange={handleCollabStatusChange}
                     className="h-full"
                   />
                 ) : (
-                  <ProseMirrorEditor
-                    key={`edit-${currentPage.title}`}
-                    ref={editorRef}
+                  /* Collaborative ProseMirror editor for formatted view */
+                  <CollaborativeEditor
+                    key={`collab-${currentPage.path}`}
+                    pagePath={currentPage.path}
+                    pageTitle={currentPage.title}
                     initialContent={currentPage.content || ''}
-                    editable={true}
-                    onChange={handleEditorChange}
-                    onViewReady={handleEditorViewReady}
+                    onCollabStatusChange={handleCollabStatusChange}
                     className="h-full"
                   />
                 )}
