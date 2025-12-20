@@ -40,7 +40,7 @@ class WikiTool:
 
 def _read_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
     """Read a wiki page with line numbers"""
-    title = args.get("title", "")
+    title = args.get("path", "") or args.get("title", "")  # Support both for compatibility
     offset = args.get("offset", 1)  # 1-indexed
     limit = args.get("limit", 2000)
 
@@ -50,7 +50,7 @@ def _read_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
         limit = int(limit)
 
     if not title:
-        return "Error: Page title is required"
+        return "Error: Page path is required"
 
     try:
         page = wiki.get_page(title)
@@ -202,13 +202,13 @@ def _list_pages(wiki: GitWiki, args: Dict[str, Any]) -> str:
 
 def _write_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
     """Create or completely overwrite a wiki page"""
-    title = args.get("title", "")
+    title = args.get("path", "") or args.get("title", "")  # Support both for compatibility
     content = args.get("content")
     author = args.get("author", "AI Agent")
     tags = args.get("tags", [])
 
     if not title:
-        return "Error: Page title is required"
+        return "Error: Page path is required"
     if content is None:
         return "Error: Page content is required"
 
@@ -241,14 +241,14 @@ def _write_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
 
 def _edit_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
     """Edit page by replacing exact text match (Claude Code style)"""
-    title = args.get("title", "")
+    title = args.get("path", "") or args.get("title", "")  # Support both for compatibility
     old_text = args.get("old_text", "")
     new_text = args.get("new_text", "")
     replace_all = args.get("replace_all", False)
     author = args.get("author", "AI Agent")
 
     if not title:
-        return "Error: Page title is required"
+        return "Error: Page path is required"
     if not old_text:
         return "Error: old_text is required - the exact text to find and replace"
     if new_text is None:
@@ -324,7 +324,7 @@ Either:
 
 def _insert_at_line(wiki: GitWiki, args: Dict[str, Any]) -> str:
     """Insert content at a specific line number"""
-    title = args.get("title", "")
+    title = args.get("path", "") or args.get("title", "")  # Support both for compatibility
     line = args.get("line", 1)
     content = args.get("content", "")
     author = args.get("author", "AI Agent")
@@ -333,7 +333,7 @@ def _insert_at_line(wiki: GitWiki, args: Dict[str, Any]) -> str:
         line = int(line)
 
     if not title:
-        return "Error: Page title is required"
+        return "Error: Page path is required"
     if not content:
         return "Error: Content to insert is required"
 
@@ -510,11 +510,11 @@ IMPORTANT: Use the file path (e.g., 'home.md', 'agents/index.md') not display ti
                 parameters={
                     "type": "object",
                     "properties": {
-                        "title": {"type": "string", "description": "Page file path (e.g., 'home.md', 'agents/index.md')"},
+                        "path": {"type": "string", "description": "Page file path (e.g., 'home.md', 'agents/index.md')"},
                         "offset": {"type": "integer", "description": "Starting line number (1-indexed). Omit to start from beginning."},
                         "limit": {"type": "integer", "description": "Max lines to return (default: 2000)."}
                     },
-                    "required": ["title"]
+                    "required": ["path"]
                 },
                 function=lambda args, w=wiki: _read_page(w, args)
             ),
@@ -524,7 +524,7 @@ IMPORTANT: Use the file path (e.g., 'home.md', 'agents/index.md') not display ti
 
 Features:
 - Regex pattern matching (case-insensitive by default)
-- Shows page title, line number, and matching content
+- Shows page path, line number, and matching content
 - Optional context lines before/after matches
 - Useful for finding where content is discussed""",
                 parameters={
@@ -541,7 +541,7 @@ Features:
             ),
             WikiTool(
                 name="glob_pages",
-                description="""Find pages by title pattern using glob-style matching.
+                description="""Find pages by path pattern using glob-style matching.
 
 Patterns:
 - * matches any characters within a path segment
@@ -555,7 +555,7 @@ Examples:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "pattern": {"type": "string", "description": "Glob pattern to match page titles/paths"},
+                        "pattern": {"type": "string", "description": "Glob pattern to match page paths"},
                         "limit": {"type": "integer", "description": "Max results to return (default: 50)"}
                     },
                     "required": ["pattern"]
@@ -566,7 +566,7 @@ Examples:
                 name="list_pages",
                 description="""List all wiki pages (sorted alphabetically).
 
-Use this to get an overview of wiki content. For searching specific content, use grep_pages. For matching title patterns, use glob_pages.
+Use this to get an overview of wiki content. For searching specific content, use grep_pages. For matching path patterns, use glob_pages.
 
 TIP: Read agents/index.md first for page descriptions and navigation.""",
                 parameters={
@@ -600,11 +600,11 @@ After creating pages, update agents/index.md to add navigation entry.""",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "title": {"type": "string", "description": "Page file path (e.g., 'home.md', 'agents/index.md')"},
+                        "path": {"type": "string", "description": "Page file path (e.g., 'home.md', 'agents/index.md')"},
                         "content": {"type": "string", "description": "Complete page content in markdown format (no frontmatter)"},
                         "author": {"type": "string", "description": "Author name for git commit (default: 'AI Agent')"}
                     },
-                    "required": ["title", "content"]
+                    "required": ["path", "content"]
                 },
                 function=lambda args, w=wiki: _write_page(w, args)
             ),
@@ -628,13 +628,13 @@ Tips:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "title": {"type": "string", "description": "Page file path (e.g., 'home.md', 'agents/index.md')"},
+                        "path": {"type": "string", "description": "Page file path (e.g., 'home.md', 'agents/index.md')"},
                         "old_text": {"type": "string", "description": "Exact text to find and replace (must be unique unless replace_all=true)"},
                         "new_text": {"type": "string", "description": "Replacement text"},
                         "replace_all": {"type": "boolean", "description": "Replace all occurrences (default: false - requires unique match)"},
                         "author": {"type": "string", "description": "Author name for git commit (default: 'AI Agent')"}
                     },
-                    "required": ["title", "old_text", "new_text"]
+                    "required": ["path", "old_text", "new_text"]
                 },
                 function=lambda args, w=wiki: _edit_page(w, args)
             ),
@@ -652,12 +652,12 @@ Note: Line numbers are 1-indexed (first line is 1).""",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "title": {"type": "string", "description": "Page file path (e.g., 'home.md', 'agents/skills.md')"},
+                        "path": {"type": "string", "description": "Page file path (e.g., 'home.md', 'agents/skills.md')"},
                         "line": {"type": "integer", "description": "Line number to insert before (1-indexed). Use line > total_lines to append."},
                         "content": {"type": "string", "description": "Content to insert (can be multiple lines)"},
                         "author": {"type": "string", "description": "Author name for commit (default: 'AI Agent')"}
                     },
-                    "required": ["title", "line", "content"]
+                    "required": ["path", "line", "content"]
                 },
                 function=lambda args, w=wiki: _insert_at_line(w, args)
             )

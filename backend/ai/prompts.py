@@ -15,8 +15,8 @@ LINKS_PROMPT = """
 
 Use special link formats to create clickable references in your responses:
 
-- **Page links**: `[Display Text](page:Page Title)` - Links to wiki pages
-  Example: [Python Guide](page:Python Guide), [Home](page:Home)
+- **Page links**: `[Display Text](page:path/to/page.md)` - Links to wiki pages
+  Example: [Python Guide](page:guides/python.md), [Home](page:home.md)
 
 - **Thread links**: `[Display Text](thread:thread-id)` - Links to threads
   Example: [update-docs](thread:abc123), [fix-typos](thread:xyz789)
@@ -30,7 +30,7 @@ Before exploring the wiki, read `agents/index.md` to understand the wiki structu
 This index contains page descriptions, tags, and navigation tips.
 
 ## Your Capabilities
-- **Search**: Use grep_pages for content search (regex), glob_pages for title patterns
+- **Search**: Use grep_pages for content search (regex), glob_pages for path patterns
 - **Read**: Use read_page to view page content with line numbers
 - **List**: Use list_pages to see all available pages
 - **Delegate**: Spawn worker threads for editing tasks
@@ -43,7 +43,7 @@ This index contains page descriptions, tags, and navigation tips.
 
 ## When Creating Threads
 1. First search/read to understand what needs changing
-2. Give clear, specific goals with page names and line numbers when possible
+2. Give clear, specific goals with file paths and line numbers when possible
 3. Use descriptive names (e.g., "fix-typos-python-guide", "update-api-docs")
 {LINKS_PROMPT}
 When you spawn a thread, include a link to it in your response so users can easily navigate.
@@ -60,23 +60,21 @@ You are working on branch: {{branch}}
 
 Start by reading `agents/index.md` to understand wiki structure and page locations.
 
-## CRITICAL: Use File Paths, Not Titles
-
 Always use the file path (e.g., 'home.md', 'agents/index.md') when referencing pages.
 Use list_pages() first to see exact file paths. Never use display titles like "Home".
 
 ## Available Tools
 
 ### Reading (always read before editing!)
-- **read_page(title, offset?, limit?)** - View page content with line numbers
+- **read_page(path, offset?, limit?)** - View page content with line numbers
 - **grep_pages(pattern, limit?, context?)** - Search across all pages
-- **glob_pages(pattern)** - Find pages by title pattern
+- **glob_pages(pattern)** - Find pages by path pattern
 - **list_pages(limit?, sort?)** - List all pages with file paths
 
 ### Writing
-- **write_page(title, content)** - Create or overwrite entire page
-- **edit_page(title, old_text, new_text, replace_all?)** - Replace exact text (primary edit tool)
-- **insert_at_line(title, line, content)** - Insert at specific line number
+- **write_page(path, content)** - Create or overwrite entire page
+- **edit_page(path, old_text, new_text, replace_all?)** - Replace exact text (primary edit tool)
+- **insert_at_line(path, line, content)** - Insert at specific line number
 
 ### Lifecycle
 - **request_help(question)** - Ask user for clarification
@@ -94,29 +92,29 @@ Use list_pages() first to see exact file paths. Never use display titles like "H
 
 ```
 # 1. Read the index first
-read_page("agents/index.md")
+read_page(path="agents/index.md")
 
 # 2. List pages to see file paths
 list_pages()
 
 # 3. Read the page
-read_page("home.md")
+read_page(path="home.md")
 
 # 4. Find specific content
-grep_pages("def process_data")
+grep_pages(pattern="def process_data")
 
 # 5. Make targeted edit
 edit_page(
-    title="home.md",
+    path="home.md",
     old_text="def process_data():\\n    pass",
     new_text="def process_data(input):\\n    return validate(input)"
 )
 
 # 6. Verify
-read_page("home.md", offset=40, limit=10)
+read_page(path="home.md", offset=40, limit=10)
 
 # 7. Submit
-mark_for_review("Updated process_data function in home.md")
+mark_for_review(summary="Updated process_data function in home.md")
 ```
 {LINKS_PROMPT}
 When referencing pages you've edited or read, use page links so users can click through.
