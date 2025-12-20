@@ -285,6 +285,59 @@ export function createCollabSession(
 }
 
 /**
+ * Initialize Y.Text content safely, waiting for WebSocket sync to complete.
+ * This prevents race conditions where multiple clients insert content concurrently.
+ *
+ * @param session - The collaborative session
+ * @param initialContent - Content to insert if Y.Text is empty after sync
+ * @returns Promise that resolves when initialization is complete
+ */
+export function initializeContent(
+  session: CollabSession,
+  initialContent: string
+): Promise<void> {
+  return new Promise((resolve) => {
+    const yText = getSharedText(session.doc);
+    const provider = session.provider;
+
+    // If already synced, check and initialize immediately
+    if (provider.synced) {
+      if (yText.length === 0 && initialContent) {
+        yText.insert(0, initialContent);
+        console.log(`Initialized content for ${session.pagePath} (already synced)`);
+      }
+      resolve();
+      return;
+    }
+
+    // Wait for sync event
+    const handleSync = (synced: boolean) => {
+      if (synced) {
+        provider.off('sync', handleSync);
+        // After sync, check if content needs initialization
+        if (yText.length === 0 && initialContent) {
+          yText.insert(0, initialContent);
+          console.log(`Initialized content for ${session.pagePath} (after sync)`);
+        }
+        resolve();
+      }
+    };
+
+    provider.on('sync', handleSync);
+
+    // Fallback timeout in case sync event doesn't fire
+    setTimeout(() => {
+      provider.off('sync', handleSync);
+      if (yText.length === 0 && initialContent) {
+        yText.insert(0, initialContent);
+        console.log(`Initialized content for ${session.pagePath} (timeout fallback)`);
+      }
+      resolve();
+    }, 2000);
+  });
+}
+
+/**
  * Get the Yjs XmlFragment for ProseMirror content.
  * This is the shared type that y-prosemirror binds to.
  * @deprecated Use getSharedText() for new code - both editors should use the same Y.Text

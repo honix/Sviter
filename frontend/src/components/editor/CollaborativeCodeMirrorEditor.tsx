@@ -15,7 +15,7 @@ import { yCollab } from 'y-codemirror.next';
 import * as Y from 'yjs';
 import type { Awareness } from 'y-protocols/awareness';
 
-import { createCollabSession, destroyCollabSession, getSharedText, type CollabUser, type ConnectionStatus, type SaveStatus } from '../../services/collab';
+import { createCollabSession, destroyCollabSession, getSharedText, initializeContent, type CollabUser, type ConnectionStatus, type SaveStatus } from '../../services/collab';
 import { useAuth } from '../../contexts/AuthContext';
 
 import './codemirror-collab.css';
@@ -217,12 +217,8 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
     const yText = getSharedText(session.doc);
     yTextRef.current = yText;
 
-    // Initialize content after a short delay to allow for sync
-    setTimeout(() => {
-      if (yText.length === 0 && initialContent) {
-        yText.insert(0, initialContent);
-      }
-    }, 100);
+    // Initialize content safely (waits for WebSocket sync to prevent race conditions)
+    initializeContent(session, initialContent);
 
     // Detect dark mode
     const isDarkMode = document.documentElement.classList.contains('dark');
