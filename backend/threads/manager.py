@@ -238,12 +238,12 @@ class ThreadManager:
         # Set initial view to assistant thread
         self.client_view[client_id] = assistant.id
 
+        # Force reload messages from DB BEFORE starting executor
+        assistant.reload_messages()
+
         # Start executor for assistant if not exists
         if assistant.id not in self.executors:
             await self._start_executor(assistant, client_id)
-
-        # Force reload messages from DB to ensure we have latest
-        assistant.reload_messages()
 
         # Build history with system prompt at the start
         system_prompt_msg = {
@@ -412,6 +412,11 @@ class ThreadManager:
 
         if not result["success"]:
             return False
+
+        # Restore conversation history from thread's persisted messages
+        if thread.messages:
+            executor.restore_history([m.to_dict() for m in thread.messages])
+            print(f"📜 Restored {len(thread.messages)} messages for thread {thread.id}")
 
         self.executors[thread.id] = executor
         return True
@@ -724,12 +729,12 @@ class ThreadManager:
 
         self.client_view[client_id] = thread_id
 
+        # Force reload messages from DB BEFORE starting executor
+        thread.reload_messages()
+
         # Start executor if needed (for threads loaded from DB)
         if thread.id not in self.executors and not thread.is_finished():
             await self._start_executor(thread, client_id)
-
-        # Force reload messages from DB to ensure we have latest
-        thread.reload_messages()
 
         # Build history with system prompt at the start
         system_prompt_msg = {

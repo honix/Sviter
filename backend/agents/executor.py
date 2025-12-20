@@ -301,6 +301,45 @@ class AgentExecutor:
         """Get current conversation history"""
         return self.conversation_history.copy()
 
+    def restore_history(self, messages: List[Dict[str, Any]]) -> None:
+        """
+        Restore conversation history from previous messages.
+
+        Used when reconnecting to an existing thread to give the LLM
+        context about previous conversation.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content' keys.
+                      Only user and assistant messages are restored.
+                      Tool calls are skipped (assistant responses summarize them).
+        """
+        for msg in messages:
+            role = msg.get('role', '')
+            content = msg.get('content', '')
+
+            # Skip empty messages and tool calls
+            # Tool calls are implementation details - assistant responses summarize them
+            if not content or role == 'tool_call':
+                continue
+
+            # Map roles to LLM-compatible format
+            if role == 'user':
+                self.conversation_history.append({
+                    "role": "user",
+                    "content": content
+                })
+            elif role == 'assistant':
+                self.conversation_history.append({
+                    "role": "assistant",
+                    "content": content
+                })
+            elif role == 'system':
+                # System messages from conflict resolution etc.
+                self.conversation_history.append({
+                    "role": "user",
+                    "content": f"[System] {content}"
+                })
+
     async def end_session(self, call_on_finish: bool = True) -> Dict[str, Any]:
         """
         End the session and clean up.

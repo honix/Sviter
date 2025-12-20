@@ -158,6 +158,29 @@ class ClaudeSDKAdapter(LLMAdapter):
             tools=mcp_tools
         )
 
+    def _format_history_as_transcript(self, conversation_history: List[Dict[str, Any]]) -> str:
+        """
+        Format conversation history as a natural transcript.
+
+        Uses User:/Assistant: format so it reads like native conversation history.
+        """
+        history_parts = []
+        for msg in conversation_history:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            if not content or role == "system":
+                continue
+
+            if role == "user":
+                history_parts.append(f"User: {content}")
+            elif role == "assistant":
+                history_parts.append(f"Assistant: {content}")
+
+        return "\n".join(history_parts)
+
     async def process_conversation(
         self,
         user_message: str,
@@ -171,11 +194,12 @@ class ClaudeSDKAdapter(LLMAdapter):
         Process conversation with Claude SDK using persistent client.
 
         The SDK maintains conversation history automatically across calls.
+        When creating a new client (after restart), injects previous history as context.
         IMPORTANT: Uses allowed_tools to restrict Claude to ONLY wiki MCP tools.
 
         Args:
             user_message: User's message/query
-            conversation_history: Previous messages (includes system prompt) - used for system prompt extraction only
+            conversation_history: Previous messages (includes system prompt)
             tools: List of WikiTool objects
             max_turns: Maximum conversation turns
             on_message: Callback for streaming (type, content)
@@ -187,6 +211,7 @@ class ClaudeSDKAdapter(LLMAdapter):
         print(f"🔵 ClaudeSDKAdapter.process_conversation called with {len(tools)} tools")
         print(f"🔵 User message: {user_message[:50]}...")
         print(f"🔵 Client connected: {self._client_connected}")
+        print(f"🔵 Conversation history length: {len(conversation_history)}")
 
         # Extract system prompt from conversation history
         system_prompt = self.system_prompt
@@ -201,6 +226,20 @@ class ClaudeSDKAdapter(LLMAdapter):
 
         # Create MCP server with tools (uses stored callback)
         self._create_mcp_server(tools)
+
+        # Check if we need to inject history context (new client with existing history)
+        needs_history_injection = not self._client and len(conversation_history) > 1
+
+        # If resuming, add history to system prompt
+        if needs_history_injection:
+            history_transcript = self._format_history_as_transcript(conversation_history)
+            if history_transcript:
+                system_prompt = f"""{system_prompt}
+
+<conversation_history>
+{history_transcript}
+</conversation_history>"""
+                print(f"🔵 Injected {len(conversation_history)} messages into system prompt")
 
         try:
             # Create client if not exists (first call)
