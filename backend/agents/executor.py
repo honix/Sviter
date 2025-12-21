@@ -12,6 +12,7 @@ from ai.adapters import OpenRouterAdapter, LLMAdapter
 from ai.adapters.claude_sdk import ClaudeSDKAdapter, CLAUDE_SDK_AVAILABLE
 from .config import GlobalAgentConfig
 from config import LLM_MODEL, LLM_PROVIDER
+from utils import wrap_system_notification
 
 
 class ExecutionResult:
@@ -337,7 +338,7 @@ class AgentExecutor:
                 # System messages from conflict resolution etc.
                 self.conversation_history.append({
                     "role": "user",
-                    "content": f"[System] {content}"
+                    "content": wrap_system_notification(content)
                 })
 
     async def end_session(self, call_on_finish: bool = True) -> Dict[str, Any]:

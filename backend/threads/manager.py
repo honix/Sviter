@@ -19,6 +19,7 @@ import os
 from config import LLM_MODEL, LLM_PROVIDER
 from storage import GitWiki
 from agents.executor import AgentExecutor
+from utils import wrap_system_notification
 from threads.base import Thread, ThreadStatus
 from threads.assistant import AssistantThread
 from threads.worker import WorkerThread
@@ -525,7 +526,7 @@ class ThreadManager:
                         "content": prompt_message
                     })
                     thread.set_generating(True)
-                    result = await executor.process_turn(prompt_message, custom_tools=tools)
+                    result = await executor.process_turn(wrap_system_notification(prompt_message), custom_tools=tools)
                     thread.set_generating(False)
                     continue
 
@@ -670,7 +671,7 @@ class ThreadManager:
                 "role": "system",
                 "content": prompt_message
             })
-            result = await executor.process_turn(prompt_message, custom_tools=tools)
+            result = await executor.process_turn(wrap_system_notification(prompt_message), custom_tools=tools)
             action = thread.get_post_turn_action(result.status)
 
         thread.set_generating(False)
@@ -904,7 +905,7 @@ If the conflicts are complex and you need guidance, use request_help to ask the 
 
             # Run in background
             task = asyncio.create_task(
-                self._run_executor_with_message(executor, conflict_message, tools, thread, client_id)
+                self._run_executor_with_message(executor, wrap_system_notification(conflict_message), tools, thread, client_id)
             )
             self.tasks[thread.id] = task
 
