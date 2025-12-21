@@ -175,6 +175,7 @@ class OpenRouterAdapter(LLMAdapter):
             tool_calls_raw = message.tool_calls or []
 
             non_system_messages.append(message)
+            conversation_history.append(message)  # Persist for next turn
 
             if content and on_message:
                 await on_message("assistant", content)
@@ -215,11 +216,13 @@ class OpenRouterAdapter(LLMAdapter):
                         "iteration": iteration
                     })
 
-                non_system_messages.append({
+                tool_result_msg = {
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "content": str(result)
-                })
+                }
+                non_system_messages.append(tool_result_msg)
+                conversation_history.append(tool_result_msg)  # Persist for next turn
 
         return ConversationResult(
             status='completed',

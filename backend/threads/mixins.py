@@ -322,12 +322,10 @@ class ReviewMixin:
 
         def on_request_help(question: str):
             self.request_help_status()
-            self.add_message("system", f"Requesting help: {question}")
             asyncio.create_task(on_status_change("need_help", question))
 
         def on_mark_for_review(summary: str):
             self.mark_for_review(summary)
-            self.add_message("system", f"Marked for review: {summary}")
             asyncio.create_task(on_status_change("review", summary))
 
         return {

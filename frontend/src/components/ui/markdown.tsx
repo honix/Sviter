@@ -1,14 +1,14 @@
 import { cn } from "@/lib/utils"
 import { marked } from "marked"
-import { memo, useId, useMemo, useCallback } from "react"
-import ReactMarkdown, { Components } from "react-markdown"
+import { memo, useId, useMemo } from "react"
+import ReactMarkdown, { type Components } from "react-markdown"
 import remarkBreaks from "remark-breaks"
 import remarkGfm from "remark-gfm"
 import { CodeBlock, CodeBlockCode } from "./code-block"
 
 export type MarkdownLinkHandler = {
   onThreadClick?: (threadId: string) => void
-  onPageClick?: (pageTitle: string) => void
+  onPageClick?: (pagePath: string) => void  // Page path like "home.md" or "agents/index.md"
 }
 
 export type MarkdownProps = {
@@ -107,7 +107,7 @@ function createComponentsWithLinkHandlers(
 
       // Handle page: protocol
       if (href?.startsWith('page:')) {
-        const pageTitle = decodeURIComponent(href.slice(5)) // Remove 'page:' prefix
+        const pagePath = decodeURIComponent(href.slice(5)) // Remove 'page:' prefix
         return (
           <span
             role="button"
@@ -116,12 +116,12 @@ function createComponentsWithLinkHandlers(
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
-              linkHandlers.onPageClick?.(pageTitle)
+              linkHandlers.onPageClick?.(pagePath)
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault()
-                linkHandlers.onPageClick?.(pageTitle)
+                linkHandlers.onPageClick?.(pagePath)
               }
             }}
           >

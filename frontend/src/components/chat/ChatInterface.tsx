@@ -122,9 +122,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
     actions.selectThread(clickedThreadId);
   }, [actions]);
 
-  const handlePageClick = useCallback(async (pageTitle: string) => {
-    // Find the page and set it as current
-    const page = state.pages.find(p => p.title === pageTitle);
+  const handlePageClick = useCallback(async (pagePath: string) => {
+    // Find the page by path and set it as current
+    const page = state.pages.find(p => p.path === pagePath);
     if (page) {
       await actions.setCurrentPage(page);
     }
@@ -212,7 +212,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
           )}
 
           {/* Changes view - show in review mode */}
-          {isReviewMode && (
+          {isReviewMode && thread?.branch && (
             <div className="mt-3 border-t border-border pt-3">
               <ThreadChangesView
                 branch={thread.branch}

@@ -48,25 +48,29 @@
 .ProseMirror h1 {
   font-size: 2.25em;
   font-weight: 700;
-  line-height: 1.1111111;
+  line-height: 1.2;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+}
+
+.ProseMirror h1:first-child {
   margin-top: 0;
-  margin-bottom: 0.8888889em;
 }
 
 .ProseMirror h2 {
   font-size: 1.875em;
   font-weight: 600;
-  line-height: 1.3333333;
-  margin-top: 1.6em;
-  margin-bottom: 0.8em;
+  line-height: 1.3;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
 }
 
 .ProseMirror h3 {
   font-size: 1.5em;
   font-weight: 600;
-  line-height: 1.6;
-  margin-top: 1.6em;
-  margin-bottom: 0.6em;
+  line-height: 1.4;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
 }
 
 /* Bold and Italic */

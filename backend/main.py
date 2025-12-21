@@ -263,6 +263,30 @@ async def delete_page(title: str, author: str = "user"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+class PageRename(BaseModel):
+    new_name: str
+    author: str = "user"
+
+
+@app.post("/api/pages/{title:path}/rename")
+async def rename_page(title: str, data: PageRename):
+    """Rename a page (change filename, keep in same folder)"""
+    try:
+        renamed_page = wiki.rename_page(
+            old_path=title,
+            new_name=data.new_name,
+            author=data.author
+        )
+        return renamed_page
+    except PageNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Page '{title}' not found")
+    except GitWikiException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Folder API endpoints
 @app.post("/api/pages/move")
 async def move_page_item(request: MoveRequest):

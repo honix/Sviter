@@ -1,13 +1,13 @@
 export interface Page {
-  title: string; // Unique identifier (used as ID in git backend)
-  content: string;
+  path: string; // Relative file path in git repo (e.g., "home.md", "agents/index.md")
+  content: string; // Plain markdown content (no frontmatter)
+  title: string; // Filename (e.g., "home.md")
+  // Legacy fields for compatibility - metadata comes from git
+  author?: string;
+  created_at?: string;
+  updated_at?: string;
+  tags?: string[];
   content_json?: any; // ProseMirror document JSON
-  author: string;
-  created_at: string;
-  updated_at: string;
-  tags: string[];
-  path: string; // Relative file path in git repo (e.g., "index.md")
-  metadata?: any; // YAML frontmatter metadata
 }
 
 export interface PageRevision {
@@ -28,12 +28,12 @@ export interface PageTreeItem {
 // Enhanced tree item with folder support
 export interface TreeItem {
   id: string; // Unique identifier (full path without extension)
-  title: string; // Display name (without numeric prefix)
-  path: string; // Full relative path (e.g., "01-getting-started/02-installation.md")
+  title: string; // Filename (e.g., "home.md", "agents")
+  path: string; // Full relative path (e.g., "home.md", "agents/index.md")
   type: 'page' | 'folder';
-  order: number; // Extracted from numeric prefix
   children?: TreeItem[] | null;
   parent_path: string | null; // Parent folder path (null = root)
+  order?: number; // Legacy - items are now sorted alphabetically
 }
 
 // Move operation payload

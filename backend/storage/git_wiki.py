@@ -1,13 +1,47 @@
 """
 Git-based wiki storage backend.
 Replaces SQLite database with git repository for version control.
+
+Pages are plain markdown files - no frontmatter.
+Metadata (author, dates) comes from git history.
+Navigation and tags are in agents/index.md.
 """
 import re
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from git import Repo, GitCommandError, Actor
-import frontmatter
+
+
+# Default content for agents/index.md when initializing a new wiki
+DEFAULT_AGENTS_INDEX = """# Wiki Index
+
+Quick reference for navigating this wiki. **Agents should read this first** when starting a task.
+
+## Pages
+
+(Add page entries here as the wiki grows)
+
+## Folders
+
+- **agents/** - Agent configuration and wiki metadata (this folder)
+  - `index.md` - Navigation hub (you are here)
+
+## Navigation Tips
+
+1. Use `list_pages` to see all pages (sorted alphabetically)
+2. Use `grep_pages` to search content across all pages
+3. Use `glob_pages` to find pages by path pattern
+4. Read this index first to understand wiki structure before making changes
+
+## Adding New Pages
+
+When creating a new page:
+1. Use a descriptive filename (e.g., `api-reference.md`, `getting-started.md`)
+2. Update this index.md to add a navigation entry
+3. Pages are sorted alphabetically - add number prefixes if specific order is needed
+"""
+
 
 
 class GitWikiException(Exception):
@@ -24,8 +58,9 @@ class GitWiki:
     """
     Git-based wiki storage system.
 
-    Manages wiki pages as markdown files in a git repository,
-    with metadata stored in YAML frontmatter.
+    Manages wiki pages as plain markdown files in a git repository.
+    No frontmatter - metadata comes from git history.
+    Pages are sorted alphabetically.
     """
 
     def __init__(self, repo_path: str):
@@ -46,6 +81,32 @@ class GitWiki:
 
         # Ensure pages directory exists
         self.pages_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize agents/ folder with default files if missing
+        self._ensure_agents_folder()
+
+    def _ensure_agents_folder(self):
+        """
+        Ensure agents/ folder exists with default index.md.
+
+        Creates index.md if missing, providing a starting point for
+        wiki navigation.
+        """
+        agents_dir = self.pages_dir / "agents"
+        agents_dir.mkdir(exist_ok=True)
+
+        index_path = agents_dir / "index.md"
+
+        if not index_path.exists():
+            index_path.write_text(DEFAULT_AGENTS_INDEX, encoding='utf-8')
+            try:
+                self.repo.index.add(["pages/agents/index.md"])
+                self.repo.index.commit(
+                    "Initialize agents/ folder",
+                    author=self._create_author("System")
+                )
+            except Exception:
+                pass  # Ignore commit errors on init
 
     @staticmethod
     def _create_author(author_name: str) -> Actor:
@@ -116,232 +177,94 @@ class GitWiki:
         # No order prefix - return 0 and full name
         return 0, name
 
-    @staticmethod
-    def _build_ordered_filename(order: int, slug: str, is_folder: bool = False) -> str:
-        """
-        Build filename with order prefix.
-
-        Args:
-            order: Order number (1-999)
-            slug: URL-safe slug
-            is_folder: If True, don't add .md extension
-
-        Returns:
-            Filename like '01-introduction.md' or '01-getting-started'
-        """
-        prefix = f"{order:02d}" if order < 100 else f"{order:03d}"
-        if is_folder:
-            return f"{prefix}-{slug}"
-        return f"{prefix}-{slug}.md"
-
-    def _get_next_order(self, parent_path: Optional[str] = None) -> int:
-        """
-        Get the next available order number in a directory.
-
-        Args:
-            parent_path: Parent directory path (None for root pages dir)
-
-        Returns:
-            Next order number (max + 1)
-        """
-        if parent_path:
-            directory = self.pages_dir / parent_path
-        else:
-            directory = self.pages_dir
-
-        if not directory.exists():
-            return 1
-
-        max_order = 0
-        for entry in directory.iterdir():
-            if entry.name.startswith('.'):
-                continue
-            order, _ = self._parse_order_from_filename(entry.name)
-            if order > max_order:
-                max_order = order
-
-        return max_order + 1
-
-    def _renumber_siblings(self, parent_path: Optional[str] = None) -> None:
-        """
-        Renumber all items in a directory to close gaps.
-
-        Args:
-            parent_path: Parent directory path (None for root pages dir)
-        """
-        if parent_path:
-            directory = self.pages_dir / parent_path
-        else:
-            directory = self.pages_dir
-
-        if not directory.exists():
-            return
-
-        # Get all items with their current order
-        items = []
-        for entry in directory.iterdir():
-            if entry.name.startswith('.'):
-                continue
-            if entry.is_file() and not entry.suffix == '.md':
-                continue
-            order, slug = self._parse_order_from_filename(entry.name)
-            items.append((order, slug, entry.is_dir(), entry))
-
-        # Sort by current order
-        items.sort(key=lambda x: x[0])
-
-        # Renumber sequentially starting from 1
-        renames = []
-        for new_order, (old_order, slug, is_folder, entry) in enumerate(items, start=1):
-            if old_order != new_order:
-                new_name = self._build_ordered_filename(new_order, slug, is_folder)
-                new_path = entry.parent / new_name
-                renames.append((entry, new_path))
-
-        # Perform renames using git mv
-        for old_path, new_path in renames:
-            old_rel = old_path.relative_to(self.repo_path)
-            new_rel = new_path.relative_to(self.repo_path)
-            self.repo.git.mv(str(old_rel), str(new_rel))
-
-    def _make_room_for_order(self, parent_path: Optional[str], target_order: int) -> None:
-        """
-        Shift items to make room for an item at target_order.
-
-        Args:
-            parent_path: Parent directory path (None for root pages dir)
-            target_order: The order position to make room for
-        """
-        if parent_path:
-            directory = self.pages_dir / parent_path
-        else:
-            directory = self.pages_dir
-
-        if not directory.exists():
-            return
-
-        # Get items at or after target_order
-        items_to_shift = []
-        for entry in directory.iterdir():
-            if entry.name.startswith('.'):
-                continue
-            if entry.is_file() and not entry.suffix == '.md':
-                continue
-            order, slug = self._parse_order_from_filename(entry.name)
-            if order >= target_order:
-                items_to_shift.append((order, slug, entry.is_dir(), entry))
-
-        # Sort by order descending (shift highest first to avoid collision)
-        items_to_shift.sort(key=lambda x: x[0], reverse=True)
-
-        # Shift each item up by 1
-        for order, slug, is_folder, entry in items_to_shift:
-            new_order = order + 1
-            new_name = self._build_ordered_filename(new_order, slug, is_folder)
-            new_path = entry.parent / new_name
-            old_rel = entry.relative_to(self.repo_path)
-            new_rel = new_path.relative_to(self.repo_path)
-            self.repo.git.mv(str(old_rel), str(new_rel))
-
     def _get_page_path(self, title: str) -> Path:
         """Get full filesystem path for a page by title or path.
 
-        Handles:
-        - Direct paths (e.g., "01-purpose.md", "02-test-folder/01-home.md")
-        - Title lookups that search for matching files with order prefixes
+        Expects full path for files in subdirectories (e.g., "agents/index.md").
         """
-        # If title looks like a path (has extension or slash), try direct lookup
+        # Direct path lookup - this is the expected case
         if title.endswith('.md') or '/' in title:
             direct_path = self.pages_dir / title
             if direct_path.exists():
                 return direct_path
 
-        # Try exact filename match (legacy support)
+        # Try exact filename match
         filename = self.title_to_filename(title)
         exact_path = self.pages_dir / filename
         if exact_path.exists():
             return exact_path
 
-        # Search for file matching the slug with any order prefix
-        slug = self.title_to_filename(title).replace('.md', '')
-
-        # Search recursively for files matching *-{slug}.md
-        for md_file in self.pages_dir.rglob(f'*-{slug}.md'):
-            if md_file.is_file():
-                return md_file
-
-        # Search for exact slug match (files without order prefix)
-        for md_file in self.pages_dir.rglob(f'{slug}.md'):
-            if md_file.is_file():
-                return md_file
-
-        # Fallback to the exact filename (will fail exists check later)
-        return exact_path
+        # Fallback to the exact path (will fail exists check later)
+        return self.pages_dir / title
 
     def _parse_page(self, filepath: Path) -> Dict[str, Any]:
         """
-        Parse a markdown file with frontmatter into a page dict.
+        Parse a markdown file into a page dict.
+
+        Reads raw markdown content. Strips frontmatter if present (for migration).
+        Title is the filename.
 
         Args:
             filepath: Path to the markdown file
 
         Returns:
-            Dictionary with page data
+            Dictionary with page data (path, content only)
         """
-        try:
-            post = frontmatter.load(filepath)
-            return {
-                "title": post.metadata.get("title", self.filename_to_title(filepath.name)),
-                "content": post.content,
-                "author": post.metadata.get("author", "Unknown"),
-                "created_at": post.metadata.get("created"),
-                "updated_at": post.metadata.get("updated"),
-                "tags": post.metadata.get("tags", []),
-                "metadata": post.metadata,
-                "path": str(filepath.relative_to(self.pages_dir))
-            }
-        except Exception as e:
-            # Handle corrupted frontmatter (e.g., merge conflict markers)
-            # Return raw content with minimal metadata
-            raw_content = filepath.read_text(encoding='utf-8')
-            return {
-                "title": self.filename_to_title(filepath.name),
-                "content": raw_content,
-                "author": "Unknown",
-                "created_at": None,
-                "updated_at": None,
-                "tags": [],
-                "metadata": {"parse_error": str(e)},
-                "path": str(filepath.relative_to(self.pages_dir)),
-                "has_conflicts": "<<<<<<" in raw_content or "=======" in raw_content
-            }
+        raw_content = filepath.read_text(encoding='utf-8')
+
+        # Strip frontmatter if present (for backwards compatibility during migration)
+        content = self._strip_frontmatter(raw_content)
+
+        return {
+            "path": str(filepath.relative_to(self.pages_dir)),
+            "title": filepath.name,
+            "content": content,
+            "has_conflicts": "<<<<<<" in raw_content or "=======" in raw_content
+        }
+
+    def _strip_frontmatter(self, content: str) -> str:
+        """
+        Strip YAML frontmatter from content if present.
+
+        Args:
+            content: Raw file content
+
+        Returns:
+            Content without frontmatter
+        """
+        if not content.startswith('---'):
+            return content
+
+        # Find the closing ---
+        lines = content.split('\n')
+        end_idx = -1
+        for i, line in enumerate(lines[1:], start=1):
+            if line.strip() == '---':
+                end_idx = i
+                break
+
+        if end_idx == -1:
+            return content  # No closing ---, return as-is
+
+        # Return content after frontmatter
+        return '\n'.join(lines[end_idx + 1:]).lstrip('\n')
 
     def _create_page_content(self, title: str, content: str, author: str = "AI Agent",
                             tags: Optional[List[str]] = None) -> str:
         """
-        Create markdown content with YAML frontmatter.
+        Create page content (plain markdown, no frontmatter).
 
         Args:
-            title: Page title
+            title: Page title (unused, kept for API compatibility)
             content: Page content (markdown)
-            author: Author name
-            tags: List of tags
+            author: Author name (unused, tracked by git)
+            tags: List of tags (unused, stored in agents/index.md)
 
         Returns:
-            Full markdown content with frontmatter
+            Plain markdown content
         """
-        now = datetime.now().isoformat()
-
-        post = frontmatter.Post(content)
-        post.metadata = {
-            "title": title,
-            "created": now,
-            "updated": now,
-            "author": author,
-            "tags": tags or []
-        }
-
-        return frontmatter.dumps(post)
+        # Just return content as-is - no frontmatter
+        return content
 
     def get_page(self, title: str) -> Dict[str, Any]:
         """
@@ -385,7 +308,7 @@ class GitWiki:
         if filepath.exists():
             raise GitWikiException(f"Page '{title}' already exists. Use update_page() instead.")
 
-        # Create page content with frontmatter
+        # Create page content (plain markdown)
         full_content = self._create_page_content(title, content, author, tags)
 
         # Write file
@@ -409,10 +332,10 @@ class GitWiki:
         Update an existing page.
 
         Args:
-            title: Page title
+            title: Page title/path
             content: New page content (markdown)
-            author: Author name
-            tags: List of tags
+            author: Author name (for git commit)
+            tags: List of tags (unused, kept for API compatibility)
             commit_msg: Custom commit message (optional)
 
         Returns:
@@ -427,42 +350,11 @@ class GitWiki:
         if not filepath.exists():
             raise PageNotFoundException(f"Page '{title}' not found. Use create_page() to create it.")
 
-        # Read existing frontmatter to preserve created date
-        try:
-            existing = frontmatter.load(filepath)
-            created_at = existing.metadata.get("created", datetime.now().isoformat())
-            existing_tags = existing.metadata.get("tags", [])
-        except Exception:
-            # Handle corrupted frontmatter (e.g., merge conflict markers)
-            created_at = datetime.now().isoformat()
-            existing_tags = []
+        # Strip frontmatter from content if present (backwards compatibility)
+        content = self._strip_frontmatter(content)
 
-        # If content already has frontmatter, extract just the body
-        # This happens when agent resolves conflicts and passes full file content
-        if content.strip().startswith('---'):
-            try:
-                parsed = frontmatter.loads(content)
-                content = parsed.content
-                # Preserve metadata from the passed content if available
-                if parsed.metadata.get("created"):
-                    created_at = parsed.metadata["created"]
-                if parsed.metadata.get("tags"):
-                    existing_tags = parsed.metadata["tags"]
-            except Exception:
-                pass  # Keep content as-is if parsing fails
-
-        # Create updated content
-        post = frontmatter.Post(content)
-        post.metadata = {
-            "title": title,
-            "created": created_at,
-            "updated": datetime.now().isoformat(),
-            "author": author,
-            "tags": tags or existing_tags
-        }
-
-        # Write file
-        filepath.write_text(frontmatter.dumps(post), encoding='utf-8')
+        # Write plain markdown content
+        filepath.write_text(content, encoding='utf-8')
 
         # Git add and commit
         try:
@@ -517,6 +409,68 @@ class GitWiki:
 
         return True
 
+    def rename_page(self, old_path: str, new_name: str, author: str = "User") -> Dict[str, Any]:
+        """
+        Rename a page (change filename only, keep in same folder).
+
+        Supports Unicode characters (Cyrillic, etc.) and spaces in names.
+
+        Args:
+            old_path: Current page path (e.g., "home.md", "agents/index.md")
+            new_name: New filename (with or without .md extension)
+            author: Author name for commit
+
+        Returns:
+            Updated page dictionary with new path
+
+        Raises:
+            PageNotFoundException: If page doesn't exist
+            GitWikiException: If rename fails or target exists
+        """
+        old_filepath = self._get_page_path(old_path)
+
+        if not old_filepath.exists():
+            raise PageNotFoundException(f"Page '{old_path}' not found")
+
+        # Sanitize new name - keep Unicode but remove dangerous chars
+        # Allow: letters (any script), numbers, spaces, hyphens, underscores
+        sanitized = re.sub(r'[<>:"/\\|?*]', '', new_name)
+        sanitized = sanitized.strip()
+
+        if not sanitized:
+            raise GitWikiException("Invalid filename")
+
+        # Ensure .md extension
+        if not sanitized.endswith('.md'):
+            sanitized = sanitized + '.md'
+
+        # Build new path in same directory
+        new_filepath = old_filepath.parent / sanitized
+
+        # Check if target already exists (and it's not the same file)
+        if new_filepath.exists() and new_filepath != old_filepath:
+            raise GitWikiException(f"Page '{sanitized}' already exists")
+
+        # Same name, nothing to do
+        if new_filepath == old_filepath:
+            return self._parse_page(old_filepath)
+
+        try:
+            # Git mv
+            old_rel = old_filepath.relative_to(self.repo_path)
+            new_rel = new_filepath.relative_to(self.repo_path)
+
+            self.repo.git.mv(str(old_rel), str(new_rel))
+            self.repo.index.commit(
+                f"Rename: {old_filepath.name} → {sanitized}",
+                author=self._create_author(author)
+            )
+
+        except GitCommandError as e:
+            raise GitWikiException(f"Rename failed: {e}")
+
+        return self._parse_page(new_filepath)
+
     def list_pages(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         List all pages in the wiki.
@@ -525,30 +479,26 @@ class GitWiki:
             limit: Maximum number of pages to return (optional)
 
         Returns:
-            List of page dictionaries (with minimal data for performance)
+            List of page dictionaries (path and title only)
         """
         pages = []
 
-        for filepath in self.pages_dir.rglob("*.md"):
-            if filepath.is_file():
-                try:
-                    page_data = self._parse_page(filepath)
-                    # Return minimal data for list view
-                    pages.append({
-                        "title": page_data["title"],
-                        "author": page_data["author"],
-                        "created_at": page_data["created_at"],
-                        "updated_at": page_data["updated_at"],
-                        "tags": page_data["tags"],
-                        "path": page_data["path"]
-                    })
-                except Exception as e:
-                    # Skip corrupted files
-                    print(f"Warning: Failed to parse {filepath}: {e}")
-                    continue
+        for filepath in self.pages_dir.rglob("*"):
+            # Skip directories and hidden files
+            if not filepath.is_file() or filepath.name.startswith('.'):
+                continue
+            try:
+                rel_path = str(filepath.relative_to(self.pages_dir))
+                pages.append({
+                    "path": rel_path,
+                    "title": filepath.name
+                })
+            except Exception as e:
+                print(f"Warning: Failed to parse {filepath}: {e}")
+                continue
 
-        # Sort by updated_at (most recent first)
-        pages.sort(key=lambda p: p["updated_at"] or "", reverse=True)
+        # Sort alphabetically by path
+        pages.sort(key=lambda p: p["path"].lower())
 
         if limit:
             pages = pages[:limit]
@@ -676,34 +626,18 @@ class GitWiki:
 
         try:
             # Get file content at specific commit
-            content = self.repo.git.show(f"{commit_sha}:{relative_path}")
+            raw_content = self.repo.git.show(f"{commit_sha}:{relative_path}")
 
-            # Parse frontmatter
-            try:
-                post = frontmatter.loads(content)
-                return {
-                    "title": post.metadata.get("title", title),
-                    "content": post.content,
-                    "author": post.metadata.get("author", "Unknown"),
-                    "created_at": post.metadata.get("created"),
-                    "updated_at": post.metadata.get("updated"),
-                    "tags": post.metadata.get("tags", []),
-                    "metadata": post.metadata,
-                    "revision": commit_sha[:7]
-                }
-            except Exception:
-                # Handle corrupted frontmatter (e.g., merge conflict markers)
-                return {
-                    "title": title,
-                    "content": content,
-                    "author": "Unknown",
-                    "created_at": None,
-                    "updated_at": None,
-                    "tags": [],
-                    "metadata": {},
-                    "revision": commit_sha[:7],
-                    "has_conflicts": "<<<<<<" in content or "=======" in content
-                }
+            # Strip frontmatter if present
+            content = self._strip_frontmatter(raw_content)
+
+            return {
+                "path": str(relative_path),
+                "title": filepath.name,
+                "content": content,
+                "revision": commit_sha[:7],
+                "has_conflicts": "<<<<<<" in raw_content or "=======" in raw_content
+            }
 
         except GitCommandError as e:
             raise GitWikiException(f"Failed to get revision {commit_sha}: {e}")
@@ -712,10 +646,11 @@ class GitWiki:
 
     def get_page_tree(self) -> List[Dict[str, Any]]:
         """
-        Get hierarchical tree of all pages and folders with ordering.
+        Get hierarchical tree of all pages and folders.
 
         Returns:
-            List of tree items, each with id, title, path, type, order, children
+            List of tree items, each with id, title, path, type, children
+            Sorted alphabetically.
         """
         def build_tree(directory: Path, parent_path: Optional[str] = None) -> List[Dict]:
             items = []
@@ -727,30 +662,27 @@ class GitWiki:
                 if entry.name.startswith('.'):
                     continue
 
-                order, slug = self._parse_order_from_filename(entry.name)
-
                 if entry.is_dir():
                     rel_path = str(entry.relative_to(self.pages_dir))
                     item = {
                         "id": rel_path,
-                        "title": slug.replace('-', ' ').title(),
+                        "title": entry.name,
                         "path": rel_path,
                         "type": "folder",
-                        "order": order if order > 0 else 999,
                         "parent_path": parent_path,
                         "children": build_tree(entry, rel_path)
                     }
                     items.append(item)
-                elif entry.suffix == '.md':
+                elif entry.is_file():
                     try:
-                        page_data = self._parse_page(entry)
                         rel_path = str(entry.relative_to(self.pages_dir))
+                        # Remove extension for id (if .md)
+                        item_id = rel_path.replace('.md', '') if rel_path.endswith('.md') else rel_path
                         item = {
-                            "id": rel_path.replace('.md', ''),
-                            "title": page_data["title"],
+                            "id": item_id,
+                            "title": entry.name,
                             "path": rel_path,
                             "type": "page",
-                            "order": order if order > 0 else 999,
                             "parent_path": parent_path,
                             "children": None
                         }
@@ -759,8 +691,8 @@ class GitWiki:
                         print(f"Warning: Failed to parse {entry}: {e}")
                         continue
 
-            # Sort by order
-            items.sort(key=lambda x: x["order"])
+            # Sort alphabetically by title (filename)
+            items.sort(key=lambda x: x["title"].lower())
             return items
 
         return build_tree(self.pages_dir)
@@ -795,12 +727,8 @@ class GitWiki:
         else:
             parent_dir = self.pages_dir
 
-        # Get next order number
-        order = self._get_next_order(parent_path)
-
-        # Build folder name with order prefix
-        folder_name = self._build_ordered_filename(order, slug, is_folder=True)
-        folder_path = parent_dir / folder_name
+        # Use plain folder name - no automatic numbering
+        folder_path = parent_dir / slug
 
         if folder_path.exists():
             raise GitWikiException(f"Folder '{name}' already exists")
@@ -856,22 +784,11 @@ class GitWiki:
         if not folder_path.is_dir():
             raise GitWikiException(f"'{path}' is not a folder")
 
-        # Get parent path before deletion for renumbering
-        parent_path = str(folder_path.parent.relative_to(self.pages_dir))
-        if parent_path == '.':
-            parent_path = None
-
         try:
             # Use git rm -r to recursively remove folder and all contents
             relative_path = folder_path.relative_to(self.repo_path)
             self.repo.git.rm('-r', str(relative_path))
             self.repo.index.commit(f"Delete folder: {path}", author=self._create_author(author))
-
-            # Renumber siblings to close gap
-            self._renumber_siblings(parent_path)
-            if parent_path:
-                self.repo.index.commit(f"Renumber items after deleting {path}",
-                                      author=self._create_author(author))
 
         except GitCommandError as e:
             raise GitWikiException(f"Failed to delete folder: {e}")
@@ -881,12 +798,14 @@ class GitWiki:
     def move_item(self, source_path: str, target_parent: Optional[str],
                  new_order: int, author: str = "System") -> Dict[str, Any]:
         """
-        Move a page or folder to a new location with specified order.
+        Move a page or folder to a new location.
+
+        Files keep their original names - no automatic numbering.
 
         Args:
             source_path: Current path of item (relative to pages dir)
             target_parent: Target parent folder path (None for root)
-            new_order: Desired order position in target folder
+            new_order: Ignored (kept for API compatibility)
             author: Author name for commit
 
         Returns:
@@ -901,8 +820,6 @@ class GitWiki:
         if not source.exists():
             raise PageNotFoundException(f"Item '{source_path}' not found")
 
-        # Parse current filename
-        order, slug = self._parse_order_from_filename(source.name)
         is_folder = source.is_dir()
 
         # Determine target directory
@@ -919,36 +836,19 @@ class GitWiki:
         else:
             target_dir = self.pages_dir
 
-        # Get source parent for later renumbering
-        source_parent = str(source.parent.relative_to(self.pages_dir))
-        if source_parent == '.':
-            source_parent = None
+        # Keep original filename - no automatic numbering
+        target_path = target_dir / source.name
 
-        # Build new filename with order
-        new_filename = self._build_ordered_filename(new_order, slug, is_folder)
-        target_path = target_dir / new_filename
-
-        # Check if we're moving within same folder (just reordering)
-        same_folder = source.parent == target_dir
+        # Check if target already exists
+        if target_path.exists() and target_path != source:
+            raise GitWikiException(f"Item '{source.name}' already exists in target folder")
 
         try:
-            # Make room for the new item at target_order (unless same folder reorder)
-            if not same_folder:
-                self._make_room_for_order(target_parent, new_order)
-
             # Git move
             source_rel = source.relative_to(self.repo_path)
             target_rel = target_path.relative_to(self.repo_path)
 
             self.repo.git.mv(str(source_rel), str(target_rel))
-
-            # Renumber source directory to close gap (if moved to different folder)
-            if not same_folder and source_parent != target_parent:
-                self._renumber_siblings(source_parent)
-
-            # If same folder reorder, renumber to fix order
-            if same_folder:
-                self._renumber_siblings(target_parent)
 
             self.repo.index.commit(f"Move {source_path} to {target_rel}",
                                   author=self._create_author(author))
@@ -959,7 +859,6 @@ class GitWiki:
         new_rel_path = str(target_path.relative_to(self.pages_dir))
         return {
             "path": new_rel_path,
-            "order": new_order,
             "parent_path": target_parent
         }
 
@@ -1314,13 +1213,8 @@ class GitWiki:
         try:
             # Get file content at specific ref
             raw_content = self.repo.git.show(f"{ref}:{relative_path}")
-            # Parse frontmatter to extract just the content
-            try:
-                post = frontmatter.loads(raw_content)
-                return post.content
-            except Exception:
-                # Handle corrupted frontmatter - return raw content
-                return raw_content
+            # Strip frontmatter if present
+            return self._strip_frontmatter(raw_content)
         except GitCommandError:
             return ""  # Page doesn't exist at ref
 
@@ -1397,19 +1291,11 @@ class GitWiki:
                 continue
 
             try:
-                content = filepath.read_text(encoding='utf-8')
-                # Skip frontmatter for search
-                try:
-                    post = frontmatter.loads(content)
-                    page_content = post.content
-                    page_title = post.metadata.get("title", self.filename_to_title(filepath.name))
-                except Exception:
-                    # Handle corrupted frontmatter - search raw content
-                    page_content = content
-                    page_title = self.filename_to_title(filepath.name)
-                lines = page_content.split('\n')
-
+                raw_content = filepath.read_text(encoding='utf-8')
+                # Strip frontmatter if present
+                page_content = self._strip_frontmatter(raw_content)
                 page_path = str(filepath.relative_to(self.pages_dir))
+                lines = page_content.split('\n')
 
                 for line_num, line in enumerate(lines, start=1):
                     if compiled.search(line):
@@ -1421,7 +1307,7 @@ class GitWiki:
                         context_after = lines[line_num:end_ctx]
 
                         matches.append({
-                            "page_title": page_title,
+                            "page_title": filepath.name,
                             "page_path": page_path,
                             "line_number": line_num,
                             "content": line,
@@ -1483,19 +1369,15 @@ class GitWiki:
                fnmatch.fnmatch(rel_path.lower(), search_pattern.lower()) or \
                fnmatch.fnmatch(rel_path_no_ext.lower(), search_pattern.lower()):
 
-                try:
-                    page_data = self._parse_page(filepath)
-                    results.append({
-                        "title": page_data["title"],
-                        "path": rel_path,
-                        "updated_at": page_data.get("updated_at")
-                    })
+                results.append({
+                    "title": filepath.name,
+                    "path": rel_path,
+                    "updated_at": None  # Legacy field
+                })
 
-                    if len(results) >= limit:
-                        break
-                except Exception:
-                    continue
+                if len(results) >= limit:
+                    break
 
-        # Sort by updated_at (most recent first)
-        results.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+        # Sort alphabetically by path
+        results.sort(key=lambda x: x["path"].lower())
         return results

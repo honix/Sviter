@@ -5,7 +5,7 @@ import LoadingSpinner from '../common/LoadingSpinner';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
-import { AlertCircle, FileText, GitBranch, Code, Eye, Cloud, CloudOff, CloudUpload, AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertCircle, FileText, GitBranch, Code, Eye, Cloud, CloudOff, CloudUpload, AlertTriangle, Loader2, Pencil, Check, X } from 'lucide-react';
 import { RevisionHistory } from '../revisions/RevisionHistory';
 import type { PageRevision } from '../../types/page';
 import { ProseMirrorEditor } from '../editor/ProseMirrorEditor';
@@ -16,6 +16,22 @@ import { CodeMirrorDiffView } from '../editor/CodeMirrorDiffView';
 import { stringToColor, getInitials } from '../../utils/colors';
 import { setEditingState } from '../../services/collab';
 import { ThreadsAPI, type ThreadFile } from '../../services/threads-api';
+
+// Render filename with dimmed extension
+const FileName: React.FC<{ name: string; className?: string }> = ({ name, className }) => {
+  const lastDot = name.lastIndexOf('.');
+  if (lastDot === -1 || lastDot === 0) {
+    return <span className={className}>{name}</span>;
+  }
+  const baseName = name.slice(0, lastDot);
+  const ext = name.slice(lastDot);
+  return (
+    <span className={className}>
+      {baseName}
+      <span className="opacity-30">{ext}</span>
+    </span>
+  );
+};
 
 const CenterPanel: React.FC = () => {
   const { state, actions } = useAppContext();
@@ -40,6 +56,13 @@ const CenterPanel: React.FC = () => {
   // Conflict resolution state
   const [conflictFiles, setConflictFiles] = useState<ThreadFile[]>([]);
   const [conflictLoading, setConflictLoading] = useState(false);
+
+  // Title editing state
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState('');
+  const [titleSaving, setTitleSaving] = useState(false);
+  const titleSavingRef = useRef(false); // Ref to track saving state for closures
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   // Find thread for current branch
   const currentThread = threads.find(t => t.branch === currentBranch);
@@ -226,6 +249,86 @@ const CenterPanel: React.FC = () => {
     setBranchTab(value as 'diff' | 'history');
   };
 
+  // Title editing handlers
+  const startEditingTitle = useCallback(() => {
+    if (!currentPage) return;
+    // Show full filename with extension
+    setTitleInput(currentPage.title);
+    setIsEditingTitle(true);
+    // Focus input after render
+    setTimeout(() => titleInputRef.current?.focus(), 0);
+  }, [currentPage]);
+
+  const cancelEditingTitle = useCallback(() => {
+    setIsEditingTitle(false);
+    setTitleInput('');
+  }, []);
+
+  const saveTitle = useCallback(async () => {
+    if (!currentPage || !titleInput.trim()) {
+      cancelEditingTitle();
+      return;
+    }
+
+    const newName = titleInput.trim();
+
+    // No change - just cancel
+    if (newName === currentPage.title) {
+      cancelEditingTitle();
+      return;
+    }
+
+    try {
+      setTitleSaving(true);
+      titleSavingRef.current = true;
+      const response = await fetch(
+        `http://localhost:8000/api/pages/${encodeURIComponent(currentPage.path)}/rename`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ new_name: newName }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to rename page');
+      }
+
+      const renamedPage = await response.json();
+
+      // Reload page tree to reflect the change
+      await actions.loadPageTree();
+
+      // Set the renamed page directly (no re-fetch needed)
+      actions.setCurrentPageDirect(renamedPage);
+
+      setIsEditingTitle(false);
+      setTitleInput('');
+    } catch (err) {
+      console.error('Failed to rename page:', err);
+      alert(err instanceof Error ? err.message : 'Failed to rename page');
+    } finally {
+      setTitleSaving(false);
+      titleSavingRef.current = false;
+    }
+  }, [currentPage, titleInput, actions, cancelEditingTitle]);
+
+  const handleTitleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveTitle();
+    } else if (e.key === 'Escape') {
+      cancelEditingTitle();
+    }
+  }, [saveTitle, cancelEditingTitle]);
+
+  // Reset title editing when page changes
+  useEffect(() => {
+    setIsEditingTitle(false);
+    setTitleInput('');
+  }, [currentPage?.path]);
+
   if (isLoading) {
     return (
       <div className="h-full bg-background flex items-center justify-center">
@@ -276,9 +379,41 @@ const CenterPanel: React.FC = () => {
       <div className="h-full bg-background flex flex-col">
         {/* Header */}
         <div className="border-b border-border p-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-foreground">
-            {currentPage.title}
-          </h1>
+          <div className="group flex items-center gap-2">
+            {isEditingTitle ? (
+              <>
+                <input
+                  ref={titleInputRef}
+                  type="text"
+                  value={titleInput}
+                  onChange={(e) => setTitleInput(e.target.value)}
+                  onKeyDown={handleTitleKeyDown}
+                  onBlur={() => {
+                    // Delay to allow button clicks to register
+                    setTimeout(() => {
+                      // Only auto-save if not already saving (use ref to avoid closure issues)
+                      if (!titleSavingRef.current) saveTitle();
+                    }, 150);
+                  }}
+                  disabled={titleSaving}
+                  className="text-2xl font-bold text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0 m-0"
+                  style={{ width: `${Math.max(titleInput.length, 1)}ch` }}
+                  placeholder="name"
+                />
+                {titleSaving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+              </>
+            ) : (
+              <>
+                <h1
+                  className="text-2xl font-bold text-foreground cursor-pointer hover:text-foreground/80 transition-colors"
+                  onClick={startEditingTitle}
+                >
+                  <FileName name={currentPage.title} />
+                </h1>
+                <Pencil className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+              </>
+            )}
+          </div>
           {/* Show collab status in View and Edit modes */}
           {(mainTab === 'view' || mainTab === 'edit') && <CollabStatusBar />}
         </div>
@@ -412,7 +547,7 @@ const CenterPanel: React.FC = () => {
       <div className="border-b border-border p-4">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-foreground">
-            {currentPage.title}
+            <FileName name={currentPage.title} />
           </h1>
         </div>
       </div>

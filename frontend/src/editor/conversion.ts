@@ -22,6 +22,19 @@ export const markdownSerializer = new MarkdownSerializer(
       state.renderInline(node);
       state.closeBlock(node);
     },
+    // Force tight lists (no blank lines between items) and use - instead of *
+    bullet_list(state, node) {
+      state.renderList(node, "  ", () => "- ");
+    },
+    ordered_list(state, node) {
+      const start = node.attrs.order || 1;
+      const maxW = String(start + node.childCount - 1).length;
+      const space = state.repeat(" ", maxW + 2);
+      state.renderList(node, space, i => {
+        const nStr = String(start + i);
+        return state.repeat(" ", maxW - nStr.length) + nStr + ". ";
+      });
+    },
   },
   defaultMarkdownSerializer.marks
 );
@@ -44,7 +57,7 @@ export function markdownToProseMirror(markdown: string): ProseMirrorNode {
  */
 export function prosemirrorToMarkdown(doc: ProseMirrorNode): string {
   try {
-    return markdownSerializer.serialize(doc);
+    return markdownSerializer.serialize(doc, { tightLists: true });
   } catch (error) {
     console.error('Error serializing to markdown:', error);
     return '';

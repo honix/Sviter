@@ -1,8 +1,8 @@
 import { useEffect, useReducer } from 'react';
 import { EditorView } from 'prosemirror-view';
 import type { Command } from 'prosemirror-state';
-import { toggleMark, setBlockType } from 'prosemirror-commands';
-import { wrapInList } from 'prosemirror-schema-list';
+import { toggleMark, setBlockType, lift } from 'prosemirror-commands';
+import { wrapInList, liftListItem } from 'prosemirror-schema-list';
 import type { MarkType, NodeType } from 'prosemirror-model';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -105,19 +105,31 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
     runCommand(toggleMark(schema.marks.code));
   };
 
-  // Set heading level
+  // Toggle heading level (if already heading, convert to paragraph)
   const handleHeading = (level: number) => {
-    runCommand(setBlockType(schema.nodes.heading, { level }));
+    if (isBlockActive(schema.nodes.heading, { level })) {
+      runCommand(setBlockType(schema.nodes.paragraph));
+    } else {
+      runCommand(setBlockType(schema.nodes.heading, { level }));
+    }
   };
 
-  // Toggle bullet list
+  // Toggle bullet list (if already in list, lift out)
   const handleBulletList = () => {
-    runCommand(wrapInList(schema.nodes.bullet_list));
+    if (isBlockActive(schema.nodes.bullet_list)) {
+      runCommand(liftListItem(schema.nodes.list_item));
+    } else {
+      runCommand(wrapInList(schema.nodes.bullet_list));
+    }
   };
 
-  // Toggle ordered list
+  // Toggle ordered list (if already in list, lift out)
   const handleOrderedList = () => {
-    runCommand(wrapInList(schema.nodes.ordered_list));
+    if (isBlockActive(schema.nodes.ordered_list)) {
+      runCommand(liftListItem(schema.nodes.list_item));
+    } else {
+      runCommand(wrapInList(schema.nodes.ordered_list));
+    }
   };
 
   // Insert link
@@ -139,9 +151,13 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
     }
   };
 
-  // Insert code block
+  // Toggle code block (if already code block, convert to paragraph)
   const handleCodeBlock = () => {
-    runCommand(setBlockType(schema.nodes.code_block));
+    if (isBlockActive(schema.nodes.code_block)) {
+      runCommand(setBlockType(schema.nodes.paragraph));
+    } else {
+      runCommand(setBlockType(schema.nodes.code_block));
+    }
   };
 
   // Insert horizontal rule
