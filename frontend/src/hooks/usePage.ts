@@ -4,11 +4,12 @@
  * Works with .md, .txt, .json, .tsx, and any other text files.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { useAuth } from '../contexts/AuthContext';
 import { stringToColor, getInitials, getDisplayName } from '../utils/colors';
+import { getWsUrl, getApiUrl } from '../utils/url';
 import { updatePage } from '../services/api';
 
 // Debounce delay for auto-save (milliseconds)
@@ -140,7 +141,7 @@ export function usePage(pageId: string): UsePageResult {
       isNewSession = true;
       // Create new Yjs document and provider
       const doc = new Y.Doc();
-      const wsUrl = 'ws://localhost:8000/ws/collab';
+      const wsUrl = getWsUrl('/ws/collab');
 
       const provider = new WebsocketProvider(wsUrl, pageId, doc, {
         connect: true,
@@ -209,7 +210,7 @@ export function usePage(pageId: string): UsePageResult {
         // If Y.Text is empty, fetch content from server and initialize
         if (yText.length === 0) {
           try {
-            const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(pageId)}`);
+            const response = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(pageId)}`);
             if (response.ok) {
               const page = await response.json();
               if (page.content) {

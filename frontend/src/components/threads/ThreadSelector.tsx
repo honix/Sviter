@@ -29,12 +29,18 @@ interface ThreadSelectorProps {
 
 const StatusIcon: React.FC<{ status: ThreadStatus }> = ({ status }) => {
   switch (status) {
+    case "active":
+      return <CheckCircle className="h-3 w-3 text-blue-500" />;
+    case "archived":
+      return <XCircle className="h-3 w-3 text-gray-400" />;
     case "working":
       return <Loader2 className="h-3 w-3 animate-spin text-blue-500" />;
     case "need_help":
       return <AlertCircle className="h-3 w-3 text-yellow-500" />;
     case "review":
       return <CheckCircle className="h-3 w-3 text-green-500" />;
+    case "resolving":
+      return <Loader2 className="h-3 w-3 animate-spin text-orange-500" />;
     case "accepted":
       return <Check className="h-3 w-3 text-green-600" />;
     case "rejected":
@@ -43,9 +49,12 @@ const StatusIcon: React.FC<{ status: ThreadStatus }> = ({ status }) => {
 };
 
 const statusLabel: Record<ThreadStatus, string> = {
+  active: "Active",
+  archived: "Archived",
   working: "Working",
   need_help: "Needs help",
   review: "Ready for review",
+  resolving: "Resolving conflicts",
   accepted: "Accepted",
   rejected: "Rejected",
 };

@@ -2,8 +2,9 @@
  * API client for agent operations
  */
 import type { Agent, AgentExecutionResult } from '../types/agent';
+import { getApiUrl } from '../utils/url';
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = getApiUrl();
 
 export class AgentsAPI {
   /**

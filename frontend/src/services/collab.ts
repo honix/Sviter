@@ -6,6 +6,7 @@
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { stringToColor, getInitials, getDisplayName } from '../utils/colors';
+import { getWsUrl, getApiUrl } from '../utils/url';
 import { updatePage } from './api';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -226,8 +227,7 @@ export function createCollabSession(
   const doc = new Y.Doc();
 
   // Connect to backend collaboration WebSocket
-  // URL format: ws://localhost:8000/ws/collab/{clientId}/{pagePath}
-  const wsUrl = `ws://localhost:8000/ws/collab`;
+  const wsUrl = getWsUrl('/ws/collab');
   const roomName = pagePath; // Use page path as room name
 
   const provider = new WebsocketProvider(wsUrl, roomName, doc, {
@@ -573,7 +573,7 @@ export async function setEditingState(
       client_id: userId,
       editing: String(editing),
     });
-    await fetch(`http://localhost:8000/api/collab/editing-state?${params}`, {
+    await fetch(`${getApiUrl()}/api/collab/editing-state?${params}`, {
       method: 'POST',
     });
     console.log(`Editing state: ${pagePath} = ${editing}`);

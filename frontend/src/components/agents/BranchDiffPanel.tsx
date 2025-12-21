@@ -1,7 +1,7 @@
 /**
  * Branch Diff Panel - displays branch diff and merge options in center panel
  */
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { GitAPI } from '../../services/git-api';
 import { useAppContext } from '../../contexts/AppContext';
 import { DiffViewer } from './DiffViewer';

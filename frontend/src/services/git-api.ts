@@ -1,9 +1,10 @@
 /**
  * API client for git operations
  */
-import type { DiffStats, BranchDiff } from '../types/agent';
+import type { DiffStats } from '../types/agent';
+import { getApiUrl } from '../utils/url';
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = getApiUrl();
 
 export class GitAPI {
   /**
@@ -74,5 +75,36 @@ export class GitAPI {
     }
     const data = await response.json();
     return data.branch;
+  }
+
+  /**
+   * Delete a branch
+   */
+  static async deleteBranch(branch: string, force: boolean = false): Promise<void> {
+    const url = `${API_BASE_URL}/api/git/branches/${encodeURIComponent(branch)}${force ? '?force=true' : ''}`;
+    const response = await fetch(url, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to delete branch: ${response.statusText}`);
+    }
+  }
+
+  /**
+   * Checkout a branch
+   */
+  static async checkoutBranch(branch: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/api/git/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ branch }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to checkout branch: ${response.statusText}`);
+    }
   }
 }

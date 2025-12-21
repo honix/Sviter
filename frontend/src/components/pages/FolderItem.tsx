@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { TreeItem } from '../../types/page';
+import type { TreeItem } from '../../types/page';
 
 interface FolderItemProps {
   folder: TreeItem;

@@ -12,6 +12,7 @@ import type { DataRow, SaveStatus } from '../../hooks/useCSV';
 import { usePage } from '../../hooks/usePage';
 import { useAuth } from '../../contexts/AuthContext';
 import type { CollabStatus } from '../editor/CollaborativeCodeMirrorEditor';
+import { getApiUrl } from '../../utils/url';
 
 // UI components available in view scope
 import { Button } from '../ui/button';
@@ -135,7 +136,7 @@ function useCSVWithStatus<T extends DataRow = DataRow>(
  *   if (!DataTable) return <div>Loading...</div>;
  *   return <DataTable data={rows} />;
  */
-function createUseComponentHook(forceUpdate: () => void) {
+function createUseComponentHook(_forceUpdate: () => void) {
   return function useComponent(componentPath: string): React.ComponentType<any> | null {
     const registry = useContext(ComponentRegistryContext);
 
@@ -348,7 +349,7 @@ export const ViewRuntime: React.FC<ViewRuntimeProps> = ({
 
       try {
         // Fetch the TSX source from API
-        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(path)}`);
+        const response = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(path)}`);
         if (!response.ok) {
           throw new Error(`Failed to load component: ${path}`);
         }

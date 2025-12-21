@@ -6,9 +6,11 @@ import { EditorView, basicSetup } from 'codemirror';
 import { EditorState, RangeSetBuilder } from '@codemirror/state';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { Decoration, DecorationSet, ViewPlugin, ViewUpdate } from '@codemirror/view';
+import { Decoration, ViewPlugin } from '@codemirror/view';
+import type { DecorationSet, ViewUpdate } from '@codemirror/view';
 import { diffLines } from 'diff';
 import { cn } from '@/lib/utils';
+import { getApiUrl } from '../../utils/url';
 
 interface CodeMirrorDiffViewProps {
   pagePath: string;
@@ -43,10 +45,10 @@ export function CodeMirrorDiffView({
   // Fetch both main and branch content via API (no checkout needed)
   useEffect(() => {
     Promise.all([
-      fetch(`http://localhost:8000/api/pages/${encodeURIComponent(pagePath)}/at-ref?ref=main`)
+      fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(pagePath)}/at-ref?ref=main`)
         .then(r => r.ok ? r.json() : { content: '' })
         .then(data => data.content || ''),
-      fetch(`http://localhost:8000/api/pages/${encodeURIComponent(pagePath)}/at-ref?ref=${encodeURIComponent(branchName)}`)
+      fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(pagePath)}/at-ref?ref=${encodeURIComponent(branchName)}`)
         .then(r => r.ok ? r.json() : { content: '' })
         .then(data => data.content || '')
     ])
@@ -63,7 +65,7 @@ export function CodeMirrorDiffView({
   }, [pagePath, branchName, refreshTrigger]);
 
   // Compute unified diff content with markers
-  const { diffContent, lineTypes, hasChanges } = useMemo(() => {
+  const { diffContent, lineTypes } = useMemo(() => {
     if (mainContent === null || branchContent === null) {
       return { diffContent: '', lineTypes: new Map<number, 'added' | 'removed'>(), hasChanges: false };
     }

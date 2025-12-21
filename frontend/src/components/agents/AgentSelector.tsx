@@ -1,7 +1,7 @@
 /**
  * AgentSelector - dropdown to select between ChatAgent (default) and autonomous agents
  */
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Select,
   SelectContent,

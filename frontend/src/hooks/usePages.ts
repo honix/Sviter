@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Page, PageTreeItem, ViewMode } from '../types/page';
+import type { Page, PageTreeItem, ViewMode } from '../types/page';
 import { useAppContext } from '../contexts/AppContext';
+import { getApiUrl } from '../utils/url';
 
 export interface UsePagesReturn {
   pages: Page[];
@@ -12,8 +13,8 @@ export interface UsePagesReturn {
   setCurrentPage: (page: Page | null) => void;
   setViewMode: (mode: ViewMode) => void;
   createPage: (title: string, content?: string) => Promise<void>;
-  updatePage: (id: number, updates: Partial<Page>) => Promise<void>;
-  deletePage: (id: number) => Promise<void>;
+  updatePage: (path: string, updates: Partial<Page>) => Promise<void>;
+  deletePage: (path: string) => Promise<void>;
   loadPages: () => Promise<void>;
 }
 
@@ -27,9 +28,36 @@ export const usePages = (): UsePagesReturn => {
 
   // Generate page tree structure
   const pageTree: PageTreeItem[] = pages.map(page => ({
-    id: page.id,
-    title: page.title
+    title: page.title,
+    path: page.path
   }));
+
+  const loadPages = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${getApiUrl()}/api/pages`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const backendPages: Page[] = data.pages;
+
+      setPages(backendPages);
+
+      // Set current page to first page if none selected and pages exist
+      if (!currentPage && backendPages.length > 0) {
+        setCurrentPage(backendPages[0]);
+      }
+    } catch (err) {
+      setError('Failed to load pages');
+      console.error('Error loading pages:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentPage]);
 
   // Load pages from backend on initialization
   useEffect(() => {
@@ -53,9 +81,10 @@ export const usePages = (): UsePagesReturn => {
 
     try {
       const newPage: Page = {
-        id: Date.now(), // In real app, this would come from backend
+        path: title,
         title,
         content,
+        file_type: 'markdown',
         author: 'user',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -73,7 +102,7 @@ export const usePages = (): UsePagesReturn => {
     }
   }, []);
 
-  const updatePage = useCallback(async (id: number, updates: Partial<Page>) => {
+  const updatePage = useCallback(async (path: string, updates: Partial<Page>) => {
     setIsLoading(true);
     setError(null);
 
@@ -84,10 +113,10 @@ export const usePages = (): UsePagesReturn => {
       };
 
       setPages(prev => prev.map(page =>
-        page.id === id ? { ...page, ...updatedPage } : page
+        page.path === path ? { ...page, ...updatedPage } : page
       ));
 
-      if (currentPage?.id === id) {
+      if (currentPage?.path === path) {
         setCurrentPage(prev => prev ? { ...prev, ...updatedPage } : null);
       }
     } catch (err) {
@@ -98,15 +127,15 @@ export const usePages = (): UsePagesReturn => {
     }
   }, [currentPage]);
 
-  const deletePage = useCallback(async (id: number) => {
+  const deletePage = useCallback(async (path: string) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      setPages(prev => prev.filter(page => page.id !== id));
+      setPages(prev => prev.filter(page => page.path !== path));
 
-      if (currentPage?.id === id) {
-        const remainingPages = pages.filter(page => page.id !== id);
+      if (currentPage?.path === path) {
+        const remainingPages = pages.filter(page => page.path !== path);
         setCurrentPage(remainingPages.length > 0 ? remainingPages[0] : null);
       }
     } catch (err) {
@@ -116,33 +145,6 @@ export const usePages = (): UsePagesReturn => {
       setIsLoading(false);
     }
   }, [currentPage, pages]);
-
-  const loadPages = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch('http://localhost:8000/api/pages');
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const backendPages: Page[] = data.pages;
-
-      setPages(backendPages);
-
-      // Set current page to first page if none selected and pages exist
-      if (!currentPage && backendPages.length > 0) {
-        setCurrentPage(backendPages[0]);
-      }
-    } catch (err) {
-      setError('Failed to load pages');
-      console.error('Error loading pages:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentPage]);
 
   return {
     pages,

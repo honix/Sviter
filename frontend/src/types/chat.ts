@@ -25,13 +25,15 @@ export interface WebSocketMessage {
   type:
     | 'chat' | 'chat_response' | 'tool_call' | 'system' | 'system_prompt' | 'page_update' | 'error' | 'status' | 'success'
     // Agent messages
-    | 'agent_complete' | 'agent_selected'
+    | 'agent_complete' | 'agent_selected' | 'agent_start'
     // Thread messages
     | 'thread_created' | 'thread_status' | 'thread_deleted' | 'thread_list' | 'thread_selected' | 'thread_message'
     // Branch messages
     | 'branch_created' | 'branch_switched' | 'branch_deleted'
     // Page messages
-    | 'page_updated' | 'pages_changed';
+    | 'page_updated' | 'pages_changed' | 'pages_content_changed'
+    // Collab messages
+    | 'collab_room_change';
   data?: any;
   message?: string;
   tool_name?: string;

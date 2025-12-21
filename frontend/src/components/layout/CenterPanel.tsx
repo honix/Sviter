@@ -5,7 +5,7 @@ import LoadingSpinner from '../common/LoadingSpinner';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
-import { AlertCircle, FileText, GitBranch, Code, Eye, Cloud, CloudOff, CloudUpload, AlertTriangle, Loader2, Pencil, Check, X, Play } from 'lucide-react';
+import { AlertCircle, FileText, GitBranch, Code, Eye, Cloud, CloudOff, CloudUpload, AlertTriangle, Loader2, Pencil } from 'lucide-react';
 import { RevisionHistory } from '../revisions/RevisionHistory';
 import type { PageRevision, FileType } from '../../types/page';
 import { ProseMirrorEditor } from '../editor/ProseMirrorEditor';
@@ -18,6 +18,7 @@ import { ViewRuntime } from '../views/ViewRuntime';
 import { stringToColor, getInitials } from '../../utils/colors';
 import { setEditingState } from '../../services/collab';
 import { ThreadsAPI, type ThreadFile } from '../../services/threads-api';
+import { getApiUrl } from '../../utils/url';
 
 // Render filename with dimmed extension
 const FileName: React.FC<{ name: string; className?: string }> = ({ name, className }) => {
@@ -231,7 +232,7 @@ const CenterPanel: React.FC = () => {
     if (currentPage) {
       try {
         const response = await fetch(
-          `http://localhost:8000/api/pages/${encodeURIComponent(currentPage.path)}/at-ref?ref=${revision.sha}`
+          `${getApiUrl()}/api/pages/${encodeURIComponent(currentPage.path)}/at-ref?ref=${revision.sha}`
         );
         if (response.ok) {
           const data = await response.json();
@@ -295,7 +296,7 @@ const CenterPanel: React.FC = () => {
       setTitleSaving(true);
       titleSavingRef.current = true;
       const response = await fetch(
-        `http://localhost:8000/api/pages/${encodeURIComponent(currentPage.path)}/rename`,
+        `${getApiUrl()}/api/pages/${encodeURIComponent(currentPage.path)}/rename`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

@@ -1,17 +1,15 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   DndContext,
   DragOverlay,
   PointerSensor,
   useSensor,
   useSensors,
-  DragStartEvent,
-  DragEndEvent,
-  DragOverEvent,
   useDraggable,
   useDroppable
 } from '@dnd-kit/core';
-import { TreeItem, Page } from '../../types/page';
+import type { DragStartEvent, DragEndEvent, DragOverEvent } from '@dnd-kit/core';
+import type { TreeItem, Page } from '../../types/page';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -25,6 +23,7 @@ import {
 import { Plus, FileText, FileSpreadsheet, FileCode, FolderPlus, GripVertical, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, LogIn } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
+import { getApiUrl } from '../../utils/url';
 
 // Render filename with dimmed extension
 const FileName: React.FC<{ name: string }> = ({ name }) => {
@@ -172,7 +171,7 @@ const PageTree: React.FC<PageTreeProps> = ({
     }
 
     // Fetch per-page diff stats with explicit head branch
-    fetch(`http://localhost:8000/api/git/diff-stats-by-page?base=main&head=${encodeURIComponent(currentBranch)}`)
+    fetch(`${getApiUrl()}/api/git/diff-stats-by-page?base=main&head=${encodeURIComponent(currentBranch)}`)
       .then(r => r.ok ? r.json() : { stats: {} })
       .then(data => setDiffStats(data.stats || {}))
       .catch(() => setDiffStats({}));
@@ -463,7 +462,7 @@ const PageTree: React.FC<PageTreeProps> = ({
               onDragCancel={handleDragCancel}
             >
               <div>
-                {items.map((entry, index) => {
+                {items.map((entry) => {
                   if (entry.type === 'dropzone') {
                     // Only show drop zones when dragging
                     if (!draggedId) return null;
@@ -536,14 +535,14 @@ const PageTree: React.FC<PageTreeProps> = ({
             {isGuest ? (
               <>
                 <DropdownMenuItem
-                  onClick={() => window.location.href = 'http://localhost:8000/auth/google'}
+                  onClick={() => window.location.href = `${getApiUrl()}/auth/google`}
                   className="cursor-pointer"
                 >
                   <LogIn className="h-4 w-4" />
                   Login with Google
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => window.location.href = 'http://localhost:8000/auth/github'}
+                  onClick={() => window.location.href = `${getApiUrl()}/auth/github`}
                   className="cursor-pointer"
                 >
                   <LogIn className="h-4 w-4" />

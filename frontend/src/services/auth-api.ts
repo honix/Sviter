@@ -1,8 +1,9 @@
 /**
  * Authentication API service
  */
+import { getApiUrl } from '../utils/url';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = getApiUrl();
 const GUEST_ID_KEY = 'etoneto_guest_id';
 
 export interface User {

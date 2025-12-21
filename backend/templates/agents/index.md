@@ -2,6 +2,8 @@
 
 Quick reference for navigating this wiki. **Agents should read this first** when starting a task.
 
+You can edit it but keep this page structure unchanged.
+
 ## Pages
 
 (Add page entries here as the wiki grows)

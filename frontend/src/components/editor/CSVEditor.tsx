@@ -3,8 +3,9 @@
  * Provides inline cell editing with real-time sync.
  */
 
-import React, { useCallback, useState, useEffect } from 'react';
-import { useCSV, DataRow } from '../../hooks/useCSV';
+import { useCallback, useState } from 'react';
+import { useCSV } from '../../hooks/useCSV';
+import type { DataRow } from '../../hooks/useCSV';
 import { Button } from '../ui/button';
 import { Plus, Trash2, Loader2 } from 'lucide-react';
 
@@ -21,7 +22,7 @@ export const CSVEditor: React.FC<CSVEditorProps> = ({
   initialHeaders,
   editable = true,
   className = '',
-  onSaveStatusChange,
+  onSaveStatusChange: _onSaveStatusChange,
 }) => {
   const {
     rows,

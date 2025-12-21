@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { User, initAuth, clearGuestId, getStoredGuestId } from '../services/auth-api';
+import type { User } from '../services/auth-api';
+import { initAuth, clearGuestId, getStoredGuestId } from '../services/auth-api';
 
 interface AuthContextType {
   user: User | null;
