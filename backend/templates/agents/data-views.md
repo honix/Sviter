@@ -52,6 +52,7 @@ See these pages for working examples:
 
 - [agents/examples/simple-view.tsx](page:agents/examples/simple-view.tsx) - Minimal view with state
 - [agents/examples/data-view.tsx](page:agents/examples/data-view.tsx) - CSV data manipulation
+- [agents/examples/kanban.tsx](page:agents/examples/kanban.tsx) - Kanban board with drag-and-drop
 - [agents/components/DataTable.tsx](page:agents/components/DataTable.tsx) - Reusable component
 
 ## Tips
