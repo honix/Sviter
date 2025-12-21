@@ -22,7 +22,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, FileText, FolderPlus, GripVertical, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, LogIn } from 'lucide-react';
+import { Plus, FileText, FileSpreadsheet, FileCode, FolderPlus, GripVertical, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, LogIn } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -40,6 +40,13 @@ const FileName: React.FC<{ name: string }> = ({ name }) => {
       <span className="opacity-30">{ext}</span>
     </>
   );
+};
+
+// Get file icon based on path extension
+const getFileIcon = (path: string) => {
+  if (path.endsWith('.csv')) return FileSpreadsheet;
+  if (path.endsWith('.tsx')) return FileCode;
+  return FileText;
 };
 
 // Per-page diff stats (matches backend format)
@@ -362,6 +369,7 @@ const PageTree: React.FC<PageTreeProps> = ({
 
     // Page item
     const pageStats = diffStats[item.path];
+    const FileIcon = getFileIcon(item.path);
 
     return (
       <div
@@ -374,7 +382,7 @@ const PageTree: React.FC<PageTreeProps> = ({
         onClick={() => page && onPageSelect(page)}
       >
         <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab flex-shrink-0" />
-        <FileText className="h-4 w-4 flex-shrink-0" />
+        <FileIcon className="h-4 w-4 flex-shrink-0" />
         <span className="text-sm flex-1 truncate"><FileName name={item.title} /></span>
         {pageStats && (pageStats.additions > 0 || pageStats.deletions > 0) && (
           <span className="text-xs font-mono flex gap-1 px-1.5 py-0.5 rounded bg-background/80 border border-border/50">
@@ -485,7 +493,10 @@ const PageTree: React.FC<PageTreeProps> = ({
                       {draggedItem.type === 'folder' ? (
                         <Folder className="h-4 w-4 text-yellow-500" />
                       ) : (
-                        <FileText className="h-4 w-4" />
+                        (() => {
+                          const DragIcon = getFileIcon(draggedItem.path);
+                          return <DragIcon className="h-4 w-4" />;
+                        })()
                       )}
                       <span className="text-sm font-medium">
                         {draggedItem.type === 'folder' ? draggedItem.title : <FileName name={draggedItem.title} />}

@@ -73,6 +73,11 @@ async def startup_event():
         print(f"✅ Wiki repository loaded successfully ({WIKI_REPO_PATH})")
         print(f"📚 Found {len(wiki.list_pages())} pages")
 
+        # Initialize template files (examples for agents)
+        created = wiki.ensure_templates()
+        if created:
+            print(f"📝 Initialized {len(created)} template files")
+
         # Initialize thread support (sets up .gitignore, cleans orphaned worktrees)
         git_ops.init_thread_support(wiki)
         print("🧵 Thread support initialized")

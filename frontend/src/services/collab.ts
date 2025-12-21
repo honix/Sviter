@@ -64,15 +64,56 @@ function notifySaveStatus(pagePath: string, status: SaveStatus): void {
 }
 
 /**
+ * Serialize Y.Array data to CSV string.
+ */
+function serializeYArrayToCSV(yArray: Y.Array<Y.Map<any>>): string {
+  const rows = yArray.toArray();
+  if (rows.length === 0) return '';
+
+  // Get headers from first row
+  const headers: string[] = [];
+  rows[0].forEach((_, key) => headers.push(key));
+
+  // Build CSV
+  const lines = [headers.join(',')];
+  rows.forEach(yMap => {
+    const values = headers.map(h => {
+      const v = yMap.get(h);
+      const str = String(v ?? '');
+      // Escape and quote if needed
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    });
+    lines.push(values.join(','));
+  });
+
+  return lines.join('\n');
+}
+
+/**
  * Save document content to backend.
+ * Handles both markdown/tsx (Y.Text) and CSV (Y.Array) files.
  */
 async function saveDocument(pagePath: string, pageTitle: string): Promise<void> {
   const session = activeSessions.get(pagePath);
   const state = saveStates.get(pagePath);
   if (!session || !state) return;
 
-  const yText = session.doc.getText('content');
-  const content = yText.toString();
+  // Determine content based on file type
+  let content: string;
+  const isCSV = pagePath.endsWith('.csv');
+
+  if (isCSV) {
+    // CSV: Serialize Y.Array to CSV format
+    const yArray = session.doc.getArray<Y.Map<any>>('data');
+    content = serializeYArrayToCSV(yArray);
+  } else {
+    // Markdown/TSX: Use Y.Text
+    const yText = session.doc.getText('content');
+    content = yText.toString();
+  }
 
   // Skip if content hasn't changed
   if (content === state.lastSavedContent) {
@@ -243,20 +284,40 @@ export function createCollabSession(
   };
   saveStates.set(pagePath, saveState);
 
-  // Set up Y.Text observer for auto-save
-  const yText = doc.getText('content');
-  yText.observe(() => {
-    // Skip during initial load (sync from server)
-    if (saveState.isInitialLoad) return;
-    scheduleSave(pagePath, title);
-  });
+  // Set up observer for auto-save (different for CSV vs text files)
+  const isCSV = pagePath.endsWith('.csv');
 
-  // Mark initial load as complete after sync settles
-  setTimeout(() => {
-    saveState.isInitialLoad = false;
-    saveState.lastSavedContent = yText.toString();
-    console.log(`Initial load complete for: ${pagePath}`);
-  }, 500);
+  if (isCSV) {
+    // CSV: Set up Y.Array observer
+    const yArray = doc.getArray<Y.Map<any>>('data');
+    yArray.observeDeep(() => {
+      // Skip during initial load (sync from server)
+      if (saveState.isInitialLoad) return;
+      scheduleSave(pagePath, title);
+    });
+
+    // Mark initial load as complete after sync settles
+    setTimeout(() => {
+      saveState.isInitialLoad = false;
+      saveState.lastSavedContent = serializeYArrayToCSV(yArray);
+      console.log(`Initial load complete for CSV: ${pagePath}`);
+    }, 500);
+  } else {
+    // Markdown/TSX: Set up Y.Text observer
+    const yText = doc.getText('content');
+    yText.observe(() => {
+      // Skip during initial load (sync from server)
+      if (saveState.isInitialLoad) return;
+      scheduleSave(pagePath, title);
+    });
+
+    // Mark initial load as complete after sync settles
+    setTimeout(() => {
+      saveState.isInitialLoad = false;
+      saveState.lastSavedContent = yText.toString();
+      console.log(`Initial load complete for: ${pagePath}`);
+    }, 500);
+  }
 
   // Create session object
   const session: CollabSession = {
@@ -353,6 +414,71 @@ export function getXmlFragment(doc: Y.Doc, name: string = 'prosemirror'): Y.XmlF
  */
 export function getSharedText(doc: Y.Doc): Y.Text {
   return doc.getText('content');
+}
+
+/**
+ * Get the shared Yjs Array for data (CSV files).
+ * Returns Y.Array<Y.Map> where each Y.Map is a row with column keys.
+ */
+export function getSharedData(doc: Y.Doc): Y.Array<Y.Map<any>> {
+  return doc.getArray<Y.Map<any>>('data');
+}
+
+/**
+ * Initialize CSV data from content string.
+ * Parses CSV content and populates the Y.Array.
+ */
+export function initializeCSVData(doc: Y.Doc, csvContent: string): void {
+  const yArray = getSharedData(doc);
+
+  // Don't reinitialize if already has data
+  if (yArray.length > 0) return;
+
+  const lines = csvContent.split('\n').filter(l => l.trim());
+  if (lines.length === 0) return;
+
+  // Parse headers
+  const headers = parseCSVLine(lines[0]);
+
+  // Parse rows in a transaction
+  doc.transact(() => {
+    lines.slice(1).forEach(line => {
+      const values = parseCSVLine(line);
+      const yMap = new Y.Map<any>();
+      headers.forEach((h, i) => {
+        yMap.set(h, values[i] ?? '');
+      });
+      yArray.push([yMap]);
+    });
+  });
+}
+
+/**
+ * Parse a CSV line into values.
+ */
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++; // Skip next quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      result.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current);
+  return result;
 }
 
 /**
