@@ -1,17 +1,15 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   DndContext,
   DragOverlay,
   PointerSensor,
   useSensor,
   useSensors,
-  DragStartEvent,
-  DragEndEvent,
-  DragOverEvent,
   useDraggable,
   useDroppable
 } from '@dnd-kit/core';
-import { TreeItem, Page } from '../../types/page';
+import type { DragStartEvent, DragEndEvent, DragOverEvent } from '@dnd-kit/core';
+import type { TreeItem, Page } from '../../types/page';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -22,9 +20,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, FileText, FolderPlus, GripVertical, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, LogIn } from 'lucide-react';
+import { Plus, FileText, FileSpreadsheet, FileCode, FolderPlus, GripVertical, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, LogIn } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
+import { getApiUrl } from '../../utils/url';
 
 // Render filename with dimmed extension
 const FileName: React.FC<{ name: string }> = ({ name }) => {
@@ -40,6 +39,13 @@ const FileName: React.FC<{ name: string }> = ({ name }) => {
       <span className="opacity-30">{ext}</span>
     </>
   );
+};
+
+// Get file icon based on path extension
+const getFileIcon = (path: string) => {
+  if (path.endsWith('.csv')) return FileSpreadsheet;
+  if (path.endsWith('.tsx')) return FileCode;
+  return FileText;
 };
 
 // Per-page diff stats (matches backend format)
@@ -165,7 +171,7 @@ const PageTree: React.FC<PageTreeProps> = ({
     }
 
     // Fetch per-page diff stats with explicit head branch
-    fetch(`http://localhost:8000/api/git/diff-stats-by-page?base=main&head=${encodeURIComponent(currentBranch)}`)
+    fetch(`${getApiUrl()}/api/git/diff-stats-by-page?base=main&head=${encodeURIComponent(currentBranch)}`)
       .then(r => r.ok ? r.json() : { stats: {} })
       .then(data => setDiffStats(data.stats || {}))
       .catch(() => setDiffStats({}));
@@ -362,6 +368,7 @@ const PageTree: React.FC<PageTreeProps> = ({
 
     // Page item
     const pageStats = diffStats[item.path];
+    const FileIcon = getFileIcon(item.path);
 
     return (
       <div
@@ -374,7 +381,7 @@ const PageTree: React.FC<PageTreeProps> = ({
         onClick={() => page && onPageSelect(page)}
       >
         <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab flex-shrink-0" />
-        <FileText className="h-4 w-4 flex-shrink-0" />
+        <FileIcon className="h-4 w-4 flex-shrink-0" />
         <span className="text-sm flex-1 truncate"><FileName name={item.title} /></span>
         {pageStats && (pageStats.additions > 0 || pageStats.deletions > 0) && (
           <span className="text-xs font-mono flex gap-1 px-1.5 py-0.5 rounded bg-background/80 border border-border/50">
@@ -455,7 +462,7 @@ const PageTree: React.FC<PageTreeProps> = ({
               onDragCancel={handleDragCancel}
             >
               <div>
-                {items.map((entry, index) => {
+                {items.map((entry) => {
                   if (entry.type === 'dropzone') {
                     // Only show drop zones when dragging
                     if (!draggedId) return null;
@@ -485,7 +492,10 @@ const PageTree: React.FC<PageTreeProps> = ({
                       {draggedItem.type === 'folder' ? (
                         <Folder className="h-4 w-4 text-yellow-500" />
                       ) : (
-                        <FileText className="h-4 w-4" />
+                        (() => {
+                          const DragIcon = getFileIcon(draggedItem.path);
+                          return <DragIcon className="h-4 w-4" />;
+                        })()
                       )}
                       <span className="text-sm font-medium">
                         {draggedItem.type === 'folder' ? draggedItem.title : <FileName name={draggedItem.title} />}
@@ -525,14 +535,14 @@ const PageTree: React.FC<PageTreeProps> = ({
             {isGuest ? (
               <>
                 <DropdownMenuItem
-                  onClick={() => window.location.href = 'http://localhost:8000/auth/google'}
+                  onClick={() => window.location.href = `${getApiUrl()}/auth/google`}
                   className="cursor-pointer"
                 >
                   <LogIn className="h-4 w-4" />
                   Login with Google
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => window.location.href = 'http://localhost:8000/auth/github'}
+                  onClick={() => window.location.href = `${getApiUrl()}/auth/github`}
                   className="cursor-pointer"
                 >
                   <LogIn className="h-4 w-4" />

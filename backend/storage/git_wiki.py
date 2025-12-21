@@ -2,45 +2,30 @@
 Git-based wiki storage backend.
 Replaces SQLite database with git repository for version control.
 
-Pages are plain markdown files - no frontmatter.
+Supports multiple file types:
+- Markdown (.md) - wiki pages
+- CSV (.csv) - data files for interactive views
+- TSX (.tsx) - React view components
+
 Metadata (author, dates) comes from git history.
 Navigation and tags are in agents/index.md.
 """
 import re
+import csv
+import io
+import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from git import Repo, GitCommandError, Actor
 
 
-# Default content for agents/index.md when initializing a new wiki
-DEFAULT_AGENTS_INDEX = """# Wiki Index
+# Templates directory (for auto-instantiating agent examples)
+TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
-Quick reference for navigating this wiki. **Agents should read this first** when starting a task.
 
-## Pages
-
-(Add page entries here as the wiki grows)
-
-## Folders
-
-- **agents/** - Agent configuration and wiki metadata (this folder)
-  - `index.md` - Navigation hub (you are here)
-
-## Navigation Tips
-
-1. Use `list_pages` to see all pages (sorted alphabetically)
-2. Use `grep_pages` to search content across all pages
-3. Use `glob_pages` to find pages by path pattern
-4. Read this index first to understand wiki structure before making changes
-
-## Adding New Pages
-
-When creating a new page:
-1. Use a descriptive filename (e.g., `api-reference.md`, `getting-started.md`)
-2. Update this index.md to add a navigation entry
-3. Pages are sorted alphabetically - add number prefixes if specific order is needed
-"""
+# Supported file extensions for wiki content
+SUPPORTED_EXTENSIONS = {'.md', '.csv', '.tsx'}
 
 
 
@@ -87,26 +72,64 @@ class GitWiki:
 
     def _ensure_agents_folder(self):
         """
-        Ensure agents/ folder exists with default index.md.
+        Ensure agents/ folder exists.
 
-        Creates index.md if missing, providing a starting point for
-        wiki navigation.
+        The actual content (index.md, examples, etc.) is handled by
+        ensure_templates() which copies from backend/templates/.
         """
         agents_dir = self.pages_dir / "agents"
         agents_dir.mkdir(exist_ok=True)
 
-        index_path = agents_dir / "index.md"
+    def ensure_templates(self) -> List[str]:
+        """
+        Copy template files to wiki if they don't exist.
 
-        if not index_path.exists():
-            index_path.write_text(DEFAULT_AGENTS_INDEX, encoding='utf-8')
+        Templates are stored in backend/templates/ and get auto-instantiated
+        into the wiki pages/ folder on startup. This provides example files
+        for agents to learn from.
+
+        Returns:
+            List of created page paths
+        """
+        if not TEMPLATES_DIR.exists():
+            return []
+
+        created = []
+
+        for template_path in TEMPLATES_DIR.rglob("*"):
+            if not template_path.is_file():
+                continue
+
+            # Skip hidden files
+            if template_path.name.startswith('.'):
+                continue
+
+            # Get relative path from templates dir
+            rel_path = template_path.relative_to(TEMPLATES_DIR)
+            wiki_path = self.pages_dir / rel_path
+
+            # Only copy if doesn't exist
+            if not wiki_path.exists():
+                # Create parent directories
+                wiki_path.parent.mkdir(parents=True, exist_ok=True)
+                # Copy file
+                shutil.copy(template_path, wiki_path)
+                created.append(str(rel_path))
+
+        # Commit all created files
+        if created:
             try:
-                self.repo.index.add(["pages/agents/index.md"])
+                for rel_path in created:
+                    self.repo.index.add([f"pages/{rel_path}"])
                 self.repo.index.commit(
-                    "Initialize agents/ folder",
+                    f"Initialize templates: {', '.join(created[:3])}{'...' if len(created) > 3 else ''}",
                     author=self._create_author("System")
                 )
-            except Exception:
-                pass  # Ignore commit errors on init
+                print(f"Initialized {len(created)} template files: {', '.join(created)}")
+            except Exception as e:
+                print(f"Warning: Failed to commit templates: {e}")
+
+        return created
 
     @staticmethod
     def _create_author(author_name: str) -> Actor:
@@ -177,18 +200,39 @@ class GitWiki:
         # No order prefix - return 0 and full name
         return 0, name
 
+    @staticmethod
+    def _get_file_type(filepath: Path) -> str:
+        """
+        Determine file type from extension.
+
+        Args:
+            filepath: Path to file
+
+        Returns:
+            'markdown', 'csv', or 'tsx'
+        """
+        ext = filepath.suffix.lower()
+        if ext == '.csv':
+            return 'csv'
+        elif ext == '.tsx':
+            return 'tsx'
+        else:
+            return 'markdown'
+
     def _get_page_path(self, title: str) -> Path:
         """Get full filesystem path for a page by title or path.
 
         Expects full path for files in subdirectories (e.g., "agents/index.md").
+        Supports .md, .csv, and .tsx files.
         """
         # Direct path lookup - this is the expected case
-        if title.endswith('.md') or '/' in title:
+        has_extension = any(title.endswith(ext) for ext in SUPPORTED_EXTENSIONS)
+        if has_extension or '/' in title:
             direct_path = self.pages_dir / title
             if direct_path.exists():
                 return direct_path
 
-        # Try exact filename match
+        # Try exact filename match (for .md files)
         filename = self.title_to_filename(title)
         exact_path = self.pages_dir / filename
         if exact_path.exists():
@@ -199,28 +243,49 @@ class GitWiki:
 
     def _parse_page(self, filepath: Path) -> Dict[str, Any]:
         """
-        Parse a markdown file into a page dict.
+        Parse a file into a page dict.
 
-        Reads raw markdown content. Strips frontmatter if present (for migration).
-        Title is the filename.
+        Handles different file types:
+        - Markdown (.md): Strips frontmatter if present
+        - CSV (.csv): Parses into headers and rows
+        - TSX (.tsx): Returns raw content
 
         Args:
-            filepath: Path to the markdown file
+            filepath: Path to the file
 
         Returns:
-            Dictionary with page data (path, content only)
+            Dictionary with page data (path, content, file_type, and type-specific fields)
         """
         raw_content = filepath.read_text(encoding='utf-8')
+        file_type = self._get_file_type(filepath)
 
-        # Strip frontmatter if present (for backwards compatibility during migration)
-        content = self._strip_frontmatter(raw_content)
-
-        return {
+        base_result = {
             "path": str(filepath.relative_to(self.pages_dir)),
             "title": filepath.name,
-            "content": content,
+            "file_type": file_type,
             "has_conflicts": "<<<<<<" in raw_content or "=======" in raw_content
         }
+
+        if file_type == 'csv':
+            # Parse CSV into headers and rows
+            base_result["content"] = raw_content
+            try:
+                reader = csv.DictReader(io.StringIO(raw_content))
+                rows = list(reader)
+                base_result["headers"] = reader.fieldnames or []
+                base_result["rows"] = rows
+            except Exception:
+                # Fallback if CSV parsing fails
+                base_result["headers"] = []
+                base_result["rows"] = []
+        elif file_type == 'tsx':
+            # TSX: Return raw content as-is
+            base_result["content"] = raw_content
+        else:
+            # Markdown: Strip frontmatter if present
+            base_result["content"] = self._strip_frontmatter(raw_content)
+
+        return base_result
 
     def _strip_frontmatter(self, content: str) -> str:
         """
@@ -471,15 +536,16 @@ class GitWiki:
 
         return self._parse_page(new_filepath)
 
-    def list_pages(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def list_pages(self, limit: Optional[int] = None, file_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         List all pages in the wiki.
 
         Args:
             limit: Maximum number of pages to return (optional)
+            file_type: Filter by file type ('markdown', 'csv', 'tsx') or None for all
 
         Returns:
-            List of page dictionaries (path and title only)
+            List of page dictionaries (path, title, file_type)
         """
         pages = []
 
@@ -487,11 +553,23 @@ class GitWiki:
             # Skip directories and hidden files
             if not filepath.is_file() or filepath.name.startswith('.'):
                 continue
+
+            # Only include supported file types
+            if filepath.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                continue
+
             try:
                 rel_path = str(filepath.relative_to(self.pages_dir))
+                ft = self._get_file_type(filepath)
+
+                # Filter by file type if specified
+                if file_type and ft != file_type:
+                    continue
+
                 pages.append({
                     "path": rel_path,
-                    "title": filepath.name
+                    "title": filepath.name,
+                    "file_type": ft
                 })
             except Exception as e:
                 print(f"Warning: Failed to parse {filepath}: {e}")
@@ -554,8 +632,8 @@ class GitWiki:
         pages = []
         query_lower = query.lower()
 
-        for filepath in self.pages_dir.rglob("*.md"):
-            if filepath.is_file():
+        for filepath in self.pages_dir.rglob("*"):
+            if filepath.is_file() and filepath.suffix.lower() in SUPPORTED_EXTENSIONS:
                 try:
                     content = filepath.read_text(encoding='utf-8').lower()
                     if query_lower in content:
@@ -649,7 +727,7 @@ class GitWiki:
         Get hierarchical tree of all pages and folders.
 
         Returns:
-            List of tree items, each with id, title, path, type, children
+            List of tree items, each with id, title, path, type, file_type, children
             Sorted alphabetically.
         """
         def build_tree(directory: Path, parent_path: Optional[str] = None) -> List[Dict]:
@@ -673,16 +751,18 @@ class GitWiki:
                         "children": build_tree(entry, rel_path)
                     }
                     items.append(item)
-                elif entry.is_file():
+                elif entry.is_file() and entry.suffix.lower() in SUPPORTED_EXTENSIONS:
                     try:
                         rel_path = str(entry.relative_to(self.pages_dir))
-                        # Remove extension for id (if .md)
-                        item_id = rel_path.replace('.md', '') if rel_path.endswith('.md') else rel_path
+                        file_type = GitWiki._get_file_type(entry)
+                        # Remove extension for id
+                        item_id = rel_path.rsplit('.', 1)[0] if '.' in rel_path else rel_path
                         item = {
                             "id": item_id,
                             "title": entry.name,
                             "path": rel_path,
                             "type": "page",
+                            "file_type": file_type,
                             "parent_path": parent_path,
                             "children": None
                         }
@@ -1227,7 +1307,7 @@ class GitWiki:
             target: Target ref (e.g., "thread/feature-x")
 
         Returns:
-            Dictionary mapping page paths to {additions, deletions}
+            Dictionary mapping page paths to {additions, deletions, file_type}
         """
         try:
             result = self.repo.git.diff('--numstat', base, target)
@@ -1239,14 +1319,17 @@ class GitWiki:
                 parts = line.split('\t')
                 if len(parts) == 3:
                     adds, dels, path = parts
-                    # Only include pages (files in pages/ directory)
-                    if path.startswith('pages/') and path.endswith('.md'):
-                        # Convert path to page identifier
-                        page_path = path[6:]  # Remove 'pages/' prefix
-                        stats[page_path] = {
-                            "additions": int(adds) if adds != '-' else 0,
-                            "deletions": int(dels) if dels != '-' else 0
-                        }
+                    # Only include pages (files in pages/ directory with supported extensions)
+                    if path.startswith('pages/'):
+                        ext = '.' + path.rsplit('.', 1)[-1] if '.' in path else ''
+                        if ext.lower() in SUPPORTED_EXTENSIONS:
+                            # Convert path to page identifier
+                            page_path = path[6:]  # Remove 'pages/' prefix
+                            stats[page_path] = {
+                                "additions": int(adds) if adds != '-' else 0,
+                                "deletions": int(dels) if dels != '-' else 0,
+                                "file_type": self._get_file_type(Path(path))
+                            }
 
             return stats
         except GitCommandError:
@@ -1286,14 +1369,18 @@ class GitWiki:
         except regex_module.error as e:
             return [{"error": f"Invalid regex pattern: {e}"}]
 
-        for filepath in self.pages_dir.rglob("*.md"):
-            if not filepath.is_file():
+        for filepath in self.pages_dir.rglob("*"):
+            if not filepath.is_file() or filepath.suffix.lower() not in SUPPORTED_EXTENSIONS:
                 continue
 
             try:
                 raw_content = filepath.read_text(encoding='utf-8')
-                # Strip frontmatter if present
-                page_content = self._strip_frontmatter(raw_content)
+                file_type = self._get_file_type(filepath)
+                # Strip frontmatter if present (for markdown files)
+                if file_type == 'markdown':
+                    page_content = self._strip_frontmatter(raw_content)
+                else:
+                    page_content = raw_content
                 page_path = str(filepath.relative_to(self.pages_dir))
                 lines = page_content.split('\n')
 
@@ -1333,16 +1420,17 @@ class GitWiki:
         - ? matches single character
 
         Args:
-            pattern: Glob pattern (e.g., "docs/*", "**/*api*")
+            pattern: Glob pattern (e.g., "docs/*", "**/*api*", "*.csv")
             limit: Maximum results to return
 
         Returns:
-            List of matching pages with title, path, updated_at
+            List of matching pages with title, path, file_type
         """
         import fnmatch
 
-        # Normalize pattern - ensure it ends with .md for file matching
-        if not pattern.endswith('.md') and not pattern.endswith('*'):
+        # Normalize pattern - add wildcard if no extension specified
+        has_extension = any(pattern.endswith(ext) for ext in SUPPORTED_EXTENSIONS)
+        if not has_extension and not pattern.endswith('*'):
             search_pattern = pattern + '*'
         else:
             search_pattern = pattern
@@ -1355,13 +1443,13 @@ class GitWiki:
 
         results = []
 
-        for filepath in self.pages_dir.rglob("*.md"):
-            if not filepath.is_file():
+        for filepath in self.pages_dir.rglob("*"):
+            if not filepath.is_file() or filepath.suffix.lower() not in SUPPORTED_EXTENSIONS:
                 continue
 
             rel_path = str(filepath.relative_to(self.pages_dir))
-            # Remove .md for matching against pattern
-            rel_path_no_ext = rel_path.replace('.md', '')
+            # Remove extension for matching against pattern
+            rel_path_no_ext = rel_path.rsplit('.', 1)[0] if '.' in rel_path else rel_path
 
             # Match against both with and without extension
             if fnmatch.fnmatch(rel_path, search_pattern) or \
@@ -1372,6 +1460,7 @@ class GitWiki:
                 results.append({
                     "title": filepath.name,
                     "path": rel_path,
+                    "file_type": self._get_file_type(filepath),
                     "updated_at": None  # Legacy field
                 })
 

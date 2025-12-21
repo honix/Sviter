@@ -1,21 +1,24 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAppContext } from '../../contexts/AppContext';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
-import { AlertCircle, FileText, GitBranch, Code, Eye, Cloud, CloudOff, CloudUpload, AlertTriangle, Loader2, Pencil, Check, X } from 'lucide-react';
+import { AlertCircle, FileText, GitBranch, Code, Eye, Cloud, CloudOff, CloudUpload, AlertTriangle, Loader2, Pencil } from 'lucide-react';
 import { RevisionHistory } from '../revisions/RevisionHistory';
-import type { PageRevision } from '../../types/page';
+import type { PageRevision, FileType } from '../../types/page';
 import { ProseMirrorEditor } from '../editor/ProseMirrorEditor';
 import { CollaborativeEditor, type CollabStatus } from '../editor/CollaborativeEditor';
 import { CollaborativeCodeMirrorEditor } from '../editor/CollaborativeCodeMirrorEditor';
 import { CodeMirrorEditor } from '../editor/CodeMirrorEditor';
 import { CodeMirrorDiffView } from '../editor/CodeMirrorDiffView';
+import { CSVEditor } from '../editor/CSVEditor';
+import { ViewRuntime } from '../views/ViewRuntime';
 import { stringToColor, getInitials } from '../../utils/colors';
 import { setEditingState } from '../../services/collab';
 import { ThreadsAPI, type ThreadFile } from '../../services/threads-api';
+import { getApiUrl } from '../../utils/url';
 
 // Render filename with dimmed extension
 const FileName: React.FC<{ name: string; className?: string }> = ({ name, className }) => {
@@ -67,6 +70,17 @@ const CenterPanel: React.FC = () => {
   // Find thread for current branch
   const currentThread = threads.find(t => t.branch === currentBranch);
   const isResolving = currentThread?.status === 'resolving';
+
+  // Determine file type from current page
+  const fileType: FileType = useMemo(() => {
+    if (!currentPage) return 'markdown';
+    if (currentPage.file_type) return currentPage.file_type;
+    // Fallback to extension-based detection
+    const path = currentPage.path;
+    if (path.endsWith('.csv')) return 'csv';
+    if (path.endsWith('.tsx')) return 'tsx';
+    return 'markdown';
+  }, [currentPage?.path, currentPage?.file_type]);
 
   // Handle collab status changes from editors
   const handleCollabStatusChange = useCallback((status: CollabStatus) => {
@@ -218,7 +232,7 @@ const CenterPanel: React.FC = () => {
     if (currentPage) {
       try {
         const response = await fetch(
-          `http://localhost:8000/api/pages/${encodeURIComponent(currentPage.path)}/at-ref?ref=${revision.sha}`
+          `${getApiUrl()}/api/pages/${encodeURIComponent(currentPage.path)}/at-ref?ref=${revision.sha}`
         );
         if (response.ok) {
           const data = await response.json();
@@ -282,7 +296,7 @@ const CenterPanel: React.FC = () => {
       setTitleSaving(true);
       titleSavingRef.current = true;
       const response = await fetch(
-        `http://localhost:8000/api/pages/${encodeURIComponent(currentPage.path)}/rename`,
+        `${getApiUrl()}/api/pages/${encodeURIComponent(currentPage.path)}/rename`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -449,30 +463,63 @@ const CenterPanel: React.FC = () => {
               )}
             </div>
 
-            {/* Single collaborative editor for both View and Edit modes - prevents remounting */}
+            {/* File-type aware editor rendering for View and Edit modes */}
             {(mainTab === 'view' || mainTab === 'edit') && !viewingRevision && (
               <div className="flex-1 overflow-hidden mt-0 flex flex-col">
                 <div className="flex-1 overflow-auto min-h-0">
-                  {formatMode === 'raw' ? (
-                    <CollaborativeCodeMirrorEditor
-                      key={`collab-cm-${currentPage.path}`}
+                  {fileType === 'csv' ? (
+                    /* CSV: Table editor */
+                    <CSVEditor
+                      key={`csv-${currentPage.path}`}
                       pagePath={currentPage.path}
-                      pageTitle={currentPage.title}
-                      initialContent={currentPage.content || ''}
+                      initialHeaders={currentPage.headers}
                       editable={mainTab === 'edit'}
-                      onCollabStatusChange={handleCollabStatusChange}
-                      className="h-full"
+                      className="h-full p-4"
                     />
+                  ) : fileType === 'tsx' ? (
+                    /* TSX: View renders component, Edit shows code */
+                    mainTab === 'view' ? (
+                      <div className="h-full p-4">
+                        <ViewRuntime
+                          tsxCode={currentPage.content || ''}
+                          pagePath={currentPage.path}
+                          onCollabStatusChange={handleCollabStatusChange}
+                        />
+                      </div>
+                    ) : (
+                      <CollaborativeCodeMirrorEditor
+                        key={`collab-cm-${currentPage.path}`}
+                        pagePath={currentPage.path}
+                        pageTitle={currentPage.title}
+                        initialContent={currentPage.content || ''}
+                        editable={true}
+                        onCollabStatusChange={handleCollabStatusChange}
+                        className="h-full"
+                      />
+                    )
                   ) : (
-                    <CollaborativeEditor
-                      key={`collab-${currentPage.path}`}
-                      pagePath={currentPage.path}
-                      pageTitle={currentPage.title}
-                      initialContent={currentPage.content || ''}
-                      editable={mainTab === 'edit'}
-                      onCollabStatusChange={handleCollabStatusChange}
-                      className="h-full"
-                    />
+                    /* Markdown: Formatted or raw mode */
+                    formatMode === 'raw' ? (
+                      <CollaborativeCodeMirrorEditor
+                        key={`collab-cm-${currentPage.path}`}
+                        pagePath={currentPage.path}
+                        pageTitle={currentPage.title}
+                        initialContent={currentPage.content || ''}
+                        editable={mainTab === 'edit'}
+                        onCollabStatusChange={handleCollabStatusChange}
+                        className="h-full"
+                      />
+                    ) : (
+                      <CollaborativeEditor
+                        key={`collab-${currentPage.path}`}
+                        pagePath={currentPage.path}
+                        pageTitle={currentPage.title}
+                        initialContent={currentPage.content || ''}
+                        editable={mainTab === 'edit'}
+                        onCollabStatusChange={handleCollabStatusChange}
+                        className="h-full"
+                      />
+                    )
                   )}
                 </div>
               </div>

@@ -1,7 +1,7 @@
 import { useEffect, useReducer } from 'react';
 import { EditorView } from 'prosemirror-view';
 import type { Command } from 'prosemirror-state';
-import { toggleMark, setBlockType, lift } from 'prosemirror-commands';
+import { toggleMark, setBlockType } from 'prosemirror-commands';
 import { wrapInList, liftListItem } from 'prosemirror-schema-list';
 import type { MarkType, NodeType } from 'prosemirror-model';
 import { Button } from '@/components/ui/button';

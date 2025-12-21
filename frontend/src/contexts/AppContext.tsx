@@ -6,6 +6,7 @@ import { treeApi } from '../services/tree-api';
 import type { Thread, ThreadMessage, ThreadStatus } from '../types/thread';
 import { useAuth } from './AuthContext';
 import { invalidateSessions } from '../services/collab';
+import { getApiUrl } from '../utils/url';
 
 interface AppState {
   pages: Page[];
@@ -286,6 +287,9 @@ interface AppContextType {
     moveItem: (sourcePath: string, targetParentPath: string | null, newOrder: number) => Promise<void>;
     createFolder: (name: string, parentPath?: string) => Promise<void>;
     deleteFolder: (path: string) => Promise<void>;
+    // Branch actions
+    refreshBranches: () => Promise<void>;
+    checkoutBranch: (branch: string) => Promise<void>;
   };
   websocket: {
     sendMessage: (message: unknown) => void;
@@ -564,7 +568,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/pages');
+      const response = await fetch(`${getApiUrl()}/api/pages`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -583,7 +587,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // The page content will be updated when the user navigates or refreshes
       if (!currentPageRef.current && backendPages.length > 0) {
         try {
-          const pageResponse = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(backendPages[0].path)}`);
+          const pageResponse = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(backendPages[0].path)}`);
           if (pageResponse.ok) {
             const fullPage = await pageResponse.json();
             currentPageRef.current = fullPage; // Update ref immediately to prevent duplicate dispatches
@@ -614,7 +618,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      const pageResponse = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(pageTitle)}`);
+      const pageResponse = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(pageTitle)}`);
       if (pageResponse.ok) {
         const fullPage = await pageResponse.json();
         // Only update if content actually changed (compare by content length and first/last chars as quick check)
@@ -637,7 +641,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      const pageResponse = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(currentPageRef.current.path)}`);
+      const pageResponse = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(currentPageRef.current.path)}`);
       if (pageResponse.ok) {
         const fullPage = await pageResponse.json();
         currentPageRef.current = fullPage;
@@ -717,7 +721,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatch({ type: 'SET_ERROR', payload: null });
 
       try {
-        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(title)}`, {
+        const response = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(title)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updates),
@@ -741,7 +745,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatch({ type: 'SET_ERROR', payload: null });
 
       try {
-        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(path)}?author=user`, {
+        const response = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(path)}?author=user`, {
           method: 'DELETE',
         });
 
@@ -769,7 +773,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatch({ type: 'SET_ERROR', payload: null });
 
       try {
-        const response = await fetch(`http://localhost:8000/api/pages/${encodeURIComponent(page.path)}`);
+        const response = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(page.path)}`);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -796,7 +800,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatch({ type: 'SET_ERROR', payload: null });
 
       try {
-        const response = await fetch('http://localhost:8000/api/pages', {
+        const response = await fetch(`${getApiUrl()}/api/pages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -906,7 +910,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await treeApi.moveItem({ sourcePath, targetParentPath, newOrder });
         const tree = await treeApi.getTree();
         dispatch({ type: 'SET_PAGE_TREE', payload: tree });
-        const response = await fetch('http://localhost:8000/api/pages');
+        const response = await fetch(`${getApiUrl()}/api/pages`);
         if (response.ok) {
           const data = await response.json();
           dispatch({ type: 'SET_PAGES', payload: data.pages });
@@ -942,6 +946,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (err) {
         console.error('Failed to delete folder:', err);
         dispatch({ type: 'SET_ERROR', payload: 'Failed to delete folder' });
+      }
+    },
+
+    // Branch actions
+    refreshBranches: async () => {
+      // Just fetch to verify endpoint is accessible - branch list is managed elsewhere
+      try {
+        await fetch(`${getApiUrl()}/api/git/branches`);
+      } catch (err) {
+        console.error('Failed to refresh branches:', err);
+      }
+    },
+
+    checkoutBranch: async (branch: string) => {
+      try {
+        const response = await fetch(`${getApiUrl()}/api/git/checkout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ branch }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to checkout branch: ${response.statusText}`);
+        }
+        dispatch({ type: 'SET_CURRENT_BRANCH', payload: branch });
+        // Reload pages and tree after checkout
+        const pagesResponse = await fetch(`${getApiUrl()}/api/pages`);
+        if (pagesResponse.ok) {
+          const data = await pagesResponse.json();
+          dispatch({ type: 'SET_PAGES', payload: data.pages });
+        }
+        const tree = await treeApi.getTree();
+        dispatch({ type: 'SET_PAGE_TREE', payload: tree });
+      } catch (err) {
+        console.error('Failed to checkout branch:', err);
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to checkout branch' });
       }
     }
   };

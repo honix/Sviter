@@ -1,6 +1,7 @@
-import { TreeItem, MoveOperation, FolderCreate } from '../types/page';
+import type { TreeItem, MoveOperation, FolderCreate } from '../types/page';
+import { getApiUrl } from '../utils/url';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = getApiUrl();
 
 export const treeApi = {
   async getTree(): Promise<TreeItem[]> {

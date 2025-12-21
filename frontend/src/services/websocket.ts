@@ -1,4 +1,5 @@
-import { WebSocketMessage, ChatMessage } from '../types/chat';
+import type { WebSocketMessage } from '../types/chat';
+import { getWsUrl } from '../utils/url';
 
 export type WebSocketEventHandler = (message: WebSocketMessage) => void;
 export type ConnectionStatusHandler = (status: 'connecting' | 'connected' | 'disconnected' | 'error') => void;
@@ -177,7 +178,7 @@ export const createWebSocketService = (clientId?: string) => {
 
   // Create new instance
   console.log(`Creating new WebSocket service for: ${id}`);
-  const wsUrl = `ws://localhost:8000/ws`;
+  const wsUrl = getWsUrl('/ws');
   const service = new WebSocketService(wsUrl, id);
   serviceInstances.set(id, service);
 

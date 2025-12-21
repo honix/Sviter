@@ -1,8 +1,9 @@
 /**
  * API client for thread operations
  */
+import { getApiUrl } from '../utils/url';
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = getApiUrl();
 
 export interface ThreadFile {
   path: string;

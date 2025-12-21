@@ -1,4 +1,3 @@
-import React from 'react';
 import MainLayout from './components/layout/MainLayout';
 import { AppProvider } from './contexts/AppContext';
 import { AuthProvider } from './contexts/AuthContext';

@@ -1,6 +1,7 @@
-import { Page, PageRevision } from '../types/page';
+import type { Page, PageRevision } from '../types/page';
+import { getApiUrl } from '../utils/url';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = `${getApiUrl()}/api`;
 
 /**
  * API service for interacting with the backend REST API

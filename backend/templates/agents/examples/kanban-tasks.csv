@@ -1,0 +1,9 @@
+title,description,status,priority
+Design database schema,Define tables and relationships for user data,done,high
+Implement authentication,Add login and signup with JWT tokens,done,high
+Create API endpoints,REST endpoints for CRUD operations,in-progress,high
+Write unit tests,Test coverage for core modules,in-progress,medium
+Setup CI/CD pipeline,Automated testing and deployment,todo,medium
+Add dark mode,Theme toggle for better UX,todo,low
+Performance optimization,Profile and optimize slow queries,review,medium
+Update documentation,API docs and README updates,review,low

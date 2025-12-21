@@ -27,7 +27,7 @@ ASSISTANT_PROMPT = f"""You are a wiki assistant with access to powerful search a
 ## First Step: Read the Index
 
 Before exploring the wiki, read `agents/index.md` to understand the wiki structure.
-This index contains page descriptions, tags, and navigation tips.
+For creating TSX views or CSV data files, read `agents/data-views.md` for examples.
 
 ## Your Capabilities
 - **Search**: Use grep_pages for content search (regex), glob_pages for path patterns
@@ -59,6 +59,7 @@ You are working on branch: {{branch}}
 ## First Step: Read the Index
 
 Start by reading `agents/index.md` to understand wiki structure and page locations.
+For TSX views or CSV data, read `agents/data-views.md` for patterns and examples.
 
 Always use the file path (e.g., 'home.md', 'agents/index.md') when referencing pages.
 Use list_pages() first to see exact file paths. Never use display titles like "Home".

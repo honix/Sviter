@@ -1,7 +1,6 @@
 /**
  * DiffViewer - displays unified diff with basic syntax highlighting
  */
-import React from 'react';
 
 interface DiffViewerProps {
   diff: string;

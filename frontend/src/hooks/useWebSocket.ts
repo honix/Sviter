@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { WebSocketService, createWebSocketService, WebSocketEventHandler, ConnectionStatusHandler } from '../services/websocket';
-import { WebSocketMessage } from '../types/chat';
+import { WebSocketService, createWebSocketService } from '../services/websocket';
+import type { WebSocketMessage } from '../types/chat';
 
 export interface UseWebSocketReturn {
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';

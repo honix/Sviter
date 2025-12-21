@@ -7,7 +7,7 @@
  * - baseBranch changes
  * - refreshTrigger changes (for when main branch is updated)
  */
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight, FilePlus, FileEdit, Trash2 } from 'lucide-react';
 import { GitAPI } from '../../services/git-api';
 import { DiffViewer } from '../agents/DiffViewer';
