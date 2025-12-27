@@ -20,7 +20,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, FileText, FileSpreadsheet, FileCode, FolderPlus, GripVertical, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, LogIn } from 'lucide-react';
+import { Plus, FileText, FileSpreadsheet, FileCode, FolderPlus, GripVertical, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, LogIn, MessageSquarePlus } from 'lucide-react';
+import { useSelection } from '../../contexts/SelectionContext';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
 import { getApiUrl } from '../../utils/url';
@@ -159,6 +160,7 @@ const PageTree: React.FC<PageTreeProps> = ({
   onMoveItem
 }) => {
   const { user, logout } = useAuth();
+  const { addPathToContext } = useSelection();
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [diffStats, setDiffStats] = useState<PageDiffStats>({});
@@ -393,6 +395,18 @@ const PageTree: React.FC<PageTreeProps> = ({
                 )}
               </span>
             )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 opacity-0 group-hover:opacity-100 text-pink-400 hover:text-pink-500 hover:bg-pink-400/10"
+              onClick={(e) => {
+                e.stopPropagation();
+                addPathToContext(item.path);
+              }}
+              title="Add path to chat"
+            >
+              <MessageSquarePlus className="h-3 w-3" />
+            </Button>
             {currentBranch === 'main' && (
               <Button
                 variant="ghost"
@@ -443,6 +457,21 @@ const PageTree: React.FC<PageTreeProps> = ({
             )}
           </span>
         )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(
+            "h-5 w-5 opacity-0 group-hover:opacity-100 text-pink-400 hover:text-pink-500 hover:bg-pink-400/10",
+            isSelected && "hover:bg-primary-foreground/20"
+          )}
+          onClick={(e) => {
+            e.stopPropagation();
+            addPathToContext(item.path);
+          }}
+          title="Add path to chat"
+        >
+          <MessageSquarePlus className="h-3 w-3" />
+        </Button>
         {currentBranch === 'main' && (
           <Button
             variant="ghost"

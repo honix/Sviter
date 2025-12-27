@@ -16,6 +16,7 @@ import { CodeMirrorDiffView } from '../editor/CodeMirrorDiffView';
 import { CSVEditor } from '../editor/CSVEditor';
 import { ViewRuntime } from '../views/ViewRuntime';
 import { BranchProvider } from '../../contexts/BranchContext';
+import { SelectionFloatingButton } from '../chat/SelectionFloatingButton';
 import { stringToColor, getInitials } from '../../utils/colors';
 import { setEditingState } from '../../services/collab';
 import { ThreadsAPI, type ThreadFile } from '../../services/threads-api';
@@ -399,7 +400,11 @@ const CenterPanel: React.FC = () => {
   // Main branch: View | Edit | History with Formatted/Raw toggle
   if (isMainBranch) {
     return (
-      <div className="h-full bg-background flex flex-col">
+      <div
+        className="h-full bg-background flex flex-col"
+        data-selection-area="center-panel"
+      >
+        <SelectionFloatingButton />
         {/* Header */}
         <div className="border-b border-border p-4 flex items-center justify-between">
           <div className="group flex items-center gap-2">
@@ -607,7 +612,11 @@ const CenterPanel: React.FC = () => {
 
   // Other branches: Diff | History (no format toggle, always raw)
   return (
-    <div className="h-full bg-background flex flex-col">
+    <div
+      className="h-full bg-background flex flex-col"
+      data-selection-area="center-panel"
+    >
+      <SelectionFloatingButton />
       {/* Header */}
       <div className="border-b border-border p-4">
         <div className="flex items-center justify-between">

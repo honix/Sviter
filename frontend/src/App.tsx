@@ -1,6 +1,7 @@
 import MainLayout from './components/layout/MainLayout';
 import { AppProvider } from './contexts/AppContext';
 import { AuthProvider } from './contexts/AuthContext';
+import { SelectionProvider } from './contexts/SelectionContext';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import { useUrlState } from './hooks/useUrlState';
 
@@ -18,10 +19,12 @@ function App() {
     <ErrorBoundary>
       <AuthProvider>
         <AppProvider>
-          <UrlStateInitializer />
-          <div className="App">
-            <MainLayout />
-          </div>
+          <SelectionProvider>
+            <UrlStateInitializer />
+            <div className="App">
+              <MainLayout />
+            </div>
+          </SelectionProvider>
         </AppProvider>
       </AuthProvider>
     </ErrorBoundary>

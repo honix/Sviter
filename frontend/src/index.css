@@ -98,3 +98,25 @@ body {
 [role="tabpanel"][data-state="inactive"] {
   display: none;
 }
+
+/* Light magenta selection for center panel - no text inversion */
+[data-selection-area="center-panel"] ::selection {
+  background-color: rgba(236, 72, 153, 0.3); /* pink-500 @ 30% */
+  color: inherit;
+}
+
+[data-selection-area="center-panel"] ::-moz-selection {
+  background-color: rgba(236, 72, 153, 0.3);
+  color: inherit;
+}
+
+/* CodeMirror selection override */
+[data-selection-area="center-panel"] .cm-selectionBackground {
+  background-color: rgba(236, 72, 153, 0.3) !important;
+}
+
+/* ProseMirror selection within center panel */
+[data-selection-area="center-panel"] .ProseMirror ::selection {
+  background-color: rgba(236, 72, 153, 0.3);
+  color: inherit;
+}

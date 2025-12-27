@@ -3,6 +3,10 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useChat } from '../../hooks/useChat';
 import { useAppContext } from '../../contexts/AppContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSelection } from '../../contexts/SelectionContext';
+import { SelectionBadge } from './SelectionBadge';
+import { MessageContextBadges } from './MessageContextBadges';
+import { parseMessageWithContext } from '../../utils/parseSelectionContext';
 import { stringToColor, getInitials } from '../../utils/colors';
 import {
   ChatContainerRoot,
@@ -40,6 +44,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
   const [inputValue, setInputValue] = useState('');
   const [expandedSystemPrompts, setExpandedSystemPrompts] = useState<Set<string>>(new Set());
   const { userId: currentUserId } = useAuth();
+  const { state: selectionState, clearAllContexts } = useSelection();
 
   const toggleSystemPrompt = useCallback((messageId: string) => {
     setExpandedSystemPrompts(prev => {
@@ -64,18 +69,29 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
   const handleSend = () => {
     if (!inputValue.trim() || !isConnected) return;
 
-    const trimmedInput = inputValue.trim();
+    let messageToSend = inputValue.trim();
 
-    // Handle /restart command (only in assistant mode)
-    if (isAssistantMode && trimmedInput === '/restart') {
+    // Handle /new command (only in assistant mode)
+    if (isAssistantMode && messageToSend === '/new') {
       clearMessages();
       websocket.sendMessage({ type: 'reset' });
       setInputValue('');
       return;
     }
 
+    // Append selection contexts in XML format
+    if (selectionState.addedContexts.length > 0) {
+      const selections = selectionState.addedContexts.map(({ text, filePath }, index) => {
+        const source = filePath ? ` source="${filePath}"` : '';
+        return `<contextItem id="#${index + 1}"${source}>\n${text}\n</contextItem>`;
+      }).join('\n');
+      const contextXml = `\n\n<userProvidedContext>\n${selections}\n</userProvidedContext>`;
+      messageToSend = messageToSend + contextXml;
+      clearAllContexts();
+    }
+
     // Send message via useChat hook (handles both assistant and worker)
-    sendMessage(trimmedInput);
+    sendMessage(messageToSend);
     setInputValue('');
   };
 
@@ -354,23 +370,35 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
                 ? { backgroundColor: stringToColor(effectiveUserId) }
                 : undefined;
 
-              return (
-                <Message key={message.id} className={messageClassName}>
-                  <MessageAvatar
-                    src={isAI ? '/ai-avatar.png' : undefined}
-                    alt={isAI ? 'AI' : effectiveUserId || 'User'}
-                    fallback={avatarFallback}
-                    style={avatarStyle}
-                  />
-                  <MessageContent
-                    markdown={isAI}
-                    className={contentClassName}
-                    linkHandlers={isAI ? linkHandlers : undefined}
-                  >
-                    {message.content}
-                  </MessageContent>
-                </Message>
-              );
+              return (() => {
+                const parsed = isUser ? parseMessageWithContext(message.content) : null;
+                const hasSelections = parsed && parsed.selections.length > 0;
+
+                return (
+                  <Message key={message.id} className={messageClassName}>
+                    <MessageAvatar
+                      src={isAI ? '/ai-avatar.png' : undefined}
+                      alt={isAI ? 'AI' : effectiveUserId || 'User'}
+                      fallback={avatarFallback}
+                      style={avatarStyle}
+                    />
+                    <div className="flex flex-col">
+                      {hasSelections && (
+                        <div className="flex flex-wrap gap-1 ml-3 mr-3 mb-[-10px] z-10 relative">
+                          <MessageContextBadges selections={parsed.selections} />
+                        </div>
+                      )}
+                      <MessageContent
+                        markdown={isAI}
+                        className={contentClassName}
+                        linkHandlers={isAI ? linkHandlers : undefined}
+                      >
+                        {isUser ? parsed!.text : message.content}
+                      </MessageContent>
+                    </div>
+                  </Message>
+                );
+              })();
             })()
           ))}
           {isGenerating && (
@@ -384,37 +412,40 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
 
       {/* Bottom section - Chat input always available */}
       <div className="p-4 border-t border-border flex-shrink-0">
-        <PromptInput
-          value={inputValue}
-          onValueChange={setInputValue}
-          onSubmit={handleSend}
-          isLoading={!isConnected}
-        >
-          <PromptInputTextarea
-            placeholder={
-              !isConnected
-                ? "Connecting..."
-                : isAssistantMode
-                  ? "Type /restart to reset • Ask about your wiki..."
-                  : isReviewMode
-                    ? "Request changes or ask questions..."
-                    : "Send a message to this thread..."
-            }
-            disabled={!isConnected}
-          />
-          <PromptInputActions>
-            <PromptInputAction tooltip="Send message">
-              <Button
-                onClick={handleSend}
-                disabled={!isConnected || !inputValue.trim()}
-                size="icon"
-                className="rounded-full"
-              >
-                <ArrowUp className="h-4 w-4" />
-              </Button>
-            </PromptInputAction>
-          </PromptInputActions>
-        </PromptInput>
+        <div className="relative">
+          <SelectionBadge />
+          <PromptInput
+            value={inputValue}
+            onValueChange={setInputValue}
+            onSubmit={handleSend}
+            isLoading={!isConnected}
+          >
+            <PromptInputTextarea
+              placeholder={
+                !isConnected
+                  ? "Connecting..."
+                  : isAssistantMode
+                    ? "Type /new to start fresh • Ask about your wiki..."
+                    : isReviewMode
+                      ? "Request changes or ask questions..."
+                      : "Send a message to this thread..."
+              }
+              disabled={!isConnected}
+            />
+            <PromptInputActions>
+              <PromptInputAction tooltip="Send message">
+                <Button
+                  onClick={handleSend}
+                  disabled={!isConnected || !inputValue.trim()}
+                  size="icon"
+                  className="rounded-full"
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+              </PromptInputAction>
+            </PromptInputActions>
+          </PromptInput>
+        </div>
       </div>
     </div>
   );

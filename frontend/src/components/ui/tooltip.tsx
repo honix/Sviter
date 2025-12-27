@@ -38,8 +38,9 @@ function TooltipContent({
   className,
   sideOffset = 0,
   children,
+  arrowClassName,
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+}: React.ComponentProps<typeof TooltipPrimitive.Content> & { arrowClassName?: string }) {
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
@@ -52,7 +53,7 @@ function TooltipContent({
         {...props}
       >
         {children}
-        <TooltipPrimitive.Arrow className="fill-muted z-50" />
+        <TooltipPrimitive.Arrow className={cn("fill-muted z-50", arrowClassName)} />
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   )
