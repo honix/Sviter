@@ -54,9 +54,10 @@ const CenterPanel: React.FC = () => {
   const [viewingRevisionContent, setViewingRevisionContent] = useState<string | null>(null);
 
   // For main branch: 'view' | 'edit' | 'history'
-  // For other branches: 'view' | 'diff' | 'history'
   const [mainTab, setMainTab] = useState<'view' | 'edit' | 'history'>('view');
-  const [branchTab, setBranchTab] = useState<'view' | 'diff' | 'history'>('view');
+  // For other branches: 'preview' | 'diff' | 'history' (from context for URL sync)
+  const { branchViewMode } = state;
+  const setBranchViewMode = actions.setBranchViewMode;
 
   // Format toggle only for main branch: 'formatted' | 'raw'
   const [formatMode, setFormatMode] = useState<'formatted' | 'raw'>('formatted');
@@ -268,7 +269,7 @@ const CenterPanel: React.FC = () => {
   };
 
   const handleBranchTabChange = (value: string) => {
-    setBranchTab(value as 'view' | 'diff' | 'history');
+    setBranchViewMode(value as 'preview' | 'diff' | 'history');
   };
 
   // Title editing handlers
@@ -619,13 +620,13 @@ const CenterPanel: React.FC = () => {
       {/* Content Area with Tabs */}
       <div className="flex-1 overflow-hidden">
         <Tabs
-          value={branchTab}
+          value={branchViewMode}
           onValueChange={handleBranchTabChange}
           className="h-full flex flex-col"
         >
           <div className="flex items-center justify-between mx-4 mt-4">
             <TabsList>
-              <TabsTrigger value="view">
+              <TabsTrigger value="preview">
                 <Eye className="h-4 w-4 mr-1.5" />
                 Preview
               </TabsTrigger>
@@ -658,8 +659,8 @@ const CenterPanel: React.FC = () => {
             )}
           </div>
 
-          {/* Preview tab - ephemeral preview mode */}
-          <TabsContent value="view" className="flex-1 overflow-hidden mt-0 flex flex-col">
+          {/* Preview tab - read-only view of branch content */}
+          <TabsContent value="preview" className="flex-1 overflow-hidden mt-0 flex flex-col">
             <div className="flex-1 overflow-auto min-h-0">
               <BranchProvider branch={currentBranch} ephemeral>
                 {fileType === 'csv' ? (
@@ -667,6 +668,7 @@ const CenterPanel: React.FC = () => {
                     key={`csv-view-${currentPage.path}-${currentBranch}-${pageUpdateCounter}`}
                     pagePath={currentPage.path}
                     initialHeaders={currentPage.headers}
+                    editable={false}
                     className="h-full p-4"
                   />
                 ) : fileType === 'tsx' ? (
@@ -683,8 +685,7 @@ const CenterPanel: React.FC = () => {
                     <ProseMirrorEditor
                       key={`md-view-${currentPage.path}-${currentBranch}-${pageUpdateCounter}`}
                       initialContent={currentPage.content || ''}
-                      editable={true}
-                      onChange={() => {}}
+                      editable={false}
                       className="h-full"
                     />
                   </div>

@@ -42,16 +42,19 @@ class AssistantThread(ReadToolsMixin, SpawnMixin, Thread):
     """
 
     @classmethod
-    def create(cls, owner_id: str, name: str = "User Assistant") -> 'AssistantThread':
+    def create(cls, owner_id: str) -> 'AssistantThread':
         """Create a new assistant thread for a user."""
         thread_id = str(uuid.uuid4())
         now = datetime.now()
+
+        # Generate consistent name: user-{owner_id[:6]}-assistant
+        thread_name = f"user-{owner_id[:6]}-assistant"
 
         # Create in database
         db_create_thread(
             thread_id=thread_id,
             thread_type='assistant',
-            name=name,
+            name=thread_name,
             owner_id=owner_id,
             status='active',
             goal=None,
@@ -61,7 +64,7 @@ class AssistantThread(ReadToolsMixin, SpawnMixin, Thread):
 
         return cls(
             id=thread_id,
-            name=name,
+            name=thread_name,
             type=ThreadType.ASSISTANT,
             owner_id=owner_id,
             status=ThreadStatus.ACTIVE,

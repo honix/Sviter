@@ -29,6 +29,7 @@ interface AppState {
   expandedFolders: string[];
   // Branch state (for diff view)
   currentBranch: string;
+  branchViewMode: 'preview' | 'diff' | 'history';
   // Refresh trigger for real-time updates
   pageUpdateCounter: number;
 }
@@ -60,6 +61,7 @@ type AppAction =
   | { type: 'TOGGLE_FOLDER'; payload: string }
   // Branch actions (for diff view only - no actual checkout)
   | { type: 'SET_CURRENT_BRANCH'; payload: string }
+  | { type: 'SET_BRANCH_VIEW_MODE'; payload: 'preview' | 'diff' | 'history' }
   | { type: 'UPDATE_CURRENT_PAGE_CONTENT'; payload: string }
   // Refresh trigger
   | { type: 'INCREMENT_PAGE_UPDATE_COUNTER' };
@@ -84,6 +86,7 @@ const initialState: AppState = {
   expandedFolders: [],
   // Branch state (for diff view - no actual checkout)
   currentBranch: 'main',
+  branchViewMode: 'preview',
   // Refresh trigger for real-time updates
   pageUpdateCounter: 0
 };
@@ -244,6 +247,9 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_CURRENT_BRANCH':
       return { ...state, currentBranch: action.payload };
 
+    case 'SET_BRANCH_VIEW_MODE':
+      return { ...state, branchViewMode: action.payload };
+
     case 'UPDATE_CURRENT_PAGE_CONTENT':
       if (!state.currentPage) return state;
       return {
@@ -290,6 +296,7 @@ interface AppContextType {
     // Branch actions
     refreshBranches: () => Promise<void>;
     checkoutBranch: (branch: string) => Promise<void>;
+    setBranchViewMode: (mode: 'preview' | 'diff' | 'history') => void;
   };
   websocket: {
     sendMessage: (message: unknown) => void;
@@ -1020,6 +1027,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.error('Failed to checkout branch:', err);
         dispatch({ type: 'SET_ERROR', payload: 'Failed to checkout branch' });
       }
+    },
+
+    setBranchViewMode: (mode: 'preview' | 'diff' | 'history') => {
+      dispatch({ type: 'SET_BRANCH_VIEW_MODE', payload: mode });
     }
   };
 

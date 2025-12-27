@@ -64,14 +64,16 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
         thread_id = str(uuid.uuid4())
         now = datetime.now()
 
-        # Sanitize name for branch naming
+        # Generate branch name and derive thread name from it (with hash for uniqueness)
         branch = cls._generate_branch_name(name, thread_id)
+        # Name matches branch without thread/ prefix: "add-hello-world-tsx-e5e491"
+        thread_name = branch.replace('thread/', '')
 
         # Create in database
         db_create_thread(
             thread_id=thread_id,
             thread_type='worker',
-            name=name,
+            name=thread_name,
             owner_id=owner_id,
             status='working',
             goal=goal,
@@ -81,7 +83,7 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
 
         return cls(
             id=thread_id,
-            name=name,
+            name=thread_name,
             type=ThreadType.WORKER,
             owner_id=owner_id,
             status=ThreadStatus.WORKING,

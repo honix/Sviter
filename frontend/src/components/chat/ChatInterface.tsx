@@ -127,6 +127,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
     const page = state.pages.find(p => p.path === pagePath);
     if (page) {
       await actions.setCurrentPage(page);
+    } else {
+      // Page might be newly created by a thread - create minimal page object
+      // setCurrentPage will fetch the actual content from the server
+      const ext = pagePath.split('.').pop()?.toLowerCase();
+      const fileType = ext === 'csv' ? 'csv' : ext === 'tsx' ? 'tsx' : 'markdown';
+      const minimalPage = {
+        path: pagePath,
+        title: pagePath.split('/').pop() || pagePath,
+        content: '',
+        file_type: fileType as 'markdown' | 'csv' | 'tsx',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      await actions.setCurrentPage(minimalPage);
     }
   }, [actions, state.pages]);
 
