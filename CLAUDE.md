@@ -21,6 +21,7 @@ This is an AI-powered wiki system with a FastAPI backend and React frontend. The
 - **Session Management**: Unified SessionManager handles main chat + worker threads
 - **Thread System**: Autonomous workers on git branches (`thread/<name>/<timestamp>`)
 - **Tool System**: Composable tools via ToolBuilder (read/edit/spawn/review)
+
 ### Frontend (React TypeScript)
 
 - **Framework**: React 19 with TypeScript and Vite
@@ -46,6 +47,7 @@ make run      # Start both backend and frontend
 ```
 
 Other commands:
+
 - `make backend` - Start backend only (port 8000)
 - `make frontend` - Start frontend only (port 5173)
 - `make clean` - Remove venv and node_modules
@@ -165,16 +167,7 @@ Other commands:
 
 1. **First time setup**: `make setup`
 2. **Run both servers**: `make run`
-3. **Testing**: Run backend tests with `backend/venv/bin/python scripts/run_tests.py`
-4. **WebSocket Testing**: Use `backend/venv/bin/python scripts/chat_client.py` for backend testing
-5. **Agentic Testing**: Use Playwright MCP to test the full application autonomously
-
-## Security Notes
-
-- API keys should be moved to environment variables for production
-- WebSocket connections validated per client
-- Git operations validated (branch names sanitized)
-- Input sanitization for markdown content
+3. **Agentic Testing**: Use Claude for Chrome to test the application autonomously
 
 ## Important Notes
 
@@ -197,15 +190,18 @@ When running in **Claude Code on the web** (not CLI):
 ## Real-time Thread Updates
 
 ### Branch & Page Lifecycle
+
 - **Branch creation**: Thread branches created when spawned via `spawn_thread`
 - **Live page updates**: Pages appear in tree as threads edit them (via `page_updated` WebSocket messages)
 - **Branch cleanup**: Rejected branches deleted, accepted branches merged to main
 
 ### WebSocket Message Types
+
 - `thread_created` / `thread_updated` - Thread lifecycle and status changes
 - `page_updated` - Real-time page tree updates during thread execution
 - `assistant_message` / `tool_call` / `tool_result` - Streaming conversation
 
 ### Implementation Notes
+
 - React 18 batching workaround: Use refs (`reloadFunctionsRef` in AppContext) to call reload functions from WebSocket callbacks with empty deps
 - System prompt bubble: Full width styling in ChatInterface
