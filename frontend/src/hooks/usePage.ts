@@ -4,10 +4,11 @@
  * Works with .md, .txt, .json, .tsx, and any other text files.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { useAuth } from '../contexts/AuthContext';
+import { useBranch } from '../contexts/BranchContext';
 import { stringToColor, getInitials, getDisplayName } from '../utils/colors';
 import { getWsUrl, getApiUrl } from '../utils/url';
 import { updatePage } from '../services/api';
@@ -114,13 +115,92 @@ function scheduleSaveText(pageId: string): void {
 }
 
 /**
+ * Ephemeral hook for viewing page content from a branch.
+ * Fetches content from branch, allows local mutations (not saved).
+ * Used in thread review View mode.
+ */
+function usePageEphemeral(
+  pageId: string,
+  branchRef: string,
+  refreshTrigger?: number
+): UsePageResult {
+  const [content, setContentState] = useState<string>('');
+  const [isLoaded, setIsLoaded] = useState(false);
+  const fetchedRef = useRef<string>('');
+
+  // Fetch content from branch
+  useEffect(() => {
+    if (!pageId || !branchRef) {
+      return;
+    }
+
+    const fetchKey = `${pageId}@${branchRef}@${refreshTrigger ?? 0}`;
+
+    // Skip if already fetched this exact version
+    if (fetchedRef.current === fetchKey && isLoaded) {
+      return;
+    }
+
+    const fetchData = async () => {
+      try {
+        const url = `${getApiUrl()}/api/pages/${encodeURIComponent(pageId)}/at-ref?ref=${encodeURIComponent(branchRef)}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          setContentState(data.content || '');
+          fetchedRef.current = fetchKey;
+        }
+      } catch (err) {
+        console.error('Failed to fetch page from branch:', err);
+      }
+      setIsLoaded(true);
+    };
+
+    fetchData();
+  }, [pageId, branchRef, refreshTrigger, isLoaded]);
+
+  // Local-only setContent (ephemeral - not saved)
+  const setContent = useCallback((newContent: string) => {
+    setContentState(newContent);
+  }, []);
+
+  return {
+    content,
+    setContent,
+    isLoaded,
+    isSyncing: false,
+    connectionStatus: 'connected',
+    saveStatus: 'saved', // Always "saved" since we don't save
+  };
+}
+
+/**
  * Hook for collaborative text page editing.
  * Syncs text content via Yjs Y.Text.
  *
  * @param pageId - The path to the text file (e.g., "notes.md", "config.json")
+ * @param refreshTrigger - Optional refresh counter for ephemeral mode sync
  */
-export function usePage(pageId: string): UsePageResult {
+export function usePage(
+  pageId: string,
+  refreshTrigger?: number
+): UsePageResult {
   const { userId } = useAuth();
+  const { viewingBranch, ephemeral } = useBranch();
+
+  // If viewing a branch in ephemeral mode, use the ephemeral hook
+  const ephemeralResult = usePageEphemeral(
+    viewingBranch && ephemeral ? pageId : '',
+    viewingBranch || '',
+    refreshTrigger
+  );
+
+  // Return ephemeral result if in ephemeral mode
+  if (viewingBranch && ephemeral) {
+    return ephemeralResult;
+  }
+
+  // Otherwise continue with normal Yjs-based hook
   const [content, setContentState] = useState<string>('');
   const [isLoaded, setIsLoaded] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);

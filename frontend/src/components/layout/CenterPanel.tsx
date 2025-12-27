@@ -5,7 +5,7 @@ import LoadingSpinner from '../common/LoadingSpinner';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
-import { AlertCircle, FileText, GitBranch, Code, Eye, Cloud, CloudOff, CloudUpload, AlertTriangle, Loader2, Pencil } from 'lucide-react';
+import { AlertCircle, FileText, GitBranch, Code, Eye, Cloud, CloudOff, CloudUpload, AlertTriangle, Loader2, Pencil, History } from 'lucide-react';
 import { RevisionHistory } from '../revisions/RevisionHistory';
 import type { PageRevision, FileType } from '../../types/page';
 import { ProseMirrorEditor } from '../editor/ProseMirrorEditor';
@@ -15,13 +15,21 @@ import { CodeMirrorEditor } from '../editor/CodeMirrorEditor';
 import { CodeMirrorDiffView } from '../editor/CodeMirrorDiffView';
 import { CSVEditor } from '../editor/CSVEditor';
 import { ViewRuntime } from '../views/ViewRuntime';
+import { BranchProvider } from '../../contexts/BranchContext';
 import { stringToColor, getInitials } from '../../utils/colors';
 import { setEditingState } from '../../services/collab';
 import { ThreadsAPI, type ThreadFile } from '../../services/threads-api';
 import { getApiUrl } from '../../utils/url';
 
+// Extract filename from path
+const getFileName = (path: string): string => {
+  const parts = path.split('/');
+  return parts[parts.length - 1];
+};
+
 // Render filename with dimmed extension
-const FileName: React.FC<{ name: string; className?: string }> = ({ name, className }) => {
+const FileName: React.FC<{ path: string; className?: string }> = ({ path, className }) => {
+  const name = getFileName(path);
   const lastDot = name.lastIndexOf('.');
   if (lastDot === -1 || lastDot === 0) {
     return <span className={className}>{name}</span>;
@@ -46,9 +54,9 @@ const CenterPanel: React.FC = () => {
   const [viewingRevisionContent, setViewingRevisionContent] = useState<string | null>(null);
 
   // For main branch: 'view' | 'edit' | 'history'
-  // For other branches: 'diff' | 'history'
+  // For other branches: 'view' | 'diff' | 'history'
   const [mainTab, setMainTab] = useState<'view' | 'edit' | 'history'>('view');
-  const [branchTab, setBranchTab] = useState<'diff' | 'history'>('diff');
+  const [branchTab, setBranchTab] = useState<'view' | 'diff' | 'history'>('view');
 
   // Format toggle only for main branch: 'formatted' | 'raw'
   const [formatMode, setFormatMode] = useState<'formatted' | 'raw'>('formatted');
@@ -260,7 +268,7 @@ const CenterPanel: React.FC = () => {
   };
 
   const handleBranchTabChange = (value: string) => {
-    setBranchTab(value as 'diff' | 'history');
+    setBranchTab(value as 'view' | 'diff' | 'history');
   };
 
   // Title editing handlers
@@ -422,7 +430,7 @@ const CenterPanel: React.FC = () => {
                   className="text-2xl font-bold text-foreground cursor-pointer hover:text-foreground/80 transition-colors"
                   onClick={startEditingTitle}
                 >
-                  <FileName name={currentPage.title} />
+                  <FileName path={currentPage.path} />
                 </h1>
                 <Pencil className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
               </>
@@ -441,9 +449,18 @@ const CenterPanel: React.FC = () => {
           >
             <div className="flex items-center justify-between mx-4 mt-4">
               <TabsList>
-                <TabsTrigger value="view">View</TabsTrigger>
-                <TabsTrigger value="edit">Edit</TabsTrigger>
-                <TabsTrigger value="history">History</TabsTrigger>
+                <TabsTrigger value="view">
+                  <Eye className="h-4 w-4 mr-1.5" />
+                  View
+                </TabsTrigger>
+                <TabsTrigger value="edit">
+                  <Pencil className="h-4 w-4 mr-1.5" />
+                  Edit
+                </TabsTrigger>
+                <TabsTrigger value="history">
+                  <History className="h-4 w-4 mr-1.5" />
+                  History
+                </TabsTrigger>
               </TabsList>
 
               {/* Format toggle for View and Edit tabs */}
@@ -594,7 +611,7 @@ const CenterPanel: React.FC = () => {
       <div className="border-b border-border p-4">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-foreground">
-            <FileName name={currentPage.title} />
+            <FileName path={currentPage.path} />
           </h1>
         </div>
       </div>
@@ -608,11 +625,18 @@ const CenterPanel: React.FC = () => {
         >
           <div className="flex items-center justify-between mx-4 mt-4">
             <TabsList>
+              <TabsTrigger value="view">
+                <Eye className="h-4 w-4 mr-1.5" />
+                Preview
+              </TabsTrigger>
               <TabsTrigger value="diff">
                 <GitBranch className="h-4 w-4 mr-1.5" />
                 Diff
               </TabsTrigger>
-              <TabsTrigger value="history">History</TabsTrigger>
+              <TabsTrigger value="history">
+                <History className="h-4 w-4 mr-1.5" />
+                History
+              </TabsTrigger>
             </TabsList>
 
             {/* Branch indicator or resolving indicator */}
@@ -633,6 +657,41 @@ const CenterPanel: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Preview tab - ephemeral preview mode */}
+          <TabsContent value="view" className="flex-1 overflow-hidden mt-0 flex flex-col">
+            <div className="flex-1 overflow-auto min-h-0">
+              <BranchProvider branch={currentBranch} ephemeral>
+                {fileType === 'csv' ? (
+                  <CSVEditor
+                    key={`csv-view-${currentPage.path}-${currentBranch}-${pageUpdateCounter}`}
+                    pagePath={currentPage.path}
+                    initialHeaders={currentPage.headers}
+                    className="h-full p-4"
+                  />
+                ) : fileType === 'tsx' ? (
+                  <div className="h-full p-4">
+                    <ViewRuntime
+                      key={`tsx-view-${currentPage.path}-${currentBranch}-${pageUpdateCounter}`}
+                      tsxCode={currentPage.content || ''}
+                      pagePath={currentPage.path}
+                      branchRef={currentBranch}
+                    />
+                  </div>
+                ) : (
+                  <div className="h-full p-4">
+                    <ProseMirrorEditor
+                      key={`md-view-${currentPage.path}-${currentBranch}-${pageUpdateCounter}`}
+                      initialContent={currentPage.content || ''}
+                      editable={true}
+                      onChange={() => {}}
+                      className="h-full"
+                    />
+                  </div>
+                )}
+              </BranchProvider>
+            </div>
+          </TabsContent>
 
           <TabsContent value="diff" className="flex-1 overflow-hidden mt-0 flex flex-col">
             <div className="flex-1 overflow-auto min-h-0">

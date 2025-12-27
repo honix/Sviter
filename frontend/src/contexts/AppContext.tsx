@@ -618,20 +618,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Refresh current page content from API (for when page_updated is received)
   const refreshCurrentPage = useCallback(async (pageTitle: string) => {
     // Only refresh if this is the currently selected page
-    if (!currentPageRef.current || currentPageRef.current.title !== pageTitle) {
+    // Compare both title and path since backend may send either format
+    if (!currentPageRef.current ||
+        (currentPageRef.current.title !== pageTitle && currentPageRef.current.path !== pageTitle)) {
       return;
     }
 
     try {
-      const pageResponse = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(pageTitle)}`);
+      // Use branch-specific endpoint if viewing a thread branch
+      const branchRef = selectedBranchForDiffRef.current;
+      // Use path for API call since that's what the endpoints expect
+      const pagePath = currentPageRef.current.path;
+      const url = branchRef
+        ? `${getApiUrl()}/api/pages/${encodeURIComponent(pagePath)}/at-ref?ref=${encodeURIComponent(branchRef)}`
+        : `${getApiUrl()}/api/pages/${encodeURIComponent(pagePath)}`;
+
+      const pageResponse = await fetch(url);
       if (pageResponse.ok) {
-        const fullPage = await pageResponse.json();
-        // Only update if content actually changed (compare by content length and first/last chars as quick check)
+        const data = await pageResponse.json();
+        // /at-ref returns {content, exists}, regular endpoint returns full page
+        const newContent = data.content || '';
         const currentContent = currentPageRef.current?.content || '';
-        const newContent = fullPage.content || '';
+
         if (currentContent !== newContent) {
-          currentPageRef.current = fullPage;
-          dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
+          // Update the current page with new content
+          const updatedPage = branchRef
+            ? { ...currentPageRef.current, content: newContent }
+            : data; // Full page object from main branch endpoint
+          currentPageRef.current = updatedPage;
+          dispatch({ type: 'SET_CURRENT_PAGE', payload: updatedPage });
         }
       }
     } catch (err) {

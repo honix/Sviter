@@ -3,10 +3,11 @@
  * Provides access to CSV data via Y.Array<Y.Map> with real-time sync.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { useAuth } from '../contexts/AuthContext';
+import { useBranch } from '../contexts/BranchContext';
 import { stringToColor, getInitials, getDisplayName } from '../utils/colors';
 import { getWsUrl, getApiUrl } from '../utils/url';
 import { updatePage } from '../services/api';
@@ -126,6 +127,122 @@ function scheduleSaveCSV(pageId: string): void {
 }
 
 /**
+ * Parse CSV content into rows and headers.
+ */
+function parseCSVContent<T extends DataRow>(
+  csvContent: string,
+  initialHeaders?: string[]
+): { rows: T[]; headers: string[] } {
+  const lines = csvContent.split('\n').filter(l => l.trim());
+  if (lines.length === 0) {
+    return { rows: [], headers: initialHeaders || [] };
+  }
+
+  const headers = parseCSVLine(lines[0]);
+  const rows: T[] = lines.slice(1).map(line => {
+    const values = parseCSVLine(line);
+    const row: any = {};
+    headers.forEach((h, i) => {
+      row[h] = values[i] ?? '';
+    });
+    return row as T;
+  });
+
+  return { rows, headers };
+}
+
+/**
+ * Ephemeral hook for viewing CSV data from a branch.
+ * Fetches data from branch, allows local mutations (not saved).
+ * Used in thread review View mode.
+ */
+function useCSVEphemeral<T extends DataRow = DataRow>(
+  pageId: string,
+  branchRef: string,
+  initialHeaders?: string[],
+  refreshTrigger?: number
+): UseCSVResult<T> {
+  const [rows, setRows] = useState<T[]>([]);
+  const [headers, setHeaders] = useState<string[]>(initialHeaders || []);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const fetchedRef = useRef<string>('');
+
+  // Fetch CSV content from branch
+  useEffect(() => {
+    if (!pageId || !branchRef || !pageId.endsWith('.csv')) {
+      return;
+    }
+
+    const fetchKey = `${pageId}@${branchRef}@${refreshTrigger ?? 0}`;
+
+    // Skip if already fetched this exact version
+    if (fetchedRef.current === fetchKey && isLoaded) {
+      return;
+    }
+
+    const fetchData = async () => {
+      try {
+        const url = `${getApiUrl()}/api/pages/${encodeURIComponent(pageId)}/at-ref?ref=${encodeURIComponent(branchRef)}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          const content = data.content || '';
+          const parsed = parseCSVContent<T>(content, initialHeaders);
+          setRows(parsed.rows);
+          setHeaders(parsed.headers);
+          fetchedRef.current = fetchKey;
+        }
+      } catch (err) {
+        console.error('Failed to fetch CSV from branch:', err);
+      }
+      setIsLoaded(true);
+    };
+
+    fetchData();
+  }, [pageId, branchRef, refreshTrigger, initialHeaders, isLoaded]);
+
+  // Local-only mutations (ephemeral - not saved)
+  const updateCell = useCallback((rowIndex: number, column: keyof T, value: string) => {
+    setRows(prev => {
+      const newRows = [...prev];
+      if (newRows[rowIndex]) {
+        newRows[rowIndex] = { ...newRows[rowIndex], [column]: value };
+      }
+      return newRows;
+    });
+  }, []);
+
+  const addRow = useCallback((row: T) => {
+    setRows(prev => [...prev, row]);
+  }, []);
+
+  const deleteRow = useCallback((rowIndex: number) => {
+    setRows(prev => prev.filter((_, i) => i !== rowIndex));
+  }, []);
+
+  const insertRow = useCallback((index: number, row: T) => {
+    setRows(prev => {
+      const newRows = [...prev];
+      newRows.splice(index, 0, row);
+      return newRows;
+    });
+  }, []);
+
+  return {
+    rows,
+    headers,
+    updateCell,
+    addRow,
+    deleteRow,
+    insertRow,
+    isLoaded,
+    isSyncing: false,
+    connectionStatus: 'connected',
+    saveStatus: 'saved', // Always "saved" since we don't save
+  };
+}
+
+/**
  * Hook for collaborative CSV data editing.
  * Syncs CSV data via Yjs Y.Array<Y.Map>.
  *
@@ -134,9 +251,27 @@ function scheduleSaveCSV(pageId: string): void {
  */
 export function useCSV<T extends DataRow = DataRow>(
   pageId: string,
-  initialHeaders?: string[]
+  initialHeaders?: string[],
+  /** Optional: force a specific refresh counter (for ephemeral mode sync) */
+  refreshTrigger?: number
 ): UseCSVResult<T> {
   const { userId } = useAuth();
+  const { viewingBranch, ephemeral } = useBranch();
+
+  // If viewing a branch in ephemeral mode, use the ephemeral hook
+  const ephemeralResult = useCSVEphemeral<T>(
+    viewingBranch && ephemeral ? pageId : '',
+    viewingBranch || '',
+    initialHeaders,
+    refreshTrigger
+  );
+
+  // Return ephemeral result if in ephemeral mode
+  if (viewingBranch && ephemeral) {
+    return ephemeralResult;
+  }
+
+  // Otherwise continue with normal Yjs-based hook
   const [rows, setRows] = useState<T[]>([]);
   const [headers, setHeaders] = useState<string[]>(initialHeaders || []);
   const [isLoaded, setIsLoaded] = useState(false);

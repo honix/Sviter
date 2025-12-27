@@ -46,6 +46,8 @@ interface ViewRuntimeProps {
   viewProps?: Record<string, any>;
   /** Callback for collab status changes (save status) */
   onCollabStatusChange?: (status: CollabStatus) => void;
+  /** Optional branch ref to load components from (for thread review View mode) */
+  branchRef?: string;
 }
 
 interface ErrorBoundaryState {
@@ -268,6 +270,7 @@ export const ViewRuntime: React.FC<ViewRuntimeProps> = ({
   onError,
   viewProps = {},
   onCollabStatusChange,
+  branchRef,
 }) => {
   const [Component, setComponent] = useState<React.ComponentType<any> | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -319,82 +322,92 @@ export const ViewRuntime: React.FC<ViewRuntimeProps> = ({
   }), []);
 
   // Component registry context value for loading other TSX components
-  const componentRegistryValue = useMemo((): ComponentRegistryContextValue => ({
-    getComponent: (path: string) => {
-      const cached = componentCache.get(path);
-      return cached?.component || null;
-    },
-    isLoading: (path: string) => {
-      const cached = componentCache.get(path);
-      return cached?.loading || false;
-    },
-    getError: (path: string) => {
-      const cached = componentCache.get(path);
-      return cached?.error || null;
-    },
-    loadComponent: async (path: string) => {
-      // Check if already cached or loading
-      const existing = componentCache.get(path);
-      if (existing) {
-        return;
-      }
+  const componentRegistryValue = useMemo((): ComponentRegistryContextValue => {
+    // Cache key includes branchRef if set
+    const getCacheKey = (path: string) => branchRef ? `${path}@${branchRef}` : path;
 
-      // Mark as loading
-      componentCache.set(path, {
-        component: null,
-        error: null,
-        loading: true,
-        promise: null,
-      });
+    return {
+      getComponent: (path: string) => {
+        const cached = componentCache.get(getCacheKey(path));
+        return cached?.component || null;
+      },
+      isLoading: (path: string) => {
+        const cached = componentCache.get(getCacheKey(path));
+        return cached?.loading || false;
+      },
+      getError: (path: string) => {
+        const cached = componentCache.get(getCacheKey(path));
+        return cached?.error || null;
+      },
+      loadComponent: async (path: string) => {
+        const cacheKey = getCacheKey(path);
 
-      try {
-        // Fetch the TSX source from API
-        const response = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(path)}`);
-        if (!response.ok) {
-          throw new Error(`Failed to load component: ${path}`);
+        // Check if already cached or loading
+        const existing = componentCache.get(cacheKey);
+        if (existing) {
+          return;
         }
-        const page = await response.json();
-        const tsxSource = page.content || '';
 
-        // Compile the component using the same scope
-        // Note: This creates a simplified scope for reusable components
-        const componentScope = createScope(useCSVWithStatus, usePage, useComponentHook);
-        const compiled = compileTSXToComponent(tsxSource, componentScope);
-
-        componentCache.set(path, {
-          component: compiled,
-          error: null,
-          loading: false,
-          promise: null,
-        });
-
-        // Update local state to trigger re-render
-        setLoadedComponents(prev => {
-          const next = new Map(prev);
-          next.set(path, compiled);
-          return next;
-        });
-
-        console.log(`Loaded component: ${path}`);
-      } catch (e) {
-        const err = e instanceof Error ? e : new Error(String(e));
-        console.error(`Failed to compile component ${path}:`, err);
-        componentCache.set(path, {
+        // Mark as loading
+        componentCache.set(cacheKey, {
           component: null,
-          error: err,
-          loading: false,
+          error: null,
+          loading: true,
           promise: null,
         });
 
-        // Update local state to trigger re-render
-        setLoadedComponents(prev => {
-          const next = new Map(prev);
-          next.set(path, null);
-          return next;
-        });
-      }
-    },
-  }), [useComponentHook]);
+        try {
+          // Fetch the TSX source from API (use /at-ref endpoint if branchRef is set)
+          const url = branchRef
+            ? `${getApiUrl()}/api/pages/${encodeURIComponent(path)}/at-ref?ref=${encodeURIComponent(branchRef)}`
+            : `${getApiUrl()}/api/pages/${encodeURIComponent(path)}`;
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to load component: ${path}`);
+          }
+          const page = await response.json();
+          const tsxSource = page.content || '';
+
+          // Compile the component using the same scope
+          // Note: This creates a simplified scope for reusable components
+          const componentScope = createScope(useCSVWithStatus, usePage, useComponentHook);
+          const compiled = compileTSXToComponent(tsxSource, componentScope);
+
+          componentCache.set(cacheKey, {
+            component: compiled,
+            error: null,
+            loading: false,
+            promise: null,
+          });
+
+          // Update local state to trigger re-render
+          setLoadedComponents(prev => {
+            const next = new Map(prev);
+            next.set(cacheKey, compiled);
+            return next;
+          });
+
+          console.log(`Loaded component: ${path}${branchRef ? ` from branch ${branchRef}` : ''}`);
+        } catch (e) {
+          const err = e instanceof Error ? e : new Error(String(e));
+          console.error(`Failed to compile component ${path}:`, err);
+          componentCache.set(cacheKey, {
+            component: null,
+            error: err,
+            loading: false,
+            promise: null,
+          });
+
+          // Update local state to trigger re-render
+          setLoadedComponents(prev => {
+            const next = new Map(prev);
+            next.set(cacheKey, null);
+            return next;
+          });
+        }
+      },
+    };
+  }, [useComponentHook, branchRef]);
 
   useEffect(() => {
     if (!tsxCode.trim()) {

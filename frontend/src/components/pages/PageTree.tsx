@@ -25,8 +25,15 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
 import { getApiUrl } from '../../utils/url';
 
+// Extract filename from path
+const getFileName = (path: string): string => {
+  const parts = path.split('/');
+  return parts[parts.length - 1];
+};
+
 // Render filename with dimmed extension
-const FileName: React.FC<{ name: string }> = ({ name }) => {
+const FileName: React.FC<{ path: string }> = ({ path }) => {
+  const name = getFileName(path);
   const lastDot = name.lastIndexOf('.');
   if (lastDot === -1 || lastDot === 0) {
     return <>{name}</>;
@@ -213,12 +220,16 @@ const PageTree: React.FC<PageTreeProps> = ({
           page = pages.find(p => p.path === item.path || p.title === item.title);
           // If page not found in pages array (e.g., new page on thread branch), create minimal object
           if (!page) {
+            // Determine file_type from extension
+            const ext = item.path.split('.').pop()?.toLowerCase();
+            const file_type = ext === 'csv' ? 'csv' : ext === 'tsx' ? 'tsx' : 'markdown';
             page = {
               title: item.title,
               path: item.path,
               content: '',  // Will be loaded when selected
               created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
+              updated_at: new Date().toISOString(),
+              file_type
             };
           }
         }
@@ -322,6 +333,23 @@ const PageTree: React.FC<PageTreeProps> = ({
     }
   };
 
+  // Calculate aggregated diff stats for a folder (sum of all children)
+  const getFolderStats = (folderPath: string): { additions: number; deletions: number } | null => {
+    let additions = 0;
+    let deletions = 0;
+    const prefix = folderPath + '/';
+
+    for (const [pagePath, stats] of Object.entries(diffStats)) {
+      if (pagePath.startsWith(prefix)) {
+        additions += stats.additions;
+        deletions += stats.deletions;
+      }
+    }
+
+    if (additions === 0 && deletions === 0) return null;
+    return { additions, deletions };
+  };
+
   const renderItem = (item: TreeItem, page: Page | undefined, indent: number) => {
     const isSelected = currentPage?.path === item.path || currentPage?.title === item.title;
     const isExpanded = expandedFolders.includes(item.id);
@@ -330,6 +358,7 @@ const PageTree: React.FC<PageTreeProps> = ({
     if (item.type === 'folder') {
       const isDropTarget = overId === `folder:${item.path}`;
       const childCount = item.children?.length || 0;
+      const folderStats = getFolderStats(item.path);
 
       return (
         <FolderDropTarget id={`folder:${item.path}`} isOver={isDropTarget && !isDragging}>
@@ -354,6 +383,16 @@ const PageTree: React.FC<PageTreeProps> = ({
             )}
             <span className="text-sm flex-1 truncate">{item.title}</span>
             <span className="text-xs text-muted-foreground">{childCount}</span>
+            {folderStats && (
+              <span className="text-xs font-mono flex gap-1 px-1.5 py-0.5 rounded bg-background/80 border border-border/50">
+                {folderStats.additions > 0 && (
+                  <span className="text-green-600 dark:text-green-400">+{folderStats.additions}</span>
+                )}
+                {folderStats.deletions > 0 && (
+                  <span className="text-red-600 dark:text-red-400">-{folderStats.deletions}</span>
+                )}
+              </span>
+            )}
             {currentBranch === 'main' && (
               <Button
                 variant="ghost"
@@ -393,7 +432,7 @@ const PageTree: React.FC<PageTreeProps> = ({
       >
         <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab flex-shrink-0" />
         <FileIcon className="h-4 w-4 flex-shrink-0" />
-        <span className="text-sm flex-1 truncate"><FileName name={item.title} /></span>
+        <span className="text-sm flex-1 truncate"><FileName path={item.path} /></span>
         {pageStats && (pageStats.additions > 0 || pageStats.deletions > 0) && (
           <span className="text-xs font-mono flex gap-1 px-1.5 py-0.5 rounded bg-background/80 border border-border/50">
             {pageStats.additions > 0 && (
@@ -509,7 +548,7 @@ const PageTree: React.FC<PageTreeProps> = ({
                         })()
                       )}
                       <span className="text-sm font-medium">
-                        {draggedItem.type === 'folder' ? draggedItem.title : <FileName name={draggedItem.title} />}
+                        {draggedItem.type === 'folder' ? draggedItem.title : <FileName path={draggedItem.path} />}
                       </span>
                     </div>
                   </div>
