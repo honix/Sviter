@@ -90,7 +90,7 @@ export function ThreadSelector({
           />
 
           <div className="flex flex-col items-start text-left flex-1 min-w-0">
-            {selectedThread ? (
+            {selectedThread && selectedThread.type !== 'assistant' ? (
               <>
                 <div className="flex items-center gap-1.5">
                   <StatusIcon status={selectedThread.status} />
@@ -98,7 +98,7 @@ export function ThreadSelector({
                     {selectedThread.name}
                   </span>
                 </div>
-                {selectedThread.type !== 'assistant' && selectedThread.branch && (
+                {selectedThread.branch && (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <GitBranch className="h-3 w-3" />
                     <span className="truncate">{selectedThread.branch}</span>
