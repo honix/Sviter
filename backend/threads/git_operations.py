@@ -178,7 +178,13 @@ def prepare_branch(wiki: GitWiki, branch_name: str) -> Optional[str]:
     """
     original_branch = None
     try:
-        original_branch = wiki.get_current_branch()
+        # Handle detached HEAD state gracefully
+        try:
+            original_branch = wiki.get_current_branch()
+        except Exception:
+            # Detached HEAD - just checkout main directly
+            original_branch = None
+
         if original_branch != "main":
             wiki.checkout_branch("main")
 
