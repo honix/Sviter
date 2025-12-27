@@ -107,4 +107,17 @@ export class GitAPI {
       throw new Error(`Failed to checkout branch: ${response.statusText}`);
     }
   }
+
+  /**
+   * Get per-file diff statistics with actual line counts
+   */
+  static async getDiffStatsByPage(baseBranch: string, headBranch: string): Promise<Record<string, { additions: number; deletions: number; file_type: string }>> {
+    const url = `${API_BASE_URL}/api/git/diff-stats-by-page?base=${encodeURIComponent(baseBranch)}&head=${encodeURIComponent(headBranch)}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch diff stats by page: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.stats;
+  }
 }

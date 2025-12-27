@@ -4,8 +4,11 @@ import { getApiUrl } from '../utils/url';
 const API_BASE = getApiUrl();
 
 export const treeApi = {
-  async getTree(): Promise<TreeItem[]> {
-    const response = await fetch(`${API_BASE}/api/pages/tree`, {
+  async getTree(ref?: string): Promise<TreeItem[]> {
+    const url = ref
+      ? `${API_BASE}/api/pages/tree?ref=${encodeURIComponent(ref)}`
+      : `${API_BASE}/api/pages/tree`;
+    const response = await fetch(url, {
       cache: 'no-store'
     });
     if (!response.ok) throw new Error('Failed to fetch page tree');

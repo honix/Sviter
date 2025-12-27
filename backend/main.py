@@ -170,10 +170,17 @@ async def get_pages(limit: int = 100):
 
 # Page Tree endpoint - MUST come before {title:path} routes
 @app.get("/api/pages/tree")
-async def get_page_tree():
-    """Get hierarchical page tree with folders and ordering"""
+async def get_page_tree(ref: str = None):
+    """Get hierarchical page tree with folders and ordering.
+
+    Args:
+        ref: Optional git ref (branch/commit) to get tree from. Defaults to current working tree.
+    """
     try:
-        tree = wiki.get_page_tree()
+        if ref:
+            tree = wiki.get_page_tree_at_ref(ref)
+        else:
+            tree = wiki.get_page_tree()
         return {"tree": tree}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

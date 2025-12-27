@@ -1204,7 +1204,8 @@ class GitWiki:
             GitWikiException: If refs don't exist or operation fails
         """
         try:
-            diff = self.repo.git.diff(ref1, ref2, unified=context_lines)
+            # Use --ignore-cr-at-eol to ignore CRLF vs LF differences
+            diff = self.repo.git.diff('--ignore-cr-at-eol', f'-U{context_lines}', ref1, ref2)
             return diff
         except GitCommandError as e:
             raise GitWikiException(f"Failed to get diff between '{ref1}' and '{ref2}': {e}")
@@ -1224,8 +1225,8 @@ class GitWiki:
             GitWikiException: If refs don't exist or operation fails
         """
         try:
-            # Get stat output
-            stat = self.repo.git.diff(ref1, ref2, stat=True)
+            # Get stat output (ignore CRLF vs LF differences)
+            stat = self.repo.git.diff('--ignore-cr-at-eol', '--stat', ref1, ref2)
 
             # Get file list with changes
             files_changed = []
@@ -1298,6 +1299,90 @@ class GitWiki:
         except GitCommandError:
             return ""  # Page doesn't exist at ref
 
+    def get_page_tree_at_ref(self, ref: str) -> List[Dict[str, Any]]:
+        """
+        Get hierarchical tree of all pages and folders at a specific git ref.
+
+        Args:
+            ref: Git reference (branch name, commit SHA, or tag)
+
+        Returns:
+            List of tree items, same structure as get_page_tree()
+        """
+        # Use module-level SUPPORTED_EXTENSIONS constant
+
+        try:
+            # Get relative path of pages_dir from repo root
+            pages_rel = self.pages_dir.relative_to(self.repo_path)
+
+            # List all files at ref using git ls-tree
+            output = self.repo.git.ls_tree('-r', '--name-only', ref, str(pages_rel))
+            if not output.strip():
+                return []
+
+            # Parse file paths and build tree structure
+            files = output.strip().split('\n')
+            tree_dict: Dict[str, Dict] = {}
+
+            for file_path in files:
+                # Remove pages_dir prefix to get relative path
+                if file_path.startswith(str(pages_rel) + '/'):
+                    rel_path = file_path[len(str(pages_rel)) + 1:]
+                else:
+                    rel_path = file_path
+
+                # Skip hidden files and unsupported extensions
+                parts = rel_path.split('/')
+                if any(p.startswith('.') for p in parts):
+                    continue
+
+                ext = '.' + rel_path.split('.')[-1].lower() if '.' in rel_path else ''
+                if ext not in SUPPORTED_EXTENSIONS:
+                    continue
+
+                # Build tree structure
+                current_dict = tree_dict
+                for i, part in enumerate(parts[:-1]):
+                    folder_path = '/'.join(parts[:i+1])
+                    if folder_path not in current_dict:
+                        current_dict[folder_path] = {
+                            "id": folder_path,
+                            "title": part,
+                            "path": folder_path,
+                            "type": "folder",
+                            "parent_path": '/'.join(parts[:i]) if i > 0 else None,
+                            "_children": {}
+                        }
+                    current_dict = current_dict[folder_path]["_children"]
+
+                # Add file
+                file_name = parts[-1]
+                title = file_name.rsplit('.', 1)[0] if '.' in file_name else file_name
+                file_type = ext[1:] if ext else 'md'
+                current_dict[rel_path] = {
+                    "id": rel_path,
+                    "title": title,
+                    "path": rel_path,
+                    "type": "page",
+                    "file_type": file_type,
+                    "parent_path": '/'.join(parts[:-1]) if len(parts) > 1 else None
+                }
+
+            # Convert dict to list recursively
+            def dict_to_list(d: Dict) -> List[Dict]:
+                items = []
+                for key, item in sorted(d.items()):
+                    if item.get("type") == "folder":
+                        children = dict_to_list(item.pop("_children", {}))
+                        item["children"] = children
+                    items.append(item)
+                return items
+
+            return dict_to_list(tree_dict)
+
+        except GitCommandError:
+            return []  # Branch doesn't exist or other git error
+
     def get_diff_stats_by_page(self, base: str, target: str) -> Dict[str, Dict[str, int]]:
         """
         Get per-page diff statistics between two refs.
@@ -1310,7 +1395,8 @@ class GitWiki:
             Dictionary mapping page paths to {additions, deletions, file_type}
         """
         try:
-            result = self.repo.git.diff('--numstat', base, target)
+            # Use --ignore-cr-at-eol to ignore CRLF vs LF differences
+            result = self.repo.git.diff('--numstat', '--ignore-cr-at-eol', base, target)
             stats = {}
 
             for line in result.strip().split('\n'):

@@ -393,11 +393,16 @@ class ThreadManager:
                 "tool_args": tool_info.get("arguments")
             })
 
-            # Notify page updates
-            if tool_info.get("tool_name") == "edit_page":
+            # Notify page updates for any write operation
+            tool_name = tool_info.get("tool_name", "")
+            if tool_name in ("edit_page", "write_page", "insert_at_line", "delete_page", "move_page"):
+                # Get the page path from args (could be "path" or "title")
+                args = tool_info.get("arguments", {})
+                page_path = args.get("path") or args.get("title")
                 await self.broadcast({
                     "type": "page_updated",
-                    "title": tool_info["arguments"].get("title")
+                    "title": page_path,
+                    "operation": tool_name
                 })
 
         # Start session

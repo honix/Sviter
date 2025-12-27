@@ -207,10 +207,21 @@ const PageTree: React.FC<PageTreeProps> = ({
 
     const processItems = (items: TreeItem[], indent: number, parentPath: string | null) => {
       items.forEach((item, index) => {
-        // Add the item
-        const page = item.type === 'page'
-          ? pages.find(p => p.path === item.path || p.title === item.title)
-          : undefined;
+        // Add the item - find existing page or create minimal page object for new pages (e.g., from thread branch)
+        let page: Page | undefined;
+        if (item.type === 'page') {
+          page = pages.find(p => p.path === item.path || p.title === item.title);
+          // If page not found in pages array (e.g., new page on thread branch), create minimal object
+          if (!page) {
+            page = {
+              title: item.title,
+              path: item.path,
+              content: '',  // Will be loaded when selected
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            };
+          }
+        }
 
         result.push({
           type: 'item',

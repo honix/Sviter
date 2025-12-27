@@ -50,30 +50,22 @@ export function ThreadChangesView({
 
       const [diffText, statsData] = await Promise.all([
         GitAPI.getBranchDiff(baseBranch, branch),
-        GitAPI.getBranchDiffStats(baseBranch, branch),
+        GitAPI.getDiffStatsByPage(baseBranch, branch),
       ]);
 
-      // Convert to ThreadDiffStats format
-      const threadStats: ThreadDiffStats = {
-        files_changed: statsData.files_changed?.length || 0,
-        lines_added: 0,
-        lines_removed: 0,
-        files: statsData.files_changed?.map((f: { path: string; changes: string }) => {
-          // Parse changes like "+10 -5" into lines_added and lines_removed
-          const matches = f.changes.match(/\+(\d+)\s+-(\d+)/);
-          const added = matches ? parseInt(matches[1], 10) : 0;
-          const removed = matches ? parseInt(matches[2], 10) : 0;
-          return {
-            path: f.path,
-            lines_added: added,
-            lines_removed: removed
-          };
-        }) || []
-      };
+      // Convert to ThreadDiffStats format using the better API with actual line counts
+      const files = Object.entries(statsData).map(([path, data]) => ({
+        path,
+        lines_added: data.additions,
+        lines_removed: data.deletions
+      }));
 
-      // Calculate totals
-      threadStats.lines_added = threadStats.files.reduce((sum, f) => sum + f.lines_added, 0);
-      threadStats.lines_removed = threadStats.files.reduce((sum, f) => sum + f.lines_removed, 0);
+      const threadStats: ThreadDiffStats = {
+        files_changed: files.length,
+        lines_added: files.reduce((sum, f) => sum + f.lines_added, 0),
+        lines_removed: files.reduce((sum, f) => sum + f.lines_removed, 0),
+        files
+      };
 
       setStats(threadStats);
       setDiff(diffText);

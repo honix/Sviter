@@ -313,6 +313,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const pageTreeRef = useRef<TreeItem[]>([]);
   const threadsRef = useRef<Thread[]>([]);
   const currentBranchRef = useRef<string>('main');
+  const selectedBranchForDiffRef = useRef<string | null>(null);
 
   // Guards to prevent concurrent loads
   const isLoadingPagesRef = useRef(false);
@@ -338,6 +339,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     currentBranchRef.current = state.currentBranch;
   }, [state.currentBranch]);
+
+  useEffect(() => {
+    selectedBranchForDiffRef.current = state.selectedBranchForDiff;
+  }, [state.selectedBranchForDiff]);
 
   // Initialize WebSocket service - wait for auth to complete
   useEffect(() => {
@@ -665,7 +670,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isLoadingTreeRef.current = true;
 
         try {
-          const tree = await treeApi.getTree();
+          // When reviewing a thread, load tree from its branch to show new/deleted pages
+          const ref = selectedBranchForDiffRef.current || undefined;
+          const tree = await treeApi.getTree(ref);
           // Only dispatch if tree actually changed to avoid unnecessary re-renders
           if (!areTreesEqual(pageTreeRef.current, tree)) {
             pageTreeRef.current = tree; // Update ref immediately to prevent duplicate dispatches
@@ -698,6 +705,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     loadPages(true);
   }, []); // Run only once on mount
+
+  // Reload tree when branch for diff changes (entering/exiting review mode)
+  useEffect(() => {
+    // Use the ref callback to load tree with the new branch
+    reloadFunctionsRef.current?.loadTree();
+  }, [state.selectedBranchForDiff]);
 
   // WebSocket functions
   const sendMessage = useCallback((message: unknown) => {
@@ -773,12 +786,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatch({ type: 'SET_ERROR', payload: null });
 
       try {
-        const response = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(page.path)}`);
+        // When reviewing a thread, load page from thread's branch
+        const branchRef = selectedBranchForDiffRef.current;
+        const url = branchRef
+          ? `${getApiUrl()}/api/pages/${encodeURIComponent(page.path)}/at-ref?ref=${encodeURIComponent(branchRef)}`
+          : `${getApiUrl()}/api/pages/${encodeURIComponent(page.path)}`;
+
+        const response = await fetch(url);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const fullPage = await response.json();
+        const data = await response.json();
+        // at-ref endpoint returns { content, exists }, regular endpoint returns full page
+        const fullPage = branchRef
+          ? { ...page, content: data.content || '' }
+          : data;
         dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
       } catch (err) {
         dispatch({ type: 'SET_ERROR', payload: 'Failed to load page content' });

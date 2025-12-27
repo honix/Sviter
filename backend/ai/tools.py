@@ -380,6 +380,46 @@ def _insert_at_line(wiki: GitWiki, args: Dict[str, Any]) -> str:
         return f"Error inserting content: {e}"
 
 
+def _delete_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """Delete a wiki page"""
+    title = args.get("path", "") or args.get("title", "")
+    author = args.get("author", "AI Agent")
+
+    if not title:
+        return "Error: Page path is required"
+
+    try:
+        wiki.delete_page(title, author)
+        return f"Page '{title}' deleted successfully."
+    except PageNotFoundException:
+        return f"Error: Page '{title}' not found."
+    except Exception as e:
+        return f"Error deleting page: {e}"
+
+
+def _move_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """Move a wiki page to a new location"""
+    source_path = args.get("source_path", "") or args.get("path", "")
+    target_parent = args.get("target_parent", "")
+    author = args.get("author", "AI Agent")
+
+    if not source_path:
+        return "Error: source_path is required"
+
+    try:
+        result = wiki.move_item(
+            source_path=source_path,
+            target_parent=target_parent,
+            author=author
+        )
+        new_path = result.get("new_path", target_parent + "/" + source_path.split("/")[-1])
+        return f"Page moved successfully from '{source_path}' to '{new_path}'."
+    except PageNotFoundException:
+        return f"Error: Page '{source_path}' not found."
+    except Exception as e:
+        return f"Error moving page: {e}"
+
+
 def _spawn_thread(
     spawn_callback: Callable[[str, str], Dict[str, Any]],
     args: Dict[str, Any]
@@ -660,6 +700,47 @@ Note: Line numbers are 1-indexed (first line is 1).""",
                     "required": ["path", "line", "content"]
                 },
                 function=lambda args, w=wiki: _insert_at_line(w, args)
+            ),
+            WikiTool(
+                name="delete_page",
+                description="""Delete a wiki page permanently.
+
+IMPORTANT: This action cannot be undone! Use with caution.
+IMPORTANT: Use the file path (e.g., 'home.md', 'agents/index.md') not display titles.
+
+After deleting, consider updating agents/index.md to remove navigation entry.""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Page file path to delete (e.g., 'home.md', 'agents/old-page.md')"},
+                        "author": {"type": "string", "description": "Author name for git commit (default: 'AI Agent')"}
+                    },
+                    "required": ["path"]
+                },
+                function=lambda args, w=wiki: _delete_page(w, args)
+            ),
+            WikiTool(
+                name="move_page",
+                description="""Move a wiki page to a new location (folder).
+
+Use this to reorganize pages into different folders.
+IMPORTANT: Use the file path (e.g., 'home.md', 'docs/guide.md') not display titles.
+
+Examples:
+- Move 'guide.md' to 'docs/' folder: source_path='guide.md', target_parent='docs'
+- Move to root: source_path='docs/guide.md', target_parent=''
+
+After moving, consider updating agents/index.md navigation entries.""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "source_path": {"type": "string", "description": "Current path of the page to move"},
+                        "target_parent": {"type": "string", "description": "Target folder path (empty string for root)"},
+                        "author": {"type": "string", "description": "Author name for git commit (default: 'AI Agent')"}
+                    },
+                    "required": ["source_path", "target_parent"]
+                },
+                function=lambda args, w=wiki: _move_page(w, args)
             )
         ]
 

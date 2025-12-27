@@ -70,7 +70,11 @@ export function CodeMirrorDiffView({
       return { diffContent: '', lineTypes: new Map<number, 'added' | 'removed'>(), hasChanges: false };
     }
 
-    const changes = diffLines(mainContent, branchContent);
+    // Normalize line endings to LF before comparing (ignore CRLF vs LF differences)
+    const normalizedMain = mainContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const normalizedBranch = branchContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    const changes = diffLines(normalizedMain, normalizedBranch);
     const lines: string[] = [];
     const types = new Map<number, 'added' | 'removed'>();
     let hasAnyChanges = false;
