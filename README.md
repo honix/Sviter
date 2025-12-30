@@ -34,4 +34,4 @@ See [Sviter-wiki/pages/Home.md](Sviter-wiki/pages/Home.md) for full documentatio
 
 ## License
 
-FSL-1.1 (free for production, Apache 2.0 after 2 years)
+FSL-1.1 (free for production use, no competing products for 2 years, then Apache 2.0)
