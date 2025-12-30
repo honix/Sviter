@@ -36,6 +36,9 @@ const SAVE_DEBOUNCE_MS = 2000;
 // Active sessions by page path
 const activeSessions = new Map<string, CollabSession>();
 
+// Pages that need forced reinitialization (after merge/invalidation)
+const forceReinitPages = new Set<string>();
+
 // Status handler registrations for each session
 const statusHandlers = new Map<string, Set<StatusHandler>>();
 const usersHandlers = new Map<string, Set<UsersHandler>>();
@@ -400,11 +403,11 @@ export function initializeContent(
 
 /**
  * Get the Yjs XmlFragment for ProseMirror content.
- * This is the shared type that y-prosemirror binds to.
- * @deprecated Use getSharedText() for new code - both editors should use the same Y.Text
+ * This is the shared type that y-prosemirror binds to for rich text editing.
+ * Provides accurate cursor synchronization via y-prosemirror bindings.
  */
-export function getXmlFragment(doc: Y.Doc, name: string = 'prosemirror'): Y.XmlFragment {
-  return doc.getXmlFragment(name);
+export function getXmlFragment(doc: Y.Doc): Y.XmlFragment {
+  return doc.get('prosemirror', Y.XmlFragment);
 }
 
 /**
@@ -493,6 +496,21 @@ export function destroyCollabSession(pagePath: string): void {
 }
 
 /**
+ * Force destroy a session, clearing all local state.
+ * Use this when the room was invalidated on the server.
+ */
+export function forceDestroySession(pagePath: string): void {
+  const session = activeSessions.get(pagePath);
+  if (session) {
+    console.log(`Force destroying session for: ${pagePath}`);
+    session.destroy();
+    statusHandlers.delete(pagePath);
+    usersHandlers.delete(pagePath);
+    activeSessions.delete(pagePath);
+  }
+}
+
+/**
  * Force destroy all sessions except the current one.
  * Called when navigating to a new page.
  */
@@ -550,12 +568,33 @@ export function hasActiveSession(pagePath: string): boolean {
  */
 export function invalidateSessions(pagePaths: string[]): void {
   for (const pagePath of pagePaths) {
+    // Mark page for forced reinitialization
+    forceReinitPages.add(pagePath);
+    console.log(`Marked ${pagePath} for forced reinitialization`);
+
     const session = activeSessions.get(pagePath);
     if (session) {
       console.log(`Invalidating collab session for: ${pagePath}`);
       session.destroy();
     }
   }
+}
+
+/**
+ * Check if a page needs forced reinitialization.
+ * This is set when content changes outside of collaborative editing.
+ */
+export function needsForceReinit(pagePath: string): boolean {
+  return forceReinitPages.has(pagePath);
+}
+
+/**
+ * Clear the force reinit flag for a page.
+ * Call this after successfully reinitializing the content.
+ */
+export function clearForceReinit(pagePath: string): void {
+  forceReinitPages.delete(pagePath);
+  console.log(`Cleared force reinit flag for ${pagePath}`);
 }
 
 /**

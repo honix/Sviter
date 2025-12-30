@@ -10,7 +10,7 @@ Tracks active rooms and clients for merge blocking functionality.
 
 import asyncio
 import logging
-from typing import Optional, Dict, Set, Callable, Awaitable, List
+from typing import Optional, Dict, Set, Callable, Awaitable, List, Any
 from fastapi import WebSocket, WebSocketDisconnect
 
 from pycrdt.websocket import WebsocketServer
@@ -81,6 +81,8 @@ class CollaborationManager:
         self._active_rooms: Dict[str, Set[str]] = {}
         # Track active EDITORS only: room_name -> set of client_ids (for merge blocking)
         self._active_editors: Dict[str, Set[str]] = {}
+        # Track WebSocket connections: room_name -> dict of client_id -> WebSocket
+        self._room_websockets: Dict[str, Dict[str, Any]] = {}
         # Callbacks for room changes
         self._room_change_callbacks: List[RoomChangeCallback] = []
 
@@ -210,11 +212,35 @@ class CollaborationManager:
             return
 
         try:
+            # First, close all WebSocket connections for this room
+            # This ensures no client can sync stale content to the new room
+            websockets_closed = 0
+            if room_name in self._room_websockets:
+                websockets_to_close = list(self._room_websockets[room_name].values())
+                for ws in websockets_to_close:
+                    try:
+                        await ws.close(code=1000, reason="Room invalidated - please reconnect")
+                        websockets_closed += 1
+                    except Exception as e:
+                        logger.warning(f"Error closing WebSocket: {e}")
+                self._room_websockets[room_name] = {}
+                logger.info(f"Closed {websockets_closed} WebSocket connections for room {room_name}")
+
+            # Clear room tracking
+            if room_name in self._active_rooms:
+                del self._active_rooms[room_name]
+            if room_name in self._active_editors:
+                del self._active_editors[room_name]
+
             # Delete the room from the server's room cache
             # This forces a fresh document to be created when clients reconnect
             if hasattr(self.server, 'rooms') and room_name in self.server.rooms:
                 del self.server.rooms[room_name]
                 logger.info(f"Invalidated room {room_name} - clients will reload from git")
+
+            # Small delay to ensure WebSocket connections are fully closed
+            if websockets_closed > 0:
+                await asyncio.sleep(0.1)
         except Exception as e:
             logger.warning(f"Failed to invalidate room {room_name}: {e}")
 
@@ -243,8 +269,11 @@ class CollaborationManager:
 
         logger.info(f"Client {client_id} connecting to room {room_name}")
 
-        # Track client joining
+        # Track client joining and store WebSocket reference
         await self._client_joined(room_name, client_id)
+        if room_name not in self._room_websockets:
+            self._room_websockets[room_name] = {}
+        self._room_websockets[room_name][client_id] = websocket
 
         # Create adapter for pycrdt-websocket
         adapter = FastAPIWebSocketAdapter(websocket, f"/{room_name}")
@@ -258,8 +287,12 @@ class CollaborationManager:
         except Exception as e:
             logger.error(f"Error in collab connection for {client_id}: {e}")
         finally:
-            # Track client leaving
+            # Track client leaving and remove WebSocket reference
             await self._client_left(room_name, client_id)
+            if room_name in self._room_websockets:
+                self._room_websockets[room_name].pop(client_id, None)
+                if not self._room_websockets[room_name]:
+                    del self._room_websockets[room_name]
 
 
 # Global instance

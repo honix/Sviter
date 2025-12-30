@@ -183,45 +183,37 @@
 }
 
 /* ========================================
-   Collaborative Editing - Cursor & Selection Styles
+   Collaborative Editing - y-prosemirror Cursor Styles
    ======================================== */
 
-/* Remote user text selection highlight (y-prosemirror default class) */
+/* Remote user text selection highlight */
 .yRemoteSelection {
   background-color: rgba(100, 149, 237, 0.3);
 }
 
-/* Remote user cursor caret - the vertical line */
-.collaboration-cursor {
+/* Custom cursor widget - the caret line */
+.collaboration-cursor-widget {
   position: relative;
   margin-left: -1px;
   margin-right: -1px;
-  border-left: 2px solid var(--cursor-color, cornflowerblue);
   pointer-events: none;
+  word-break: normal;
 }
 
-/* Remote user cursor label - small tag above cursor */
-.collaboration-cursor::after {
-  content: attr(data-user);
+/* Cursor label - small floating tag */
+.collaboration-cursor-label {
   position: absolute;
-  left: -2px;
-  bottom: calc(100% + 2px);
-  font-size: 11px;
+  left: -1px;
+  top: -1.4em;
+  font-size: 10px;
   font-weight: 500;
   font-family: system-ui, -apple-system, sans-serif;
-  padding: 2px 6px;
-  border-radius: 4px 4px 4px 0;
-  background-color: var(--cursor-color, cornflowerblue);
+  padding: 1px 4px;
+  border-radius: 3px 3px 3px 0;
   color: #fff;
-  text-shadow: 0 1px 1px rgba(0,0,0,0.2);
   white-space: nowrap;
   user-select: none;
   pointer-events: none;
   line-height: 1.2;
   z-index: 100;
-  /* Prevent label from affecting layout */
-  width: max-content;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }

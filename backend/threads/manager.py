@@ -805,6 +805,10 @@ class ThreadManager:
                 await self._trigger_conflict_resolution(client_id, thread)
                 return {"type": "success", "result": "resolving_conflicts"}
 
+        # Get affected pages BEFORE merge (diff will be empty after merge)
+        affected_pages = self.get_thread_affected_pages(thread_id)
+        print(f"🔍 Thread {thread_id} affects pages: {affected_pages}")
+
         # No conflicts, proceed with merge
         result = thread.accept(self.wiki)
 
@@ -815,22 +819,20 @@ class ThreadManager:
                 "status": "accepted",
                 "message": "Changes merged to main"
             })
-
-            # Invalidate collab rooms for affected pages so clients reload from git
-            affected_pages = self.get_thread_affected_pages(thread_id)
             if affected_pages:
-                # Tell clients to reload these specific pages
+                # FIRST: Invalidate room cache (close WebSockets, clear server state)
+                # This MUST happen before broadcasting to prevent race conditions
+                if self.collab_manager:
+                    await self.collab_manager.invalidate_rooms(affected_pages)
+                    print(f"🔄 Invalidated collab rooms for: {affected_pages}")
+
+                # THEN: Tell clients to reload these specific pages
                 await self.broadcast({
                     "type": "pages_content_changed",
                     "pages": affected_pages,
                     "reason": "thread_merged"
                 })
                 print(f"🔄 Notified clients to reload pages: {affected_pages}")
-
-                # Also invalidate room cache
-                if self.collab_manager:
-                    await self.collab_manager.invalidate_rooms(affected_pages)
-                    print(f"🔄 Invalidated collab rooms for: {affected_pages}")
 
             # Clean up executor
             await self._cleanup_executor(thread_id)

@@ -534,7 +534,7 @@ const CenterPanel: React.FC = () => {
                     /* Markdown: Formatted or raw mode */
                     formatMode === 'raw' ? (
                       <CollaborativeCodeMirrorEditor
-                        key={`collab-cm-${currentPage.path}`}
+                        key={`collab-cm-${currentPage.path}-${pageUpdateCounter}`}
                         pagePath={currentPage.path}
                         pageTitle={currentPage.title}
                         initialContent={currentPage.content || ''}
@@ -544,7 +544,7 @@ const CenterPanel: React.FC = () => {
                       />
                     ) : (
                       <CollaborativeEditor
-                        key={`collab-${currentPage.path}`}
+                        key={`collab-${currentPage.path}-${pageUpdateCounter}`}
                         pagePath={currentPage.path}
                         pageTitle={currentPage.title}
                         initialContent={currentPage.content || ''}

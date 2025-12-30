@@ -367,6 +367,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const messageUnsubscribe = wsService.current.onMessage((message) => {
       setLastMessage(message);
 
+      // Debug: Log all message types to track pages_content_changed
+      if (message.type === 'pages_content_changed' || message.type === 'pages_changed') {
+        console.log('📢 Received message:', message.type, message);
+      }
+
       // Handle thread-specific messages
       if (message.type === 'thread_created') {
         dispatch({ type: 'ADD_THREAD', payload: message.thread });
@@ -497,13 +502,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           console.log('Invalidating collab sessions for merged pages:', pages);
           invalidateSessions(pages);
         }
-        // Also reload pages and tree
-        if (reloadFunctionsRef.current) {
-          reloadFunctionsRef.current.loadPages();
-          reloadFunctionsRef.current.loadTree();
-          reloadFunctionsRef.current.forceRefreshCurrentPage();
-        }
-        dispatch({ type: 'INCREMENT_PAGE_UPDATE_COUNTER' });
+        // Reload pages and tree, wait for fresh content, then trigger re-render
+        (async () => {
+          if (reloadFunctionsRef.current) {
+            reloadFunctionsRef.current.loadPages();
+            reloadFunctionsRef.current.loadTree();
+            // Wait for fresh content before triggering editor remount
+            await reloadFunctionsRef.current.forceRefreshCurrentPage();
+          }
+          // Now increment counter to remount editors with fresh content
+          dispatch({ type: 'INCREMENT_PAGE_UPDATE_COUNTER' });
+        })();
       }
 
       // Notify all registered handlers

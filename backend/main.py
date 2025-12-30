@@ -145,6 +145,20 @@ async def set_editing_state(room_name: str, client_id: str, editing: bool):
     return {"success": True, "room": room_name, "client_id": client_id, "editing": editing}
 
 
+# API endpoint to invalidate a collab room (clear cached state)
+@app.post("/api/collab/invalidate")
+async def invalidate_room(room_name: str):
+    """
+    Invalidate a room's document state, forcing clients to reload from git.
+    Used for migration or when room state is stale.
+    """
+    if not collab_module.collab_manager:
+        return {"error": "Collaboration manager not initialized"}
+
+    await collab_module.collab_manager.invalidate_room(room_name)
+    return {"success": True, "room": room_name}
+
+
 # WebSocket endpoint for chat/threads
 @app.websocket("/ws/{client_id}")
 async def websocket_handler(websocket: WebSocket, client_id: str):
