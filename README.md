@@ -1,4 +1,4 @@
-# Sviter
+# 🌸 Sviter
 
 AI-powered wiki where autonomous agents help you build and maintain knowledge.
 
@@ -30,7 +30,7 @@ make run      # Start backend (8000) and frontend (5173)
 
 ## Documentation
 
-See [Sviter-wiki/pages/Home.md](Sviter-wiki/pages/Home.md) for full documentation (built with Sviter itself).
+See [Sviter-wiki](https://github.com/honix/Sviter-wiki/blob/main/pages/Home.md) for full documentation — built with Sviter and best viewed inside Sviter itself.
 
 ## License
 
