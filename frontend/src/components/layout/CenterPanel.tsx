@@ -47,8 +47,8 @@ const FileName: React.FC<{ path: string; className?: string }> = ({ path, classN
 
 const CenterPanel: React.FC = () => {
   const { state, actions } = useAppContext();
-  const { currentPage, viewMode, isLoading, error, currentBranch, pageUpdateCounter, threads } = state;
-  const { setViewMode } = actions;
+  const { currentPage, viewMode, isLoading, error, currentBranch, pageUpdateCounter, threads, pages } = state;
+  const { setViewMode, setCurrentPage } = actions;
   const { userId } = useAuth();
 
   const [viewingRevision, setViewingRevision] = useState<PageRevision | null>(null);
@@ -96,6 +96,16 @@ const CenterPanel: React.FC = () => {
   const handleCollabStatusChange = useCallback((status: CollabStatus) => {
     setCollabStatus(status);
   }, []);
+
+  // Handle wiki link clicks - navigate to page by path
+  const handleWikiLinkClick = useCallback((pagePath: string) => {
+    const targetPage = pages.find(p => p.path === pagePath);
+    if (targetPage) {
+      setCurrentPage(targetPage);
+    } else {
+      console.warn(`Wiki link target not found: ${pagePath}`);
+    }
+  }, [pages, setCurrentPage]);
 
   // Status bar component for collaborative editing
   const CollabStatusBar = () => {
@@ -540,6 +550,7 @@ const CenterPanel: React.FC = () => {
                         initialContent={currentPage.content || ''}
                         editable={mainTab === 'edit'}
                         onCollabStatusChange={handleCollabStatusChange}
+                        onLinkClick={handleWikiLinkClick}
                         className="h-full"
                       />
                     )
@@ -585,6 +596,7 @@ const CenterPanel: React.FC = () => {
                       key={`view-${currentPage.title}-${viewingRevision.sha}`}
                       initialContent={viewingRevisionContent ?? ''}
                       editable={false}
+                      onLinkClick={handleWikiLinkClick}
                       className="h-full"
                     />
                   )}
@@ -695,6 +707,7 @@ const CenterPanel: React.FC = () => {
                       key={`md-view-${currentPage.path}-${currentBranch}-${pageUpdateCounter}`}
                       initialContent={currentPage.content || ''}
                       editable={false}
+                      onLinkClick={handleWikiLinkClick}
                       className="h-full"
                     />
                   </div>

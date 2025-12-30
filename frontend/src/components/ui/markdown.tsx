@@ -105,28 +105,21 @@ function createComponentsWithLinkHandlers(
         )
       }
 
-      // Handle page: protocol
-      if (href?.startsWith('page:')) {
-        const pagePath = decodeURIComponent(href.slice(5)) // Remove 'page:' prefix
+      // Handle wiki links (relative links without protocol)
+      if (href && linkHandlers.onPageClick && !href.includes(':')) {
+        const pagePath = href.endsWith('.md') ? href : `${href}.md`
         return (
-          <span
-            role="button"
-            tabIndex={0}
+          <a
+            href={`/main/${pagePath}/view`}
             className="text-primary hover:text-primary/80 underline cursor-pointer"
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
               linkHandlers.onPageClick?.(pagePath)
             }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                linkHandlers.onPageClick?.(pagePath)
-              }
-            }}
           >
             {children}
-          </span>
+          </a>
         )
       }
 
@@ -148,14 +141,13 @@ function createComponentsWithLinkHandlers(
 
 const INITIAL_COMPONENTS = createBaseComponents()
 
-// Custom URL transform to allow thread: and page: protocols
+// Custom URL transform to allow thread: protocol and relative wiki links
 function customUrlTransform(url: string): string {
-  // Allow our custom protocols
-  if (url.startsWith('thread:') || url.startsWith('page:')) {
+  // Allow thread: protocol
+  if (url.startsWith('thread:')) {
     return url
   }
-  // For other URLs, use default behavior (allows http, https, mailto, etc.)
-  // Return the URL as-is for standard protocols
+  // Allow standard protocols
   const safeProtocols = ['http:', 'https:', 'mailto:', 'tel:']
   try {
     const parsed = new URL(url, 'http://example.com')
@@ -163,7 +155,7 @@ function customUrlTransform(url: string): string {
       return url
     }
   } catch {
-    // Relative URL or invalid, allow it
+    // Relative URL - allow it (wiki links)
     return url
   }
   return url

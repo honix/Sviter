@@ -8,12 +8,14 @@ import { inputRules, wrappingInputRule, textblockTypeInputRule, smartQuotes, emD
 import { schema } from '../../editor/schema';
 import { markdownToProseMirror, prosemirrorToMarkdown } from '../../editor/conversion';
 import { buildKeymap } from '../../editor/keymap';
+import { useWikiLinks } from '../../hooks/useWikiLinks';
 import './prosemirror.css';
 
 interface ProseMirrorEditorProps {
   initialContent: string; // Markdown string
   onChange?: (doc: any, markdown: string) => void;
   onViewReady?: (view: EditorView) => void;
+  onLinkClick?: (href: string) => void; // Handle wiki link clicks
   editable: boolean;
   className?: string;
 }
@@ -23,7 +25,7 @@ export interface ProseMirrorEditorHandle {
 }
 
 export const ProseMirrorEditor = forwardRef<ProseMirrorEditorHandle, ProseMirrorEditorProps>(
-  ({ initialContent, onChange, onViewReady, editable, className }, ref) => {
+  ({ initialContent, onChange, onViewReady, onLinkClick, editable, className }, ref) => {
     const editorRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
     const initializedRef = useRef(false);
@@ -133,9 +135,14 @@ export const ProseMirrorEditor = forwardRef<ProseMirrorEditorHandle, ProseMirror
       }
     }, [initialContent]);
 
+    // Wiki link handling
+    const { handleClick, handleMouseOver } = useWikiLinks(onLinkClick, editable);
+
     return (
       <div
         ref={editorRef}
+        onClick={handleClick}
+        onMouseOver={handleMouseOver}
         className={`prosemirror-editor ${editable ? 'editable' : 'readonly'} ${className || ''}`}
       />
     );

@@ -22,6 +22,7 @@ import { markdownToProseMirror, prosemirrorToMarkdown } from '../../editor/conve
 import { createCollabSession, destroyCollabSession, getSharedText, initializeContent, type CollabUser, type ConnectionStatus, type SaveStatus } from '../../services/collab';
 import { useAuth } from '../../contexts/AuthContext';
 import { EditorToolbar } from './EditorToolbar';
+import { useWikiLinks } from '../../hooks/useWikiLinks';
 
 import './prosemirror.css';
 
@@ -200,6 +201,7 @@ interface CollaborativeEditorProps {
   className?: string;
   editable?: boolean;
   onCollabStatusChange?: (status: CollabStatus) => void;
+  onLinkClick?: (href: string) => void; // Handle wiki link clicks
 }
 
 export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
@@ -209,6 +211,7 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
   className,
   editable = true,
   onCollabStatusChange,
+  onLinkClick,
 }) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -422,6 +425,9 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
     }
   }, [connectionStatus, remoteUsers, saveStatus, onCollabStatusChange]);
 
+  // Wiki link handling
+  const { handleClick, handleMouseOver } = useWikiLinks(onLinkClick, editable);
+
   return (
     <div className={`flex flex-col h-full ${className || ''}`}>
       {/* Toolbar - only show when editable */}
@@ -434,6 +440,8 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       {/* Editor */}
       <div
         ref={editorRef}
+        onClick={handleClick}
+        onMouseOver={handleMouseOver}
         className={`prosemirror-editor flex-1 overflow-auto ${editable ? 'editable' : 'readonly'}`}
       />
     </div>

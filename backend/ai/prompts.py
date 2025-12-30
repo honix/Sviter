@@ -11,15 +11,17 @@ Format responses in Markdown. No blank lines before lists.
 
 # Common prompt section for interactive links
 LINKS_PROMPT = """
-## Interactive Links
+## Wiki Links
 
-Use special link formats to create clickable references in your responses:
+Use standard markdown links with file paths:
 
-- **Page links**: `[Display Text](page:path/to/page.md)` - Links to wiki pages
-  Example: [Python Guide](page:guides/python.md), [Home](page:home.md)
+- **Page links**: `[Display Text](path/to/page.md)` - Use the actual file path
+  Examples: `[Home](Home.md)`, `[Index](agents/index.md)`, `[Guide](docs/guide.md)`
 
 - **Thread links**: `[Display Text](thread:thread-id)` - Links to threads
-  Example: [update-docs](thread:abc123), [fix-typos](thread:xyz789)
+  Example: `[update-docs](thread:abc123)`
+
+Always use the file path as shown by list_pages(). Include .md extension.
 """
 
 ASSISTANT_PROMPT = f"""You are a wiki assistant with access to powerful search and navigation tools.
