@@ -6,7 +6,7 @@ FSL-1.1-ALv2
 
 ## Notice
 
-Copyright 2025 Fedor Shchukin
+Copyright 2026 Fedor Shchukin
 
 ## Licensed Work
 
