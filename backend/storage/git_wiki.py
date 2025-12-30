@@ -434,8 +434,10 @@ class GitWiki:
                 # In merge state - file is staged, commit will happen later
                 pass
             else:
-                message = commit_msg or f"Update page: {title}"
-                self.repo.index.commit(message, author=self._create_author(author))
+                # Only commit if there are actual changes staged
+                if self.repo.index.diff("HEAD"):
+                    message = commit_msg or f"Update page: {title}"
+                    self.repo.index.commit(message, author=self._create_author(author))
         except GitCommandError as e:
             raise GitWikiException(f"Git commit failed: {e}")
 
