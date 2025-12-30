@@ -881,10 +881,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCenterPanelMode: (mode: 'page' | 'branch-diff') => dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: mode }),
     setSelectedBranchForDiff: (branch: string | null) => dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: branch }),
     viewBranchDiff: (branch: string) => {
+      dispatch({ type: 'SET_CURRENT_BRANCH', payload: branch });
       dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: branch });
       dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'branch-diff' });
     },
     closeBranchDiff: () => {
+      dispatch({ type: 'SET_CURRENT_BRANCH', payload: 'main' });
       dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'page' });
       dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: null });
     },
