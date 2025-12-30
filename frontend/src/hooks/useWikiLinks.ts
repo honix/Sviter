@@ -25,7 +25,9 @@ export function useWikiLinks(
     if (link && !link.dataset.wikiPage) {
       const href = link.getAttribute('href');
       if (href && !href.startsWith('http') && !href.startsWith('mailto:')) {
-        const pagePath = href.endsWith('.md') ? href : `${href}.md`;
+        // Check if href already has a file extension
+        const hasExtension = /\.[a-zA-Z0-9]+$/.test(href);
+        const pagePath = hasExtension ? href : `${href}.md`;
         link.dataset.wikiPage = pagePath;
         link.setAttribute('href', `/main/${pagePath}/${editable ? 'edit' : 'view'}`);
       }
