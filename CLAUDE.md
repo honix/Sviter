@@ -97,7 +97,7 @@ Other commands:
 
 ### Backend
 
-- **Storage**: Git-based with GitWiki class - all content in `etoneto-wiki/` git submodule
+- **Storage**: Git-based with GitWiki class - all content in `Sviter-wiki/` git submodule
 - **WebSocket**: Real-time communication on `/ws/{client_id}` endpoint via SessionManager
 - **Session Types**:
   - **Main session**: Read-only assistant with spawn_thread/list_threads tools
@@ -173,7 +173,7 @@ Other commands:
 
 - **Port Configuration**: Backend on 8000, Frontend on 5173
 - **WebSocket URL**: Frontend connects to `ws://localhost:8000/ws/`
-- **Git Repository**: Wiki content stored in `etoneto-wiki/` submodule (https://github.com/honix/etoneto-wiki)
+- **Git Repository**: Wiki content stored in `Sviter-wiki/` submodule (https://github.com/honix/Sviter-wiki)
 - **No Routing**: Application uses context-based state, NOT react-router-dom
 - **Flexbox Scrolling**: Use `min-h-0` on flex children to enable proper scrolling
 - **Real-time Features**: Full bidirectional communication between frontend and backend
@@ -185,7 +185,7 @@ When running in **Claude Code on the web** (not CLI):
 - **DO NOT push directly to `main`** — use session branch only
 - Push all changes to the assigned session branch (e.g., `claude/feature-name-<session-id>`)
 - Create a PR for merging to main instead of direct push
-- The wiki submodule (`etoneto-wiki/`) can be pushed to main directly since it's a separate repo
+- The wiki submodule (`Sviter-wiki/`) can be pushed to main directly since it's a separate repo
 
 ## Real-time Thread Updates
 

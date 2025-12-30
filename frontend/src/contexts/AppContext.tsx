@@ -599,7 +599,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // The page content will be updated when the user navigates or refreshes
       if (!currentPageRef.current && backendPages.length > 0) {
         try {
-          const pageResponse = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(backendPages[0].path)}`);
+          // Try to find Home.md first, otherwise use first page
+          const homePage = backendPages.find(p => p.path === 'Home.md' || p.title === 'Home.md');
+          const defaultPage = homePage || backendPages[0];
+          const pageResponse = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(defaultPage.path)}`);
           if (pageResponse.ok) {
             const fullPage = await pageResponse.json();
             currentPageRef.current = fullPage; // Update ref immediately to prevent duplicate dispatches

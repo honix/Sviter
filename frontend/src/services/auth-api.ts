@@ -4,7 +4,7 @@
 import { getApiUrl } from '../utils/url';
 
 const API_BASE = getApiUrl();
-const GUEST_ID_KEY = 'etoneto_guest_id';
+const GUEST_ID_KEY = 'sviter_guest_id';
 
 export interface User {
   id: string;

@@ -20,7 +20,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, FileText, FileSpreadsheet, FileCode, FolderPlus, GripVertical, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, LogIn, MessageSquarePlus } from 'lucide-react';
+import { Plus, FileText, FileSpreadsheet, FileCode, FolderPlus, GripVertical, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, LogIn, MessageSquarePlus, Waypoints } from 'lucide-react';
 import { useSelection } from '../../contexts/SelectionContext';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -498,10 +498,10 @@ const PageTree: React.FC<PageTreeProps> = ({
     <div className="h-full bg-background flex flex-col">
       {/* Header */}
       <div className="p-4 border-b border-border space-y-3">
-        <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-          <FileText className="h-5 w-5" />
-          Pages
-        </h2>
+        <h1 className="text-2xl font-bold flex items-center gap-2 tracking-tight">
+          <Waypoints className="h-6 w-6 text-pink-400" />
+          Sviter
+        </h1>
 
         {currentBranch === 'main' ? (
           <div className="flex gap-2">

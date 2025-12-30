@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 
 # Database file location
-DB_PATH = Path(__file__).parent / "data" / "etoneto.db"
+DB_PATH = Path(__file__).parent / "data" / "sviter.db"
 
 
 def init_db():
