@@ -28,6 +28,12 @@ make run      # Start backend (8000) and frontend (5173)
 3. Review the diff when done
 4. Accept (merge) or Reject (discard)
 
+## Use Cases
+
+- **Spec-Driven Development** — Write specs in wiki, AI keeps docs and code in sync
+- **Team Knowledge Base** — Devs ask questions, writers update docs, git stays hidden
+- **Research & Notes** — Connect ideas across pages, AI helps cross-reference
+
 ## Documentation
 
 See [Sviter-wiki](https://github.com/honix/Sviter-wiki/blob/main/pages/Home.md) for full documentation — built with Sviter and best viewed inside Sviter itself.
