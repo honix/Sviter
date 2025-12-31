@@ -16,6 +16,8 @@ AI-powered wiki where autonomous agents help you build and maintain knowledge.
 
 ## Quick Start
 
+Configure your `backend/.env` and `frontend/.env` files using `.env.example` as a reference.
+
 ```bash
 make setup    # Install dependencies (first time)
 make run      # Start backend (8000) and frontend (5173)
