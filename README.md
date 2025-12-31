@@ -23,6 +23,8 @@ make setup    # Install dependencies (first time)
 make run      # Start backend (8000) and frontend (5173)
 ```
 
+See ![Getting-Started](https://github.com/honix/Sviter-wiki/blob/main/pages/Getting-Started.md) wiki-page for more information.
+
 ## How It Works
 
 1. Chat with AI about your wiki
