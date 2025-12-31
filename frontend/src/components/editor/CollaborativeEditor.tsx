@@ -171,42 +171,31 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       if (cancelled) return;
 
       // Check if we need forced reinitialization (e.g., after thread merge)
-      const forceReinit = needsForceReinit(pagePath);
+      let forceReinit = needsForceReinit(pagePath);
       if (forceReinit) {
         console.log(`Force reinitializing ${pagePath} due to external content change`);
       }
 
-      // Initialize XmlFragment from markdown if empty OR if forced reinit
-      if ((yXmlFragment.length === 0 || forceReinit) && initialContent) {
-        isSyncing = true; // Prevent observers from firing during init
-        const doc = markdownToProseMirror(initialContent);
-        session.doc.transact(() => {
-          // Clear existing content if force reinit
-          if (forceReinit && yXmlFragment.length > 0) {
-            while (yXmlFragment.length > 0) {
-              yXmlFragment.delete(0, 1);
-            }
-          }
-          insertProseMirrorContent(yXmlFragment, doc);
-        }, 'init');
-        console.log(`Initialized XmlFragment for ${pagePath}`);
-
-        // Also initialize Y.Text immediately so Raw mode has content
-        const yText = getSharedText(session.doc);
-        session.doc.transact(() => {
-          yText.delete(0, yText.length);
-          yText.insert(0, initialContent);
-        }, 'init');
-        console.log(`Initialized Y.Text for ${pagePath}`);
-
-        isSyncing = false;
-
-        // Clear the force reinit flag
-        if (forceReinit) {
-          clearForceReinit(pagePath);
+      // Also check if Y.Text content differs from initialContent (indicates stale data)
+      const yText = getSharedText(session.doc);
+      const currentYTextContent = yText.toString();
+      if (!forceReinit && yXmlFragment.length > 0 && initialContent) {
+        // If Y.Text is empty but XmlFragment has content, something is wrong
+        // Or if Y.Text differs significantly from initialContent
+        if (currentYTextContent.length === 0 ||
+            (currentYTextContent !== initialContent && currentYTextContent.length < initialContent.length * 0.5)) {
+          console.log(`Content mismatch detected for ${pagePath}, forcing reinit`);
+          console.log(`Y.Text length: ${currentYTextContent.length}, initialContent length: ${initialContent.length}`);
+          forceReinit = true;
         }
-      } else {
-        console.log(`XmlFragment already has ${yXmlFragment.length} nodes for ${pagePath}`);
+      }
+
+      // Determine if we need to initialize content
+      const needsInit = yXmlFragment.length === 0 || forceReinit;
+
+      if (forceReinit) {
+        // Clear the force reinit flag early
+        clearForceReinit(pagePath);
       }
 
       if (cancelled || !editorRef.current) return;
@@ -239,6 +228,38 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       setEditorView(view);
       initializedRef.current = true;
 
+      // Initialize content using ProseMirror transaction (lets ySyncPlugin handle XmlFragment format)
+      if (needsInit && initialContent) {
+        console.log(`Initializing content for ${pagePath} via ProseMirror transaction`);
+        const newDoc = markdownToProseMirror(initialContent);
+        const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, newDoc.content);
+        view.dispatch(tr);
+
+        // Also initialize Y.Text for Raw mode
+        isSyncing = true;
+        session.doc.transact(() => {
+          yText.delete(0, yText.length);
+          yText.insert(0, initialContent);
+        }, 'init');
+        isSyncing = false;
+        console.log(`Initialized Y.Text for ${pagePath}`);
+      } else {
+        console.log(`XmlFragment already has ${yXmlFragment.length} nodes for ${pagePath}`);
+
+        // Check if XmlFragment content matches Y.Text - if not, fix via ProseMirror transaction
+        const yTextContent = yText.toString();
+        const renderedMarkdown = prosemirrorToMarkdown(view.state.doc);
+        if (yTextContent && renderedMarkdown !== yTextContent) {
+          console.log(`Content mismatch detected after editor init for ${pagePath}`);
+          console.log(`Y.Text length: ${yTextContent.length}, rendered length: ${renderedMarkdown.length}`);
+          // Fix by replacing document content via ProseMirror (ySyncPlugin syncs to XmlFragment)
+          const newDoc = markdownToProseMirror(yTextContent);
+          const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, newDoc.content);
+          view.dispatch(tr);
+          console.log(`Fixed content from Y.Text for ${pagePath}`);
+        }
+      }
+
       // Observe XmlFragment changes to sync to Y.Text (only for LOCAL changes)
       yXmlFragment.observeDeep((events, transaction) => {
         if (isSyncing) return; // Skip if we're in a sync operation
@@ -249,34 +270,26 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       });
 
       // Also observe Y.Text changes (from Raw mode) to sync back to XmlFragment
-      const yText = getSharedText(session.doc);
-
       const syncFromYText = () => {
-        if (isSyncing) return; // Skip if already syncing
+        if (isSyncing || !view) return; // Skip if already syncing or no view
 
         const markdownContent = yText.toString();
         if (!markdownContent) return;
 
         // Convert markdown to ProseMirror doc and compare
         const newDoc = markdownToProseMirror(markdownContent);
-        const currentMarkdown = view ? prosemirrorToMarkdown(view.state.doc) : '';
+        const currentMarkdown = prosemirrorToMarkdown(view.state.doc);
 
         // Only sync if content actually differs
         if (currentMarkdown === markdownContent) return;
 
         isSyncing = true;
-        // Clear and rebuild XmlFragment
-        session.doc.transact(() => {
-          // Clear existing content
-          while (yXmlFragment.length > 0) {
-            yXmlFragment.delete(0, 1);
-          }
-          // Insert new content
-          insertProseMirrorContent(yXmlFragment, newDoc);
-        }, 'codemirror-sync');
+        // Use ProseMirror transaction - ySyncPlugin will handle XmlFragment sync
+        const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, newDoc.content);
+        view.dispatch(tr);
         isSyncing = false;
 
-        console.log(`Synced Y.Text → XmlFragment for ${pagePath}`);
+        console.log(`Synced Y.Text → ProseMirror for ${pagePath}`);
       };
 
       yText.observe((event, transaction) => {
@@ -338,62 +351,5 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
     </div>
   );
 };
-
-/**
- * Insert ProseMirror document content into Y.XmlFragment.
- * This converts the ProseMirror node tree to Y.XmlElement/Y.XmlText nodes.
- */
-function insertProseMirrorContent(yXmlFragment: Y.XmlFragment, doc: ReturnType<typeof markdownToProseMirror>): void {
-  doc.content.forEach((node) => {
-    const yNode = prosemirrorNodeToYXml(node);
-    if (yNode) {
-      yXmlFragment.push([yNode]);
-    }
-  });
-}
-
-/**
- * Convert a ProseMirror node to Y.XmlElement or Y.XmlText.
- */
-function prosemirrorNodeToYXml(node: any): Y.XmlElement | Y.XmlText | null {
-  if (node.isText) {
-    const yText = new Y.XmlText();
-    yText.insert(0, node.text || '');
-    // Add marks as attributes if needed
-    if (node.marks && node.marks.length > 0) {
-      node.marks.forEach((mark: any) => {
-        yText.format(0, node.text?.length || 0, { [mark.type.name]: mark.attrs || true });
-      });
-    }
-    return yText;
-  }
-
-  if (node.type && node.type.name) {
-    const yElement = new Y.XmlElement(node.type.name);
-
-    // Set attributes
-    if (node.attrs) {
-      Object.entries(node.attrs).forEach(([key, value]) => {
-        if (value !== null && value !== undefined) {
-          yElement.setAttribute(key, value as string);
-        }
-      });
-    }
-
-    // Add children
-    if (node.content) {
-      node.content.forEach((child: any) => {
-        const yChild = prosemirrorNodeToYXml(child);
-        if (yChild) {
-          yElement.push([yChild]);
-        }
-      });
-    }
-
-    return yElement;
-  }
-
-  return null;
-}
 
 export default CollaborativeEditor;

@@ -8,7 +8,11 @@ import { schema } from './schema';
 export const markdownParser = new MarkdownParser(
   schema,
   defaultMarkdownParser.tokenizer,
-  defaultMarkdownParser.tokens
+  {
+    ...defaultMarkdownParser.tokens,
+    // Ensure inline code is handled
+    code_inline: { mark: 'code' },
+  }
 );
 
 /**
