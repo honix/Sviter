@@ -12,22 +12,32 @@ PROJECT_ROOT = Path(__file__).parent.parent
 TESTS_DIR = Path(__file__).parent
 
 
-def wait_for_url(url: str, timeout: int = 60, interval: float = 2.0) -> bool:
-    """Wait for a URL to become available (any HTTP response is OK)."""
+def wait_for_url(url: str, timeout: int = 60) -> bool:
+    """
+    Wait for a URL to become available using exponential backoff.
+
+    Starts with 0.5s delay, doubles each retry up to 4s max.
+    Any HTTP response (including errors) means server is up.
+    """
     start = time.time()
     last_error = None
+    delay = 0.5  # Start with 500ms
+    max_delay = 4.0
+
     while time.time() - start < timeout:
         try:
             response = urllib.request.urlopen(url, timeout=10)
             response.read()
             return True
-        except urllib.error.HTTPError as e:
+        except urllib.error.HTTPError:
             # Any HTTP response (including 404) means server is up
             return True
         except Exception as e:
             last_error = e
-            time.sleep(interval)
-    print(f"wait_for_url failed: {last_error}")
+            time.sleep(delay)
+            delay = min(delay * 2, max_delay)  # Exponential backoff
+
+    print(f"wait_for_url failed after {timeout}s: {last_error}")
     return False
 
 
@@ -54,16 +64,14 @@ def wiki_app(docker_compose_file):
     )
 
     try:
-        # Start containers (--wait flag waits for healthchecks)
+        # Start containers (waits for Docker healthchecks)
         compose.start()
-
-        # Give a bit more time after healthchecks pass
-        time.sleep(5)
 
         frontend_url = "http://localhost:5173"
         backend_url = "http://localhost:8000/health"
 
-        # Verify services are reachable
+        # Verify services are reachable from host (Docker healthchecks run inside container,
+        # but we need to confirm port forwarding works and services respond to host requests)
         if not wait_for_url(backend_url, timeout=30):
             raise RuntimeError(f"Backend not ready at {backend_url}")
 
