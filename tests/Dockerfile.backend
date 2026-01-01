@@ -1,0 +1,41 @@
+# Test backend Dockerfile
+# Build context is project root (..)
+
+FROM python:3.11-slim
+
+# Create non-root user for Claude SDK compatibility
+RUN useradd -m -s /bin/bash appuser
+
+WORKDIR /app
+
+# Install git (required for GitPython)
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for layer caching
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY backend/ .
+
+# Configure git for container (needed for GitPython operations)
+RUN git config --global user.email "test@test.com" && \
+    git config --global user.name "Test User"
+
+# Copy test wiki fixtures and initialize as git repo
+COPY tests/fixtures/wiki /wiki
+RUN cd /wiki && git init && git add -A && git commit -m "Initial test fixtures"
+
+# Set ownership and switch to non-root user
+RUN chown -R appuser:appuser /app /wiki
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+
+# Run uvicorn
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
