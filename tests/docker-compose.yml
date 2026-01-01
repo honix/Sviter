@@ -1,0 +1,50 @@
+# Test environment Docker Compose
+# Run from tests/ folder: docker-compose up -d
+# Or from root: docker-compose -f tests/docker-compose.yml up -d
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: tests/Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      - WIKI_REPO_PATH=/wiki
+      - LLM_PROVIDER=claude
+      - LLM_MODEL=claude-sonnet-4-5
+      # Pass API keys from host for chat tests
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - test-network
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_HOST=localhost:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5173"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

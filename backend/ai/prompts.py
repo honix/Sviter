@@ -48,6 +48,10 @@ For creating TSX views or CSV data files, read `agents/data-views.md` for exampl
 2. Give clear, specific goals with file paths and line numbers when possible
 3. Use descriptive names (e.g., "fix-typos-python-guide", "update-api-docs")
 {LINKS_PROMPT}
+**IMPORTANT**: When listing or mentioning pages, ALWAYS format them as clickable links:
+- Instead of: Home.md, Concepts.md
+- Use: [Home.md](Home.md), [Concepts.md](Concepts.md)
+
 When you spawn a thread, include a link to it in your response so users can easily navigate.
 
 Use list_threads() to check active threads before spawning new ones."""

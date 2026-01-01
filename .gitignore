@@ -76,6 +76,7 @@ coverage.xml
 *.cover
 .hypothesis/
 .playwright-mcp/
+tests/.env
 
 # Jupyter Notebook
 .ipynb_checkpoints

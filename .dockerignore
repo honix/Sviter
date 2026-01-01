@@ -1,0 +1,39 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+backend/venv
+backend/.venv
+backend/.env
+.env
+
+# Node
+frontend/node_modules
+frontend/dist
+node_modules
+
+# Git
+.git
+.gitignore
+.gitmodules
+
+# IDE
+.vscode
+.idea
+
+# Docs (keep test fixtures)
+README.md
+CLAUDE.md
+backend/*.md
+frontend/*.md
+
+# Tests output
+.pytest_cache
+playwright-report
+
+# Database files (must be fresh in tests)
+backend/data/
+*.db
+
+# Submodule (use fixtures instead)
+Sviter-wiki
