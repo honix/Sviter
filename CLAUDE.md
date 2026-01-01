@@ -51,12 +51,14 @@ Other commands:
 - `make backend` - Start backend only (port 8000)
 - `make frontend` - Start frontend only (port 5173)
 - `make clean` - Remove venv and node_modules
+- `make haiku-tester` - Run browser UI tests with Claude haiku
 
 ## Project Structure
 
 ```
 ├── CLAUDE.md                 # This file - project instructions
-├── Makefile                  # Build commands (setup, run, clean)
+├── Makefile                  # Build commands (setup, run, clean, haiku-tester)
+├── tests/                    # Test infrastructure (Docker, haiku-tester)
 ├── backend/                  # Python FastAPI backend
 │   ├── main.py               # FastAPI app entry point
 │   ├── requirements.txt      # Python dependencies
@@ -168,6 +170,36 @@ Other commands:
 1. **First time setup**: `make setup`
 2. **Run both servers**: `make run`
 3. **Agentic Testing**: Use Claude for Chrome to test the application autonomously
+
+## Testing
+
+### Haiku Tester (Browser UI Tests)
+
+Uses Claude haiku model with Chrome MCP to perform visual UI testing. Tests run in Docker containers for isolation.
+
+```bash
+make haiku-tester    # Run all browser tests
+```
+
+**Requirements:**
+- Chrome with Claude extension installed and connected
+- Docker for container management
+- API key in `tests/.env` (for AI chat tests in containers)
+
+**Test structure:**
+```
+tests/
+├── docker-compose.yml    # Test containers config
+├── Dockerfile.backend    # Backend image for tests
+├── .env                  # API keys (gitignored)
+├── .env.example          # Example env file
+├── conftest.py           # Pytest fixtures (testcontainers)
+├── fixtures/wiki/        # Minimal test wiki pages
+└── haiku-tester/         # Browser test files
+    └── test_views.py     # UI tests (views, chat, navigation)
+```
+
+**Note:** Local development uses Claude subscription login. Docker containers require explicit `ANTHROPIC_API_KEY` since OAuth doesn't work in containers.
 
 ## Important Notes
 
