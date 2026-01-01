@@ -11,7 +11,7 @@ setup:
 	cd frontend && npm install
 
 backend:
-	$(PYTHON) backend/main.py
+	cd backend && ../$(PYTHON) main.py
 
 frontend:
 	cd frontend && npm run dev
