@@ -13,6 +13,7 @@ AI-powered wiki where autonomous agents help you build and maintain knowledge.
 - **Git Under the Hood** — Full version control without the complexity
 - **Real-time Collaboration** — Live updates, markdown editing
 - **Pluggable LLM** — Claude SDK or OpenRouter - BYOK or connect to your local inference services
+- **On-demand Custom Views for your data** — Ask AI to create an interactive view just with prompt
 
 ## Quick Start
 
