@@ -382,22 +382,24 @@ async def get_thread_files(
     import os
 
     worktree = Path(worktree_path)
-    pages_dir = worktree / 'pages'
 
-    if not pages_dir.exists():
+    if not worktree.exists():
         return {"files": [], "has_conflicts": False}
 
     files = []
     has_conflicts = False
 
-    for filepath in pages_dir.glob('**/*.md'):
+    for filepath in worktree.glob('**/*.md'):
+        # Skip .git directory
+        if '.git' in filepath.parts:
+            continue
         try:
             content = filepath.read_text(encoding='utf-8')
             file_has_conflicts = '<<<<<<< ' in content or '=======' in content or '>>>>>>> ' in content
             if file_has_conflicts:
                 has_conflicts = True
 
-            rel_path = str(filepath.relative_to(pages_dir))
+            rel_path = str(filepath.relative_to(worktree))
             files.append({
                 "path": rel_path,
                 "content": content,
@@ -405,7 +407,7 @@ async def get_thread_files(
             })
         except Exception as e:
             files.append({
-                "path": str(filepath.relative_to(pages_dir)),
+                "path": str(filepath.relative_to(worktree)),
                 "content": f"Error reading file: {e}",
                 "has_conflicts": False,
                 "error": True

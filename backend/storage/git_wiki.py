@@ -56,16 +56,12 @@ class GitWiki:
             repo_path: Path to the wiki git repository
         """
         self.repo_path = Path(repo_path)
-        self.pages_dir = self.repo_path / "pages"
 
         # Initialize or open git repository
         try:
             self.repo = Repo(self.repo_path)
         except Exception as e:
             raise GitWikiException(f"Failed to open git repository at {repo_path}: {e}")
-
-        # Ensure pages directory exists
-        self.pages_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize agents/ folder with default files if missing
         self._ensure_agents_folder()
@@ -77,7 +73,7 @@ class GitWiki:
         The actual content (index.md, examples, etc.) is handled by
         ensure_templates() which copies from backend/templates/.
         """
-        agents_dir = self.pages_dir / "agents"
+        agents_dir = self.repo_path / "agents"
         agents_dir.mkdir(exist_ok=True)
 
     def ensure_templates(self) -> List[str]:
@@ -85,8 +81,8 @@ class GitWiki:
         Copy template files to wiki if they don't exist.
 
         Templates are stored in backend/templates/ and get auto-instantiated
-        into the wiki pages/ folder on startup. This provides example files
-        for agents to learn from.
+        into the wiki on startup. This provides example files for agents
+        to learn from.
 
         Returns:
             List of created page paths
@@ -106,7 +102,7 @@ class GitWiki:
 
             # Get relative path from templates dir
             rel_path = template_path.relative_to(TEMPLATES_DIR)
-            wiki_path = self.pages_dir / rel_path
+            wiki_path = self.repo_path / rel_path
 
             # Only copy if doesn't exist
             if not wiki_path.exists():
@@ -120,7 +116,7 @@ class GitWiki:
         if created:
             try:
                 for rel_path in created:
-                    self.repo.index.add([f"pages/{rel_path}"])
+                    self.repo.index.add([str(rel_path)])
                 self.repo.index.commit(
                     f"Initialize templates: {', '.join(created[:3])}{'...' if len(created) > 3 else ''}",
                     author=self._create_author("System")
@@ -228,18 +224,18 @@ class GitWiki:
         # Direct path lookup - this is the expected case
         has_extension = any(title.endswith(ext) for ext in SUPPORTED_EXTENSIONS)
         if has_extension or '/' in title:
-            direct_path = self.pages_dir / title
+            direct_path = self.repo_path / title
             if direct_path.exists():
                 return direct_path
 
         # Try exact filename match (for .md files)
         filename = self.title_to_filename(title)
-        exact_path = self.pages_dir / filename
+        exact_path = self.repo_path / filename
         if exact_path.exists():
             return exact_path
 
         # Fallback to the exact path (will fail exists check later)
-        return self.pages_dir / title
+        return self.repo_path / title
 
     def _parse_page(self, filepath: Path) -> Dict[str, Any]:
         """
@@ -260,7 +256,7 @@ class GitWiki:
         file_type = self._get_file_type(filepath)
 
         base_result = {
-            "path": str(filepath.relative_to(self.pages_dir)),
+            "path": str(filepath.relative_to(self.repo_path)),
             "title": filepath.name,
             "file_type": file_type,
             "has_conflicts": "<<<<<<" in raw_content or "=======" in raw_content
@@ -551,9 +547,12 @@ class GitWiki:
         """
         pages = []
 
-        for filepath in self.pages_dir.rglob("*"):
-            # Skip directories and hidden files
+        for filepath in self.repo_path.rglob("*"):
+            # Skip directories, hidden files, and .git folder
             if not filepath.is_file() or filepath.name.startswith('.'):
+                continue
+            # Skip .git directory contents
+            if '.git' in filepath.parts:
                 continue
 
             # Only include supported file types
@@ -561,7 +560,7 @@ class GitWiki:
                 continue
 
             try:
-                rel_path = str(filepath.relative_to(self.pages_dir))
+                rel_path = str(filepath.relative_to(self.repo_path))
                 ft = self._get_file_type(filepath)
 
                 # Filter by file type if specified
@@ -602,7 +601,7 @@ class GitWiki:
                 '-l',  # Only show filenames
                 '-i',  # Case insensitive
                 query,
-                'pages/'
+                '.'
             )
 
             # Parse results
@@ -634,7 +633,10 @@ class GitWiki:
         pages = []
         query_lower = query.lower()
 
-        for filepath in self.pages_dir.rglob("*"):
+        for filepath in self.repo_path.rglob("*"):
+            # Skip .git directory
+            if '.git' in filepath.parts:
+                continue
             if filepath.is_file() and filepath.suffix.lower() in SUPPORTED_EXTENSIONS:
                 try:
                     content = filepath.read_text(encoding='utf-8').lower()
@@ -743,7 +745,7 @@ class GitWiki:
                     continue
 
                 if entry.is_dir():
-                    rel_path = str(entry.relative_to(self.pages_dir))
+                    rel_path = str(entry.relative_to(self.repo_path))
                     item = {
                         "id": rel_path,
                         "title": entry.name,
@@ -755,7 +757,7 @@ class GitWiki:
                     items.append(item)
                 elif entry.is_file() and entry.suffix.lower() in SUPPORTED_EXTENSIONS:
                     try:
-                        rel_path = str(entry.relative_to(self.pages_dir))
+                        rel_path = str(entry.relative_to(self.repo_path))
                         file_type = GitWiki._get_file_type(entry)
                         # Remove extension for id
                         item_id = rel_path.rsplit('.', 1)[0] if '.' in rel_path else rel_path
@@ -777,7 +779,7 @@ class GitWiki:
             items.sort(key=lambda x: x["title"].lower())
             return items
 
-        return build_tree(self.pages_dir)
+        return build_tree(self.repo_path)
 
     def create_folder(self, name: str, parent_path: Optional[str] = None,
                      author: str = "System") -> Dict[str, Any]:
@@ -803,11 +805,11 @@ class GitWiki:
 
         # Determine parent directory
         if parent_path:
-            parent_dir = self.pages_dir / parent_path
+            parent_dir = self.repo_path / parent_path
             if not parent_dir.is_dir():
                 raise GitWikiException(f"Parent folder '{parent_path}' not found")
         else:
-            parent_dir = self.pages_dir
+            parent_dir = self.repo_path
 
         # Use plain folder name - no automatic numbering
         folder_path = parent_dir / slug
@@ -833,13 +835,12 @@ class GitWiki:
             folder_path.rmdir()
             raise GitWikiException(f"Git commit failed: {e}")
 
-        rel_path = str(folder_path.relative_to(self.pages_dir))
+        rel_path = str(folder_path.relative_to(self.repo_path))
         return {
             "id": rel_path,
             "title": name,
             "path": rel_path,
             "type": "folder",
-            "order": order,
             "parent_path": parent_path,
             "children": []
         }
@@ -849,7 +850,7 @@ class GitWiki:
         Delete a folder and all its contents recursively.
 
         Args:
-            path: Folder path relative to pages directory
+            path: Folder path relative to wiki root
             author: Author name for commit
 
         Returns:
@@ -858,7 +859,7 @@ class GitWiki:
         Raises:
             GitWikiException: If folder doesn't exist or deletion fails
         """
-        folder_path = self.pages_dir / path
+        folder_path = self.repo_path / path
 
         if not folder_path.exists():
             raise GitWikiException(f"Folder '{path}' not found")
@@ -885,7 +886,7 @@ class GitWiki:
         Files keep their original names - no automatic numbering.
 
         Args:
-            source_path: Current path of item (relative to pages dir)
+            source_path: Current path of item (relative to wiki root)
             target_parent: Target parent folder path (None for root)
             new_order: Ignored (kept for API compatibility)
             author: Author name for commit
@@ -897,7 +898,7 @@ class GitWiki:
             PageNotFoundException: If source item not found
             GitWikiException: If target folder not found or move fails
         """
-        source = self.pages_dir / source_path
+        source = self.repo_path / source_path
 
         if not source.exists():
             raise PageNotFoundException(f"Item '{source_path}' not found")
@@ -906,7 +907,7 @@ class GitWiki:
 
         # Determine target directory
         if target_parent:
-            target_dir = self.pages_dir / target_parent
+            target_dir = self.repo_path / target_parent
             if not target_dir.is_dir():
                 raise GitWikiException(f"Target folder '{target_parent}' not found")
             # Prevent moving folder into itself or its descendants
@@ -916,7 +917,7 @@ class GitWiki:
                 if target_resolved == source_resolved or str(target_resolved).startswith(str(source_resolved) + '/'):
                     raise GitWikiException("Cannot move folder into itself or its descendants")
         else:
-            target_dir = self.pages_dir
+            target_dir = self.repo_path
 
         # Keep original filename - no automatic numbering
         target_path = target_dir / source.name
@@ -938,7 +939,7 @@ class GitWiki:
         except GitCommandError as e:
             raise GitWikiException(f"Failed to move item: {e}")
 
-        new_rel_path = str(target_path.relative_to(self.pages_dir))
+        new_rel_path = str(target_path.relative_to(self.repo_path))
         return {
             "path": new_rel_path,
             "parent_path": target_parent
@@ -1311,14 +1312,9 @@ class GitWiki:
         Returns:
             List of tree items, same structure as get_page_tree()
         """
-        # Use module-level SUPPORTED_EXTENSIONS constant
-
         try:
-            # Get relative path of pages_dir from repo root
-            pages_rel = self.pages_dir.relative_to(self.repo_path)
-
             # List all files at ref using git ls-tree
-            output = self.repo.git.ls_tree('-r', '--name-only', ref, str(pages_rel))
+            output = self.repo.git.ls_tree('-r', '--name-only', ref)
             if not output.strip():
                 return []
 
@@ -1327,18 +1323,12 @@ class GitWiki:
             tree_dict: Dict[str, Dict] = {}
 
             for file_path in files:
-                # Remove pages_dir prefix to get relative path
-                if file_path.startswith(str(pages_rel) + '/'):
-                    rel_path = file_path[len(str(pages_rel)) + 1:]
-                else:
-                    rel_path = file_path
-
                 # Skip hidden files and unsupported extensions
-                parts = rel_path.split('/')
+                parts = file_path.split('/')
                 if any(p.startswith('.') for p in parts):
                     continue
 
-                ext = '.' + rel_path.split('.')[-1].lower() if '.' in rel_path else ''
+                ext = '.' + file_path.split('.')[-1].lower() if '.' in file_path else ''
                 if ext not in SUPPORTED_EXTENSIONS:
                     continue
 
@@ -1361,10 +1351,10 @@ class GitWiki:
                 file_name = parts[-1]
                 title = file_name.rsplit('.', 1)[0] if '.' in file_name else file_name
                 file_type = ext[1:] if ext else 'md'
-                current_dict[rel_path] = {
-                    "id": rel_path,
+                current_dict[file_path] = {
+                    "id": file_path,
                     "title": title,
-                    "path": rel_path,
+                    "path": file_path,
                     "type": "page",
                     "file_type": file_type,
                     "parent_path": '/'.join(parts[:-1]) if len(parts) > 1 else None
@@ -1407,17 +1397,17 @@ class GitWiki:
                 parts = line.split('\t')
                 if len(parts) == 3:
                     adds, dels, path = parts
-                    # Only include pages (files in pages/ directory with supported extensions)
-                    if path.startswith('pages/'):
-                        ext = '.' + path.rsplit('.', 1)[-1] if '.' in path else ''
-                        if ext.lower() in SUPPORTED_EXTENSIONS:
-                            # Convert path to page identifier
-                            page_path = path[6:]  # Remove 'pages/' prefix
-                            stats[page_path] = {
-                                "additions": int(adds) if adds != '-' else 0,
-                                "deletions": int(dels) if dels != '-' else 0,
-                                "file_type": self._get_file_type(Path(path))
-                            }
+                    # Skip hidden files
+                    if path.startswith('.') or '/.' in path:
+                        continue
+                    # Only include files with supported extensions
+                    ext = '.' + path.rsplit('.', 1)[-1] if '.' in path else ''
+                    if ext.lower() in SUPPORTED_EXTENSIONS:
+                        stats[path] = {
+                            "additions": int(adds) if adds != '-' else 0,
+                            "deletions": int(dels) if dels != '-' else 0,
+                            "file_type": self._get_file_type(Path(path))
+                        }
 
             return stats
         except GitCommandError:
@@ -1457,7 +1447,10 @@ class GitWiki:
         except regex_module.error as e:
             return [{"error": f"Invalid regex pattern: {e}"}]
 
-        for filepath in self.pages_dir.rglob("*"):
+        for filepath in self.repo_path.rglob("*"):
+            # Skip .git directory
+            if '.git' in filepath.parts:
+                continue
             if not filepath.is_file() or filepath.suffix.lower() not in SUPPORTED_EXTENSIONS:
                 continue
 
@@ -1469,7 +1462,7 @@ class GitWiki:
                     page_content = self._strip_frontmatter(raw_content)
                 else:
                     page_content = raw_content
-                page_path = str(filepath.relative_to(self.pages_dir))
+                page_path = str(filepath.relative_to(self.repo_path))
                 lines = page_content.split('\n')
 
                 for line_num, line in enumerate(lines, start=1):
@@ -1531,11 +1524,14 @@ class GitWiki:
 
         results = []
 
-        for filepath in self.pages_dir.rglob("*"):
+        for filepath in self.repo_path.rglob("*"):
+            # Skip .git directory
+            if '.git' in filepath.parts:
+                continue
             if not filepath.is_file() or filepath.suffix.lower() not in SUPPORTED_EXTENSIONS:
                 continue
 
-            rel_path = str(filepath.relative_to(self.pages_dir))
+            rel_path = str(filepath.relative_to(self.repo_path))
             # Remove extension for matching against pattern
             rel_path_no_ext = rel_path.rsplit('.', 1)[0] if '.' in rel_path else rel_path
 

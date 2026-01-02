@@ -23,7 +23,7 @@ make setup    # Install dependencies (first time)
 make run      # Start backend (8000) and frontend (5173)
 ```
 
-See ![Getting-Started](https://github.com/honix/Sviter-wiki/blob/main/pages/Getting-Started.md) wiki-page for more information.
+See ![Getting-Started](https://github.com/honix/Sviter-wiki/blob/main/Getting-Started.md) wiki-page for more information.
 
 ## How It Works
 
@@ -40,7 +40,7 @@ See ![Getting-Started](https://github.com/honix/Sviter-wiki/blob/main/pages/Gett
 
 ## Documentation
 
-See [Sviter-wiki](https://github.com/honix/Sviter-wiki/blob/main/pages/Home.md) for full documentation — built with Sviter and best viewed inside Sviter itself.
+See [Sviter-wiki](https://github.com/honix/Sviter-wiki/blob/main/Home.md) for full documentation — built with Sviter and best viewed inside Sviter itself.
 
 ## License
 

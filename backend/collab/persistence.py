@@ -105,17 +105,12 @@ class CollabPersistence:
         Convert a page path to a title.
 
         The page path might be:
-        - "pages/01-intro.md" -> "intro"
         - "01-intro.md" -> "intro"
         - "folder/page.md" -> "folder/page"
         """
         # Remove .md extension
         if page_path.endswith('.md'):
             page_path = page_path[:-3]
-
-        # Remove pages/ prefix if present
-        if page_path.startswith('pages/'):
-            page_path = page_path[6:]
 
         # Remove order prefix (e.g., "01-" or "001-")
         parts = page_path.split('/')
