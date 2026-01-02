@@ -18,6 +18,7 @@ interface ProseMirrorEditorProps {
   onLinkClick?: (href: string) => void; // Handle wiki link clicks
   editable: boolean;
   className?: string;
+  pagePath?: string; // Current page path for resolving relative links
 }
 
 export interface ProseMirrorEditorHandle {
@@ -25,7 +26,7 @@ export interface ProseMirrorEditorHandle {
 }
 
 export const ProseMirrorEditor = forwardRef<ProseMirrorEditorHandle, ProseMirrorEditorProps>(
-  ({ initialContent, onChange, onViewReady, onLinkClick, editable, className }, ref) => {
+  ({ initialContent, onChange, onViewReady, onLinkClick, editable, className, pagePath }, ref) => {
     const editorRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
     const initializedRef = useRef(false);
@@ -136,7 +137,7 @@ export const ProseMirrorEditor = forwardRef<ProseMirrorEditorHandle, ProseMirror
     }, [initialContent]);
 
     // Wiki link handling
-    const { handleClick, handleMouseOver } = useWikiLinks(onLinkClick, editable);
+    const { handleClick, handleMouseOver } = useWikiLinks(onLinkClick, editable, pagePath);
 
     return (
       <div

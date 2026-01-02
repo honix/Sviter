@@ -330,7 +330,7 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
   }, [connectionStatus, remoteUsers, saveStatus, onCollabStatusChange]);
 
   // Wiki link handling
-  const { handleClick, handleMouseOver } = useWikiLinks(onLinkClick, editable);
+  const { handleClick, handleMouseOver } = useWikiLinks(onLinkClick, editable, pagePath);
 
   return (
     <div className={`flex flex-col h-full ${className || ''}`}>

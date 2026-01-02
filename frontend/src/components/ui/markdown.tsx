@@ -107,17 +107,14 @@ function createComponentsWithLinkHandlers(
 
       // Handle wiki links (relative links without protocol)
       if (href && linkHandlers.onPageClick && !href.includes(':')) {
-        // Check if href already has a file extension
-        const hasExtension = /\.[a-zA-Z0-9]+$/.test(href)
-        const pagePath = hasExtension ? href : `${href}.md`
         return (
           <a
-            href={`/main/${pagePath}/view`}
+            href={`/main/${href}/view`}
             className="text-primary hover:text-primary/80 underline cursor-pointer"
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
-              linkHandlers.onPageClick?.(pagePath)
+              linkHandlers.onPageClick?.(href)
             }}
           >
             {children}

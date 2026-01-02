@@ -598,6 +598,7 @@ const CenterPanel: React.FC = () => {
                       editable={false}
                       onLinkClick={handleWikiLinkClick}
                       className="h-full"
+                      pagePath={currentPage.path}
                     />
                   )}
                 </div>
@@ -709,6 +710,7 @@ const CenterPanel: React.FC = () => {
                       editable={false}
                       onLinkClick={handleWikiLinkClick}
                       className="h-full"
+                      pagePath={currentPage.path}
                     />
                   </div>
                 )}
