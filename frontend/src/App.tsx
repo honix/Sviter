@@ -4,6 +4,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { SelectionProvider } from './contexts/SelectionContext';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import { useUrlState } from './hooks/useUrlState';
+import { Toaster } from '@/components/ui/sonner';
 
 /**
  * Component that initializes URL state syncing.
@@ -23,6 +24,7 @@ function App() {
             <UrlStateInitializer />
             <div className="App">
               <MainLayout />
+              <Toaster position="bottom-center" />
             </div>
           </SelectionProvider>
         </AppProvider>

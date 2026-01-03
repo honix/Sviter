@@ -1,14 +1,11 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  useSensor,
-  useSensors,
   useDraggable,
   useDroppable
 } from '@dnd-kit/core';
-import type { DragStartEvent, DragEndEvent, DragOverEvent } from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import { useAppDnd } from '../../contexts/DndContext';
+import type { DragItemData } from '../../contexts/DndContext';
 import type { TreeItem, Page } from '../../types/page';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -20,11 +17,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, FileText, FileSpreadsheet, FileCode, FolderPlus, GripVertical, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, LogIn, MessageSquarePlus, Waypoints } from 'lucide-react';
+import { Plus, FileText, FileSpreadsheet, FileCode, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, LogIn, MessageSquarePlus, Waypoints, ImagePlus, Loader2, Image, File } from 'lucide-react';
 import { useSelection } from '../../contexts/SelectionContext';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
 import { getApiUrl } from '../../utils/url';
+import { isImagePath } from '../../utils/files';
+import { useImageUpload } from '../../hooks/useImageUpload';
 
 // Extract filename from path
 const getFileName = (path: string): string => {
@@ -53,7 +52,9 @@ const FileName: React.FC<{ path: string }> = ({ path }) => {
 const getFileIcon = (path: string) => {
   if (path.endsWith('.csv')) return FileSpreadsheet;
   if (path.endsWith('.tsx')) return FileCode;
-  return FileText;
+  if (path.endsWith('.md')) return FileText;
+  if (isImagePath(path)) return Image;
+  return File; // Unknown file type
 };
 
 // Per-page diff stats (matches backend format)
@@ -80,12 +81,31 @@ interface PageTreeProps {
   onMoveItem: (sourcePath: string, targetParentPath: string | null, newOrder: number) => void;
 }
 
-// Simple draggable item
+// Draggable item wrapper - whole item is draggable
 const DraggableItem: React.FC<{
   id: string;
+  itemData: DragItemData;
   children: React.ReactNode;
-}> = ({ id, children }) => {
+}> = ({ id, itemData, children }) => {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id });
+  const { setDraggedItem } = useAppDnd();
+
+  // Keep itemData in ref to avoid dependency on object reference
+  const itemDataRef = useRef(itemData);
+  itemDataRef.current = itemData;
+
+  // Track if we already set the dragged item for this drag session
+  const didSetRef = useRef(false);
+
+  // Set dragged item data only once when drag starts
+  useEffect(() => {
+    if (isDragging && !didSetRef.current) {
+      didSetRef.current = true;
+      setDraggedItem(itemDataRef.current);
+    } else if (!isDragging) {
+      didSetRef.current = false;
+    }
+  }, [isDragging, setDraggedItem]);
 
   return (
     <div
@@ -161,9 +181,13 @@ const PageTree: React.FC<PageTreeProps> = ({
 }) => {
   const { user, logout } = useAuth();
   const { addPathToContext } = useSelection();
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
+  const { draggedItem, overId: dndOverId, setTreeDragEndHandler } = useAppDnd();
   const [diffStats, setDiffStats] = useState<PageDiffStats>({});
+  const { isUploading, triggerUpload, inputProps } = useImageUpload();
+
+  // Track if we're dragging (for showing drop zones)
+  const isDragging = draggedItem !== null;
+  const overId = dndOverId;
 
   // Get display name and initials for profile
   const displayName = user?.type === 'oauth' && user?.name
@@ -185,12 +209,6 @@ const PageTree: React.FC<PageTreeProps> = ({
       .then(data => setDiffStats(data.stats || {}))
       .catch(() => setDiffStats({}));
   }, [currentBranch, pageUpdateCounter]);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 }
-    })
-  );
 
   // Build flat list with drop zones
   // Items are already sorted alphabetically by the backend
@@ -276,55 +294,51 @@ const PageTree: React.FC<PageTreeProps> = ({
     return result;
   }, [tree, pages, expandedFolders]);
 
-  const draggedItem = draggedId
-    ? items.find(i => i.type === 'item' && i.item?.id === draggedId)?.item
-    : null;
-
-  const handleDragStart = (event: DragStartEvent) => {
-    setDraggedId(event.active.id as string);
-  };
-
-  const handleDragOver = (event: DragOverEvent) => {
-    setOverId(event.over?.id as string || null);
-  };
-
-  const handleDragEnd = (event: DragEndEvent) => {
+  // Handler for tree drag end (internal reordering)
+  const handleTreeDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
-    setDraggedId(null);
-    setOverId(null);
 
+    // Don't process if no drop target
     if (!over) return;
+
+    // Only process internal tree drops (folder: or drop: prefixed IDs)
+    const dropId = over.id as string;
+    if (!dropId.startsWith('folder:') && !dropId.startsWith('drop:')) return;
 
     const sourceItem = items.find(i => i.type === 'item' && i.item?.id === active.id)?.item;
     if (!sourceItem) return;
 
-    const overId = over.id as string;
-
     // Check if dropping on a folder
-    if (overId.startsWith('folder:')) {
-      const folderPath = overId.replace('folder:', '');
+    if (dropId.startsWith('folder:')) {
+      const folderPath = dropId.replace('folder:', '');
       onMoveItem(sourceItem.path, folderPath, 1);
       return;
     }
 
     // Check if dropping on a drop zone
-    if (overId.startsWith('drop:')) {
-      const parts = overId.split(':');
+    if (dropId.startsWith('drop:')) {
+      const parts = dropId.split(':');
       const parentPath = parts[1] === 'root' ? null : parts[1];
       const order = parseInt(parts[2], 10);
       onMoveItem(sourceItem.path, parentPath, order);
     }
-  };
+  }, [items, onMoveItem]);
 
-  const handleDragCancel = () => {
-    setDraggedId(null);
-    setOverId(null);
-  };
+  // Register tree drag handler with context
+  useEffect(() => {
+    setTreeDragEndHandler(handleTreeDragEnd);
+    return () => setTreeDragEndHandler(undefined);
+  }, [handleTreeDragEnd, setTreeDragEndHandler]);
 
   const handleCreatePage = () => {
     const title = prompt('Enter page title:');
     if (title?.trim()) {
-      onCreatePage(title.trim());
+      let pageName = title.trim();
+      // Add .md extension if no extension provided
+      if (!pageName.includes('.')) {
+        pageName = `${pageName}.md`;
+      }
+      onCreatePage(pageName);
     }
   };
 
@@ -333,6 +347,18 @@ const PageTree: React.FC<PageTreeProps> = ({
     if (name?.trim()) {
       onCreateFolder(name.trim());
     }
+  };
+
+  // Helper to get item data for dragging
+  const getItemDragData = (item: TreeItem): DragItemData => {
+    const itemType = item.type === 'folder' ? 'folder' : isImagePath(item.path) ? 'image' : 'page';
+    const name = getFileName(item.path).replace(/\.[^.]+$/, '');
+    return {
+      id: item.id,
+      type: itemType,
+      path: item.path,
+      name: item.title || name,
+    };
   };
 
   // Calculate aggregated diff stats for a folder (sum of all children)
@@ -355,7 +381,7 @@ const PageTree: React.FC<PageTreeProps> = ({
   const renderItem = (item: TreeItem, page: Page | undefined, indent: number) => {
     const isSelected = currentPage?.path === item.path || currentPage?.title === item.title;
     const isExpanded = expandedFolders.includes(item.id);
-    const isDragging = draggedId === item.id;
+    const isItemDragging = draggedItem?.id === item.id;
 
     if (item.type === 'folder') {
       const isDropTarget = overId === `folder:${item.path}`;
@@ -363,16 +389,12 @@ const PageTree: React.FC<PageTreeProps> = ({
       const folderStats = getFolderStats(item.path);
 
       return (
-        <FolderDropTarget id={`folder:${item.path}`} isOver={isDropTarget && !isDragging}>
+        <FolderDropTarget id={`folder:${item.path}`} isOver={isDropTarget && !isItemDragging}>
           <div
-            className={cn(
-              "flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-accent group",
-              isDragging && "opacity-30"
-            )}
+            className="flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-grab hover:bg-accent group"
             style={{ paddingLeft: `${8 + indent * 20}px` }}
             onClick={() => onToggleFolder(item.id)}
           >
-            <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab flex-shrink-0" />
             {isExpanded ? (
               <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             ) : (
@@ -437,14 +459,12 @@ const PageTree: React.FC<PageTreeProps> = ({
     return (
       <div
         className={cn(
-          "flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-pointer group",
-          isSelected ? "bg-primary text-primary-foreground" : "hover:bg-accent",
-          isDragging && "opacity-30"
+          "flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-grab group",
+          isSelected ? "bg-primary text-primary-foreground" : "hover:bg-accent"
         )}
         style={{ paddingLeft: `${8 + indent * 20}px` }}
         onClick={() => page && onPageSelect(page)}
       >
-        <GripVertical className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab flex-shrink-0" />
         <FileIcon className="h-4 w-4 flex-shrink-0" />
         <span className="text-sm flex-1 truncate"><FileName path={item.path} /></span>
         {pageStats && (pageStats.additions > 0 || pageStats.deletions > 0) && (
@@ -512,6 +532,20 @@ const PageTree: React.FC<PageTreeProps> = ({
             <Button onClick={handleCreateFolder} variant="outline" size="sm" title="New Folder">
               <FolderPlus className="h-4 w-4" />
             </Button>
+            <Button
+              onClick={triggerUpload}
+              variant="outline"
+              size="sm"
+              title="Upload Image"
+              disabled={isUploading}
+            >
+              {isUploading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ImagePlus className="h-4 w-4" />
+              )}
+            </Button>
+            <input {...inputProps} />
           </div>
         ) : (
           <div className="text-sm text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
@@ -533,57 +567,33 @@ const PageTree: React.FC<PageTreeProps> = ({
               </Button>
             </div>
           ) : (
-            <DndContext
-              sensors={sensors}
-              onDragStart={handleDragStart}
-              onDragOver={handleDragOver}
-              onDragEnd={handleDragEnd}
-              onDragCancel={handleDragCancel}
-            >
-              <div>
-                {items.map((entry) => {
-                  if (entry.type === 'dropzone') {
-                    // Only show drop zones when dragging
-                    if (!draggedId) return null;
-
-                    return (
-                      <DropZone
-                        key={entry.dropId}
-                        id={entry.dropId!}
-                        indent={entry.indent}
-                        isOver={overId === entry.dropId}
-                      />
-                    );
-                  }
+            <div>
+              {items.map((entry) => {
+                if (entry.type === 'dropzone') {
+                  // Only show drop zones when dragging
+                  if (!isDragging) return null;
 
                   return (
-                    <DraggableItem key={entry.item!.id} id={entry.item!.id}>
-                      {renderItem(entry.item!, entry.page, entry.indent)}
-                    </DraggableItem>
+                    <DropZone
+                      key={entry.dropId}
+                      id={entry.dropId!}
+                      indent={entry.indent}
+                      isOver={overId === entry.dropId}
+                    />
                   );
-                })}
-              </div>
+                }
 
-              <DragOverlay>
-                {draggedItem && (
-                  <div className="bg-background border-2 border-primary rounded-lg px-3 py-2 shadow-xl">
-                    <div className="flex items-center gap-2">
-                      {draggedItem.type === 'folder' ? (
-                        <Folder className="h-4 w-4 text-yellow-500" />
-                      ) : (
-                        (() => {
-                          const DragIcon = getFileIcon(draggedItem.path);
-                          return <DragIcon className="h-4 w-4" />;
-                        })()
-                      )}
-                      <span className="text-sm font-medium">
-                        {draggedItem.type === 'folder' ? draggedItem.title : <FileName path={draggedItem.path} />}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </DragOverlay>
-            </DndContext>
+                return (
+                  <DraggableItem
+                    key={entry.item!.id}
+                    id={entry.item!.id}
+                    itemData={getItemDragData(entry.item!)}
+                  >
+                    {renderItem(entry.item!, entry.page, entry.indent)}
+                  </DraggableItem>
+                );
+              })}
+            </div>
           )}
         </div>
       </ScrollArea>

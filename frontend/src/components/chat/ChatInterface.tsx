@@ -1,5 +1,8 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { useDroppable } from '@dnd-kit/core';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useAppDnd } from '../../contexts/DndContext';
+import type { DragItemData } from '../../contexts/DndContext';
 import { useChat } from '../../hooks/useChat';
 import { useAppContext } from '../../contexts/AppContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -45,6 +48,34 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
   const [expandedSystemPrompts, setExpandedSystemPrompts] = useState<Set<string>>(new Set());
   const { userId: currentUserId } = useAuth();
   const { state: selectionState, clearAllContexts } = useSelection();
+
+  // dnd-kit droppable for dragging items into chat
+  const { setNodeRef: setDroppableRef, isOver: isDndOver } = useDroppable({
+    id: 'chat-drop-zone',
+  });
+  const { registerDropHandler, unregisterDropHandler } = useAppDnd();
+
+  // Handle dnd-kit drop - insert reference into input
+  const handleDndDrop = useCallback((item: DragItemData) => {
+    let textToInsert = '';
+    if (item.type === 'image') {
+      textToInsert = `![${item.name}](/${item.path})`;
+    } else if (item.type === 'page') {
+      textToInsert = `[${item.name}](/${item.path})`;
+    } else if (item.type === 'folder') {
+      textToInsert = `/${item.path}`;
+    }
+
+    if (textToInsert) {
+      setInputValue(prev => prev + (prev ? ' ' : '') + textToInsert);
+    }
+  }, []);
+
+  // Register drop handler with dnd context
+  useEffect(() => {
+    registerDropHandler('chat-drop-zone', handleDndDrop);
+    return () => unregisterDropHandler('chat-drop-zone');
+  }, [registerDropHandler, unregisterDropHandler, handleDndDrop]);
 
   const toggleSystemPrompt = useCallback((messageId: string) => {
     setExpandedSystemPrompts(prev => {
@@ -411,7 +442,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
       </ChatContainerRoot>
 
       {/* Bottom section - Chat input always available */}
-      <div className="p-4 border-t border-border flex-shrink-0">
+      <div
+        ref={setDroppableRef}
+        className={`p-4 border-t flex-shrink-0 transition-colors ${
+          isDndOver ? 'border-primary bg-primary/5' : 'border-border'
+        }`}
+      >
         <div className="relative">
           <SelectionBadge />
           <PromptInput

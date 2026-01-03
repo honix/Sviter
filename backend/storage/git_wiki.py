@@ -25,7 +25,7 @@ TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
 
 # Supported file extensions for wiki content
-SUPPORTED_EXTENSIONS = {'.md', '.csv', '.tsx'}
+SUPPORTED_EXTENSIONS = {'.md', '.csv', '.tsx', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
 
 
 
@@ -205,15 +205,19 @@ class GitWiki:
             filepath: Path to file
 
         Returns:
-            'markdown', 'csv', or 'tsx'
+            'markdown', 'csv', 'tsx', 'image', or 'unknown'
         """
         ext = filepath.suffix.lower()
-        if ext == '.csv':
+        if ext == '.md':
+            return 'markdown'
+        elif ext == '.csv':
             return 'csv'
         elif ext == '.tsx':
             return 'tsx'
+        elif ext in {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}:
+            return 'image'
         else:
-            return 'markdown'
+            return 'unknown'
 
     def _get_page_path(self, title: str) -> Path:
         """Get full filesystem path for a page by title or path.
@@ -503,10 +507,6 @@ class GitWiki:
         if not sanitized:
             raise GitWikiException("Invalid filename")
 
-        # Ensure .md extension
-        if not sanitized.endswith('.md'):
-            sanitized = sanitized + '.md'
-
         # Build new path in same directory
         new_filepath = old_filepath.parent / sanitized
 
@@ -755,12 +755,13 @@ class GitWiki:
                         "children": build_tree(entry, rel_path)
                     }
                     items.append(item)
-                elif entry.is_file() and entry.suffix.lower() in SUPPORTED_EXTENSIONS:
+                elif entry.is_file():
                     try:
                         rel_path = str(entry.relative_to(self.repo_path))
+                        # Get file type (returns 'unknown' for unsupported extensions)
                         file_type = GitWiki._get_file_type(entry)
-                        # Remove extension for id
-                        item_id = rel_path.rsplit('.', 1)[0] if '.' in rel_path else rel_path
+                        # Remove extension for id (if has extension)
+                        item_id = rel_path.rsplit('.', 1)[0] if '.' in entry.name else rel_path
                         item = {
                             "id": item_id,
                             "title": entry.name,
@@ -868,12 +869,27 @@ class GitWiki:
             raise GitWikiException(f"'{path}' is not a folder")
 
         try:
-            # Use git rm -r to recursively remove folder and all contents
             relative_path = folder_path.relative_to(self.repo_path)
-            self.repo.git.rm('-r', str(relative_path))
-            self.repo.index.commit(f"Delete folder: {path}", author=self._create_author(author))
+            has_tracked_files = False
 
-        except GitCommandError as e:
+            # Try git rm -r to remove tracked files
+            try:
+                self.repo.git.rm('-r', str(relative_path))
+                has_tracked_files = True
+            except GitCommandError:
+                # No tracked files - folder is empty or has only untracked files
+                pass
+
+            # Remove any remaining untracked files/folders from filesystem
+            import shutil
+            if folder_path.exists():
+                shutil.rmtree(folder_path)
+
+            # Commit if we removed tracked files
+            if has_tracked_files:
+                self.repo.index.commit(f"Delete folder: {path}", author=self._create_author(author))
+
+        except Exception as e:
             raise GitWikiException(f"Failed to delete folder: {e}")
 
         return True

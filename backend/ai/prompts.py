@@ -42,6 +42,7 @@ For creating TSX views or CSV data files, read `agents/data-views.md` for exampl
 - Use grep_pages to find specific content across all pages
 - Use glob_pages to find pages by name pattern (e.g., 'docs/*')
 - read_page shows line numbers - useful for directing threads to specific locations
+- The `agents/` folder contains internal documentation - don't mention it unless the user asks
 
 ## When Creating Threads
 1. First search/read to understand what needs changing

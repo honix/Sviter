@@ -35,3 +35,52 @@ export function getWsUrl(path: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${host}${path}`;
 }
+
+/**
+ * Resolve a relative path against a base path (GitHub-style).
+ * Used for wiki links and image paths.
+ *
+ * @param path - The path to resolve (may be relative, root-relative, or have ../)
+ * @param basePath - The current page/file path to resolve against
+ * @returns Resolved path relative to wiki root
+ *
+ * @example
+ * resolvePath('images/foo.png', 'docs/guide.md') => 'docs/images/foo.png'
+ * resolvePath('../images/foo.png', 'docs/guide.md') => 'images/foo.png'
+ * resolvePath('/images/foo.png', 'docs/guide.md') => 'images/foo.png'
+ */
+export function resolvePath(path: string, basePath?: string | null): string {
+  // Decode URL-encoded paths first (markdown-it encodes spaces as %20)
+  const decoded = decodeURIComponent(path);
+
+  // If starts with /, it's root-relative
+  if (decoded.startsWith('/')) {
+    return decoded.slice(1);
+  }
+
+  // If no base path, treat as root-relative
+  if (!basePath) {
+    return decoded;
+  }
+
+  // Get directory of base path as array of segments
+  const lastSlash = basePath.lastIndexOf('/');
+  const dirSegments = lastSlash === -1 ? [] : basePath.slice(0, lastSlash).split('/');
+
+  // Split path into segments
+  const pathSegments = decoded.split('/');
+
+  // Process each segment
+  const resultSegments = [...dirSegments];
+  for (const segment of pathSegments) {
+    if (segment === '..') {
+      if (resultSegments.length > 0) {
+        resultSegments.pop();
+      }
+    } else if (segment !== '.' && segment !== '') {
+      resultSegments.push(segment);
+    }
+  }
+
+  return resultSegments.join('/');
+}

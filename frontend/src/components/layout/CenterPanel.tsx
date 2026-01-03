@@ -21,6 +21,8 @@ import { stringToColor, getInitials } from '../../utils/colors';
 import { setEditingState } from '../../services/collab';
 import { ThreadsAPI, type ThreadFile } from '../../services/threads-api';
 import { getApiUrl } from '../../utils/url';
+import { isImagePath } from '../../utils/files';
+import { toast } from 'sonner';
 
 // Extract filename from path
 const getFileName = (path: string): string => {
@@ -84,12 +86,15 @@ const CenterPanel: React.FC = () => {
   // Determine file type from current page
   const fileType: FileType = useMemo(() => {
     if (!currentPage) return 'markdown';
-    if (currentPage.file_type) return currentPage.file_type;
+    if (currentPage.file_type && currentPage.file_type !== 'unknown') return currentPage.file_type;
     // Fallback to extension-based detection
     const path = currentPage.path;
     if (path.endsWith('.csv')) return 'csv';
     if (path.endsWith('.tsx')) return 'tsx';
-    return 'markdown';
+    if (isImagePath(path)) return 'image';
+    if (path.endsWith('.md')) return 'markdown';
+    // Unknown file type
+    return 'unknown';
   }, [currentPage?.path, currentPage?.file_type]);
 
   // Handle collab status changes from editors
@@ -341,7 +346,7 @@ const CenterPanel: React.FC = () => {
       setTitleInput('');
     } catch (err) {
       console.error('Failed to rename page:', err);
-      alert(err instanceof Error ? err.message : 'Failed to rename page');
+      toast.error(err instanceof Error ? err.message : 'Failed to rename page');
     } finally {
       setTitleSaving(false);
       titleSavingRef.current = false;
@@ -434,8 +439,8 @@ const CenterPanel: React.FC = () => {
                     }, 150);
                   }}
                   disabled={titleSaving}
-                  className="text-2xl font-bold text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0 m-0"
-                  style={{ width: `${Math.max(titleInput.length, 1)}ch` }}
+                  className="text-2xl font-bold text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0 m-0 min-w-[120px]"
+                  style={{ width: `${Math.max(titleInput.length + 2, 8)}ch` }}
                   placeholder="name"
                 />
                 {titleSaving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
@@ -448,12 +453,15 @@ const CenterPanel: React.FC = () => {
                 >
                   <FileName path={currentPage.path} />
                 </h1>
-                <Pencil className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                <Pencil
+                  className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:text-foreground"
+                  onClick={startEditingTitle}
+                />
               </>
             )}
           </div>
-          {/* Show collab status in View and Edit modes */}
-          {(mainTab === 'view' || mainTab === 'edit') && <CollabStatusBar />}
+          {/* Show collab status in View and Edit modes (not for images) */}
+          {fileType !== 'image' && (mainTab === 'view' || mainTab === 'edit') && <CollabStatusBar />}
         </div>
 
         {/* Content Area with Tabs */}
@@ -469,18 +477,20 @@ const CenterPanel: React.FC = () => {
                   <Eye className="h-4 w-4 mr-1.5" />
                   View
                 </TabsTrigger>
-                <TabsTrigger value="edit">
-                  <Pencil className="h-4 w-4 mr-1.5" />
-                  Edit
-                </TabsTrigger>
+                {fileType !== 'image' && (
+                  <TabsTrigger value="edit">
+                    <Pencil className="h-4 w-4 mr-1.5" />
+                    Edit
+                  </TabsTrigger>
+                )}
                 <TabsTrigger value="history">
                   <History className="h-4 w-4 mr-1.5" />
                   History
                 </TabsTrigger>
               </TabsList>
 
-              {/* Format toggle for View and Edit tabs */}
-              {(mainTab === 'view' || mainTab === 'edit') && (
+              {/* Format toggle for View and Edit tabs (not for images) */}
+              {fileType !== 'image' && (mainTab === 'view' || mainTab === 'edit') && (
                 <Tabs value={formatMode} onValueChange={(v) => setFormatMode(v as 'formatted' | 'raw')}>
                   <TabsList>
                     <TabsTrigger value="formatted">
@@ -530,6 +540,24 @@ const CenterPanel: React.FC = () => {
                         className="h-full"
                       />
                     )
+                  ) : fileType === 'image' ? (
+                    /* Image: Display image */
+                    <div className="h-full flex items-center justify-center p-8">
+                      <img
+                        src={`${getApiUrl()}/api/assets/${currentPage.path}`}
+                        alt={currentPage.title}
+                        className="max-w-full max-h-full object-contain"
+                      />
+                    </div>
+                  ) : fileType === 'unknown' ? (
+                    /* Unknown: No viewer available */
+                    <div className="h-full flex items-center justify-center p-8">
+                      <div className="text-center text-muted-foreground">
+                        <FileText className="h-16 w-16 mx-auto mb-4 opacity-30" />
+                        <p className="text-lg">No view for this file</p>
+                        <p className="text-sm mt-1 opacity-70">{currentPage.path}</p>
+                      </div>
+                    </div>
                   ) : (
                     /* Markdown: Formatted or raw mode */
                     formatMode === 'raw' ? (
@@ -701,6 +729,22 @@ const CenterPanel: React.FC = () => {
                       pagePath={currentPage.path}
                       branchRef={currentBranch}
                     />
+                  </div>
+                ) : fileType === 'image' ? (
+                  <div className="h-full flex items-center justify-center p-8">
+                    <img
+                      src={`${getApiUrl()}/api/assets/${currentPage.path}`}
+                      alt={currentPage.title}
+                      className="max-w-full max-h-full object-contain"
+                    />
+                  </div>
+                ) : fileType === 'unknown' ? (
+                  <div className="h-full flex items-center justify-center p-8">
+                    <div className="text-center text-muted-foreground">
+                      <FileText className="h-16 w-16 mx-auto mb-4 opacity-30" />
+                      <p className="text-lg">No view for this file</p>
+                      <p className="text-sm mt-1 opacity-70">{currentPage.path}</p>
+                    </div>
                   </div>
                 ) : (
                   <div className="h-full p-4">

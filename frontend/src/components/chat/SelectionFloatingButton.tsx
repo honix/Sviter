@@ -3,7 +3,6 @@ import { MessageSquarePlus } from 'lucide-react';
 import { useSelection } from '../../contexts/SelectionContext';
 
 const BUTTON_WIDTH = 110; // Approximate button width
-const BUTTON_HEIGHT = 32; // Approximate button height
 
 export const SelectionFloatingButton: React.FC = () => {
   const { state, addToContext } = useSelection();

@@ -6,7 +6,7 @@ import { keymap } from 'prosemirror-keymap';
 import { baseKeymap } from 'prosemirror-commands';
 import { inputRules, wrappingInputRule, textblockTypeInputRule, smartQuotes, emDash, ellipsis } from 'prosemirror-inputrules';
 import { tableEditing } from 'prosemirror-tables';
-import { schema } from '../../editor/schema';
+import { schema, setCurrentPagePath } from '../../editor/schema';
 import { markdownToProseMirror, prosemirrorToMarkdown } from '../../editor/conversion';
 import { buildKeymap } from '../../editor/keymap';
 import { useWikiLinks } from '../../hooks/useWikiLinks';
@@ -137,6 +137,11 @@ export const ProseMirrorEditor = forwardRef<ProseMirrorEditorHandle, ProseMirror
         }
       }
     }, [initialContent]);
+
+    // Update current page path for relative image URL resolution
+    useEffect(() => {
+      setCurrentPagePath(pagePath || null);
+    }, [pagePath]);
 
     // Wiki link handling
     const { handleClick, handleMouseOver } = useWikiLinks(onLinkClick, editable, pagePath);

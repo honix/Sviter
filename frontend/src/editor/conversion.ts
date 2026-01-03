@@ -32,6 +32,16 @@ export const markdownParser = new MarkdownParser(
     ...defaultMarkdownParser.tokens,
     // Ensure inline code is handled
     code_inline: { mark: 'code' },
+    // Image token
+    image: {
+      node: 'image',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      getAttrs: (tok: any) => ({
+        src: tok.attrGet('src'),
+        alt: tok.children?.[0]?.content || null,
+        title: tok.attrGet('title'),
+      }),
+    },
     // Table tokens - cells need special handling to wrap content in paragraphs
     table: { block: 'table' },
     thead: { ignore: true },
@@ -75,6 +85,16 @@ export const markdownSerializer = new MarkdownSerializer(
     paragraph(state, node) {
       state.renderInline(node);
       state.closeBlock(node);
+    },
+    // Image serialization to markdown format
+    // Use angle brackets for paths with spaces: ![alt](<path with spaces>)
+    image(state, node) {
+      const alt = state.esc(node.attrs.alt || '');
+      const src = node.attrs.src;
+      const title = node.attrs.title;
+      // Wrap in angle brackets if path contains spaces
+      const srcFormatted = src.includes(' ') ? `<${src}>` : src;
+      state.write(`![${alt}](${srcFormatted}${title ? ` "${state.esc(title)}"` : ''})`);
     },
     // Force tight lists (no blank lines between items) and use - instead of *
     bullet_list(state, node) {

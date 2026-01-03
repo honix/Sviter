@@ -280,3 +280,24 @@
   overflow-x: auto;
   margin: 1em 0;
 }
+
+/* ========================================
+   Image Styles
+   ======================================== */
+
+.ProseMirror .wiki-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.375rem;
+  margin: 0.5em 0;
+  display: inline-block;
+}
+
+.prosemirror-editor.editable .ProseMirror .wiki-image {
+  cursor: pointer;
+}
+
+.ProseMirror .wiki-image.ProseMirror-selectednode {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}

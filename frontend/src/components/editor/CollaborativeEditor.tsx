@@ -12,12 +12,17 @@ import { baseKeymap } from 'prosemirror-commands';
 import { inputRules, wrappingInputRule, textblockTypeInputRule, smartQuotes, emDash, ellipsis } from 'prosemirror-inputrules';
 import { tableEditing } from 'prosemirror-tables';
 import { ySyncPlugin, yCursorPlugin, yUndoPlugin, undo as yUndo, redo as yRedo } from 'y-prosemirror';
-import * as Y from 'yjs';
+import { useDroppable } from '@dnd-kit/core';
+import { ImagePlus, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
-import { schema } from '../../editor/schema';
+import { schema, setCurrentPagePath } from '../../editor/schema';
+import { useAppDnd } from '../../contexts/DndContext';
+import type { DragItemData } from '../../contexts/DndContext';
 import { buildKeymap } from '../../editor/keymap';
 import { markdownToProseMirror, prosemirrorToMarkdown } from '../../editor/conversion';
 import { createCollabSession, destroyCollabSession, getXmlFragment, getSharedText, needsForceReinit, clearForceReinit, type CollabUser, type ConnectionStatus, type SaveStatus } from '../../services/collab';
+import { uploadImage, isImageFile } from '../../services/upload-api';
 import { useAuth } from '../../contexts/AuthContext';
 import { EditorToolbar } from './EditorToolbar';
 import { useWikiLinks } from '../../hooks/useWikiLinks';
@@ -55,11 +60,68 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [remoteUsers, setRemoteUsers] = useState<CollabUser[]>([]);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [dropCursor, setDropCursor] = useState<{ top: number; left: number; height: number } | null>(null);
+  const dropPosRef = useRef<number | null>(null);
+  const dragCounterRef = useRef(0);
   const { userId } = useAuth();
   const sessionRef = useRef<ReturnType<typeof createCollabSession> | null>(null);
   const initializedRef = useRef(false);
   const editableRef = useRef(editable);
   editableRef.current = editable;
+
+  // dnd-kit droppable for in-app drag from PageTree
+  const { setNodeRef: setDroppableRef, isOver: isDndOver } = useDroppable({
+    id: 'editor-drop-zone',
+  });
+  const { registerDropHandler, unregisterDropHandler, draggedItem } = useAppDnd();
+
+  // Shared helper to update drop cursor from pointer coordinates
+  const updateDropCursor = useCallback((clientX: number, clientY: number) => {
+    if (!viewRef.current || !editorRef.current) return;
+    const view = viewRef.current;
+    const editorRect = editorRef.current.getBoundingClientRect();
+    const pos = view.posAtCoords({ left: clientX, top: clientY });
+    if (pos) {
+      dropPosRef.current = pos.pos;
+      const cursorCoords = view.coordsAtPos(pos.pos);
+      if (cursorCoords) {
+        setDropCursor({
+          top: cursorCoords.top - editorRect.top,
+          left: cursorCoords.left - editorRect.left,
+          height: cursorCoords.bottom - cursorCoords.top || 20,
+        });
+      }
+    }
+  }, []);
+
+  // Track pointer position during dnd-kit drags for drop cursor
+  // Use global listener because dnd-kit captures pointer events
+  useEffect(() => {
+    if (!isDndOver || !draggedItem || !editable) {
+      setDropCursor(null);
+      dropPosRef.current = null;
+      return;
+    }
+
+    const handleGlobalPointerMove = (e: PointerEvent) => {
+      if (!editorRef.current) return;
+      const editorRect = editorRef.current.getBoundingClientRect();
+      // Check if pointer is within editor bounds
+      if (
+        e.clientX >= editorRect.left &&
+        e.clientX <= editorRect.right &&
+        e.clientY >= editorRect.top &&
+        e.clientY <= editorRect.bottom
+      ) {
+        updateDropCursor(e.clientX, e.clientY);
+      }
+    };
+
+    window.addEventListener('pointermove', handleGlobalPointerMove);
+    return () => window.removeEventListener('pointermove', handleGlobalPointerMove);
+  }, [isDndOver, draggedItem, editable, updateDropCursor]);
 
   // Handle status changes
   const handleStatusChange = useCallback((status: ConnectionStatus) => {
@@ -75,6 +137,158 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
   const handleSaveStatusChange = useCallback((status: SaveStatus) => {
     setSaveStatus(status);
   }, []);
+
+  // Insert image node at cursor position or specified drop position
+  const insertImageNode = useCallback((src: string, alt: string, dropPos?: number | null) => {
+    if (!viewRef.current) return;
+    const view = viewRef.current;
+    const { state, dispatch } = view;
+
+    // Use drop position if provided, otherwise use current selection
+    const pos = dropPos ?? state.selection.from;
+    const $pos = state.doc.resolve(pos);
+    const parent = $pos.parent;
+
+    const imageNode = schema.nodes.image.create({ src, alt });
+
+    // If inside a heading, insert a new paragraph with the image after it
+    if (parent.type.name === 'heading') {
+      const endOfHeading = $pos.after();
+      const paragraphWithImage = schema.nodes.paragraph.create(null, imageNode);
+      const tr = state.tr.insert(endOfHeading, paragraphWithImage);
+      dispatch(tr);
+    } else if (parent.type.name === 'paragraph' || parent.type.name === 'list_item') {
+      // Normal case - insert at position
+      const tr = state.tr.insert(pos, imageNode);
+      dispatch(tr);
+    } else {
+      // For other block types, wrap in a paragraph
+      const paragraphWithImage = schema.nodes.paragraph.create(null, imageNode);
+      const tr = state.tr.insert(pos, paragraphWithImage);
+      dispatch(tr);
+    }
+    view.focus();
+  }, []);
+
+  // Insert link node at cursor position or specified drop position
+  const insertLinkNode = useCallback((href: string, title: string, dropPos?: number | null) => {
+    if (!viewRef.current) return;
+    const view = viewRef.current;
+    const { state, dispatch } = view;
+    const linkMark = schema.marks.link.create({ href });
+    const textNode = schema.text(title, [linkMark]);
+
+    // Use drop position if provided, otherwise replace selection
+    if (dropPos != null) {
+      const tr = state.tr.insert(dropPos, textNode);
+      dispatch(tr);
+    } else {
+      const tr = state.tr.replaceSelectionWith(textNode);
+      dispatch(tr);
+    }
+    view.focus();
+  }, []);
+
+  // Handle file upload
+  const handleFileUpload = useCallback(async (files: FileList, dropPos?: number | null) => {
+    if (!editable || !viewRef.current) return;
+
+    const imageFiles = Array.from(files).filter(isImageFile);
+    if (imageFiles.length === 0) return;
+
+    setIsUploading(true);
+    try {
+      for (const file of imageFiles) {
+        const result = await uploadImage(file);
+        insertImageNode(result.path, file.name.replace(/\.[^.]+$/, ''), dropPos);
+      }
+    } catch (error) {
+      console.error('Upload failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Upload failed');
+    } finally {
+      setIsUploading(false);
+    }
+  }, [editable, insertImageNode]);
+
+  // Drag event handlers
+  // Native drag handlers - only for OS file drops (dnd-kit handles in-app drags)
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    // Only show overlay for native file drops (not dnd-kit)
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragOver(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) {
+      setIsDragOver(false);
+      setDropCursor(null);
+      dropPosRef.current = null;
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (editable) {
+      updateDropCursor(e.clientX, e.clientY);
+    }
+  }, [editable, updateDropCursor]);
+
+  // Native drop handler - only for OS file uploads (dnd-kit handles in-app drags)
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDragOver(false);
+    setDropCursor(null);
+
+    const dropPos = dropPosRef.current;
+    dropPosRef.current = null;
+
+    if (!editable) return;
+
+    // Handle file drop from OS
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      handleFileUpload(files, dropPos);
+    }
+  }, [editable, handleFileUpload]);
+
+  // Set current page path for relative image URL resolution (GitHub-style)
+  useEffect(() => {
+    setCurrentPagePath(pagePath);
+  }, [pagePath]);
+
+  // Handle dnd-kit drop from PageTree
+  const handleDndDrop = useCallback((item: DragItemData) => {
+    if (!editable || !viewRef.current) return;
+
+    // Use tracked drop position or fall back to cursor position
+    const pos = dropPosRef.current ?? viewRef.current.state.selection.from;
+
+    if (item.type === 'image') {
+      insertImageNode(item.path, item.name, pos);
+    } else if (item.type === 'page') {
+      insertLinkNode(`/${item.path}`, item.name, pos);
+    }
+
+    // Clear drop cursor
+    setDropCursor(null);
+    dropPosRef.current = null;
+  }, [editable, insertImageNode, insertLinkNode]);
+
+  // Register drop handler with dnd context
+  useEffect(() => {
+    registerDropHandler('editor-drop-zone', handleDndDrop);
+    return () => unregisterDropHandler('editor-drop-zone');
+  }, [registerDropHandler, unregisterDropHandler, handleDndDrop]);
 
   // Initialize editor with y-prosemirror
   useEffect(() => {
@@ -263,7 +477,7 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       }
 
       // Observe XmlFragment changes to sync to Y.Text (only for LOCAL changes)
-      yXmlFragment.observeDeep((events, transaction) => {
+      yXmlFragment.observeDeep((_events, transaction) => {
         if (isSyncing) return; // Skip if we're in a sync operation
         // Skip remote changes - they already have Y.Text synced
         if (transaction.origin === session.provider || transaction.origin === 'y-sync') return;
@@ -294,7 +508,7 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
         console.log(`Synced Y.Text → ProseMirror for ${pagePath}`);
       };
 
-      yText.observe((event, transaction) => {
+      yText.observe((_event, transaction) => {
         // Skip our own changes and remote changes
         if (isSyncing) return;
         if (transaction.origin === 'prosemirror-sync' || transaction.origin === 'codemirror-sync' || transaction.origin === 'init') return;
@@ -343,13 +557,51 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
         </div>
       )}
 
-      {/* Editor */}
+      {/* Editor with drag-drop zone */}
       <div
-        ref={editorRef}
-        onClick={handleClick}
-        onMouseOver={handleMouseOver}
-        className={`prosemirror-editor flex-1 overflow-auto ${editable ? 'editable' : 'readonly'}`}
-      />
+        ref={setDroppableRef}
+        className="relative flex-1 min-h-0"
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        <div
+          ref={editorRef}
+          onClick={handleClick}
+          onMouseOver={handleMouseOver}
+          className={`prosemirror-editor h-full overflow-auto ${editable ? 'editable' : 'readonly'}`}
+        />
+
+        {/* Drag overlay - show for both native and dnd-kit drags */}
+        {(isDragOver || isDndOver) && editable && (
+          <div className="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center z-50 pointer-events-none">
+            <div className="flex flex-col items-center gap-2 text-primary">
+              <ImagePlus className="h-12 w-12" />
+              <span className="text-lg font-medium">Drop to insert</span>
+            </div>
+          </div>
+        )}
+
+        {/* Upload spinner */}
+        {isUploading && (
+          <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-50 pointer-events-none">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        )}
+
+        {/* Drop cursor indicator */}
+        {dropCursor && editable && (
+          <div
+            className="absolute w-0.5 bg-primary z-50 pointer-events-none"
+            style={{
+              top: dropCursor.top,
+              left: dropCursor.left,
+              height: dropCursor.height,
+            }}
+          />
+        )}
+      </div>
     </div>
   );
 };

@@ -1,5 +1,6 @@
-from fastapi import FastAPI, WebSocket, HTTPException, BackgroundTasks
+from fastapi import FastAPI, WebSocket, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from storage import GitWiki, PageNotFoundException, GitWikiException
 from threads.manager import websocket_endpoint, initialize_thread_manager
 from threads import manager as threads_module  # Access thread_manager at runtime
@@ -9,7 +10,11 @@ from collab import initialize_collab_manager
 from collab import manager as collab_module  # Access collab_manager at runtime
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+from pathlib import Path
 import uvicorn
+import shutil
+import mimetypes
+import re
 from config import WIKI_REPO_PATH, OPENROUTER_API_KEY
 from db import init_db
 from auth import router as auth_router
@@ -34,6 +39,12 @@ class MoveRequest(BaseModel):
     source_path: str
     target_parent_path: Optional[str] = None
     new_order: int
+
+class ImageUploadResponse(BaseModel):
+    path: str
+    url: str
+    filename: str
+    markdown: str
 
 # Initialize GitWiki
 wiki = GitWiki(WIKI_REPO_PATH)
@@ -171,6 +182,101 @@ async def websocket_handler(websocket: WebSocket, client_id: str):
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "ai-wiki-backend", "storage": "git"}
+
+
+# Helper function for filename sanitization
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename to prevent path traversal and invalid chars"""
+    # Remove path components
+    name = Path(filename).name
+    # Replace dangerous characters
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', name)
+    # Collapse multiple dots/dashes
+    name = re.sub(r'\.+', '.', name)
+    return name or "file"
+
+
+# Image upload endpoint
+@app.post("/api/upload", response_model=ImageUploadResponse)
+async def upload_image(
+    file: UploadFile = File(...),
+    folder: str = Form(default="images"),
+    author: str = Form(default="user")
+):
+    """Upload an image file to the wiki and commit to git"""
+    # Validate file type
+    allowed_types = {'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'}
+    content_type = file.content_type
+    if content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail=f"File type {content_type} not allowed. Allowed types: {', '.join(allowed_types)}")
+
+    # Sanitize filename and handle collisions
+    original_filename = file.filename or "image"
+    safe_filename = sanitize_filename(original_filename)
+
+    # Create target directory if needed
+    target_dir = wiki.repo_path / folder
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    # Handle filename collisions
+    target_path = target_dir / safe_filename
+    counter = 1
+    base_name = safe_filename.rsplit('.', 1)[0] if '.' in safe_filename else safe_filename
+    extension = safe_filename.rsplit('.', 1)[1] if '.' in safe_filename else ''
+    while target_path.exists():
+        new_name = f"{base_name}-{counter}.{extension}" if extension else f"{base_name}-{counter}"
+        target_path = target_dir / new_name
+        counter += 1
+
+    # Save file
+    try:
+        with target_path.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+    finally:
+        await file.close()
+
+    # Git add and commit
+    relative_path = target_path.relative_to(wiki.repo_path)
+    wiki.repo.index.add([str(relative_path)])
+    wiki.repo.index.commit(
+        f"Upload image: {target_path.name}",
+        author=wiki._create_author(author)
+    )
+
+    # Return paths for frontend (simple relative paths, frontend converts to API URLs)
+    # Use angle brackets for paths with spaces: ![alt](<path with spaces>)
+    return ImageUploadResponse(
+        path=str(relative_path),
+        url=str(relative_path),  # Simple path like "images/foo.png"
+        filename=target_path.name,
+        markdown=f"![{target_path.stem}](<{relative_path}>)"
+    )
+
+
+# Asset serving endpoint
+@app.get("/api/assets/{path:path}")
+async def serve_asset(path: str):
+    """Serve static assets (images) from wiki repository"""
+    file_path = wiki.repo_path / path
+
+    # Security: ensure path is within wiki repo (prevent path traversal)
+    try:
+        file_path.resolve().relative_to(wiki.repo_path.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Determine content type
+    content_type, _ = mimetypes.guess_type(str(file_path))
+
+    return FileResponse(
+        path=file_path,
+        media_type=content_type or 'application/octet-stream',
+        filename=file_path.name
+    )
+
 
 # API endpoints for pages
 @app.get("/api/pages")

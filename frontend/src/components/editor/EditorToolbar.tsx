@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import { EditorView } from 'prosemirror-view';
 import type { Command } from 'prosemirror-state';
 import { toggleMark, setBlockType } from 'prosemirror-commands';
@@ -41,8 +41,12 @@ import {
   Rows2,
   Columns3,
   Columns2,
+  ImagePlus,
+  Loader2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { schema } from '../../editor/schema';
+import { uploadImage, isImageFile } from '../../services/upload-api';
 
 interface EditorToolbarProps {
   editorView: EditorView | null;
@@ -51,6 +55,8 @@ interface EditorToolbarProps {
 export function EditorToolbar({ editorView }: EditorToolbarProps) {
   // Use reducer to trigger re-renders when selection changes
   const [, forceUpdate] = useReducer((x) => x + 1, 0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Listen to editor state changes to update toolbar
   useEffect(() => {
@@ -161,7 +167,7 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
     const { from, to, empty } = currentState.selection;
 
     if (empty) {
-      alert('Please select text to create a link');
+      toast.info('Please select text to create a link');
       return;
     }
 
@@ -220,6 +226,44 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
 
     editorView.dispatch(tr.replaceSelectionWith(table));
     editorView.focus();
+  };
+
+  // Handle image upload button click
+  const handleImageClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  // Handle image file selection
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!editorView) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        if (isImageFile(file)) {
+          const result = await uploadImage(file);
+          // Insert image at cursor
+          const currentState = editorView.state;
+          const imageNode = schema.nodes.image.create({
+            src: result.url,
+            alt: file.name.replace(/\.[^.]+$/, ''),
+          });
+          editorView.dispatch(currentState.tr.replaceSelectionWith(imageNode));
+        }
+      }
+      editorView.focus();
+    } catch (error) {
+      console.error('Upload failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Upload failed');
+    } finally {
+      setIsUploading(false);
+      // Reset input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   // Check if cursor is in a table
@@ -306,6 +350,20 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
           active={false}
           tooltip="Horizontal Rule"
           icon={<Minus className="h-4 w-4" />}
+        />
+        <ToolbarButton
+          onClick={handleImageClick}
+          active={false}
+          tooltip="Insert Image"
+          icon={isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={handleImageSelect}
+          className="hidden"
         />
 
         <Separator orientation="vertical" className="mx-1 h-6" />

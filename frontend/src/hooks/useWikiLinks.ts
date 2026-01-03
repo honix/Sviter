@@ -1,47 +1,8 @@
 import { useCallback } from 'react';
+import { resolvePath } from '../utils/url';
 
-/**
- * Resolve a relative link against a current page path (GitHub-style).
- * E.g., resolveLink('data-views.md', 'agents/index.md') => 'agents/data-views.md'
- * E.g., resolveLink('examples/simple.tsx', 'agents/index.md') => 'agents/examples/simple.tsx'
- * E.g., resolveLink('../Home.md', 'agents/index.md') => 'Home.md'
- * E.g., resolveLink('../../foo.md', 'a/b/c.md') => 'foo.md'
- * E.g., resolveLink('/Home.md', 'agents/index.md') => 'Home.md' (absolute from root)
- */
-export function resolveWikiLink(href: string, currentPagePath?: string): string {
-  // If href starts with /, it's absolute from wiki root
-  if (href.startsWith('/')) {
-    return href.slice(1);
-  }
-
-  // If no current page, treat as-is
-  if (!currentPagePath) {
-    return href;
-  }
-
-  // Get directory of current page as array of segments
-  const lastSlash = currentPagePath.lastIndexOf('/');
-  const dirSegments = lastSlash === -1 ? [] : currentPagePath.slice(0, lastSlash).split('/');
-
-  // Split href into segments
-  const hrefSegments = href.split('/');
-
-  // Process each segment
-  const resultSegments = [...dirSegments];
-  for (const segment of hrefSegments) {
-    if (segment === '..') {
-      // Go up one directory
-      if (resultSegments.length > 0) {
-        resultSegments.pop();
-      }
-    } else if (segment !== '.' && segment !== '') {
-      // Add normal segment (skip . and empty)
-      resultSegments.push(segment);
-    }
-  }
-
-  return resultSegments.join('/');
-}
+// Re-export for backwards compatibility
+export const resolveWikiLink = resolvePath;
 
 /**
  * Hook for handling wiki link clicks and hover behavior in editors.

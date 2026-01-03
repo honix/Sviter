@@ -1,5 +1,5 @@
 // Supported file types
-export type FileType = 'markdown' | 'csv' | 'tsx';
+export type FileType = 'markdown' | 'csv' | 'tsx' | 'image' | 'unknown';
 
 export interface Page {
   path: string; // Relative file path in git repo (e.g., "home.md", "data.csv", "view.tsx")

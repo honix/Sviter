@@ -7,6 +7,7 @@ import type { Thread, ThreadMessage, ThreadStatus } from '../types/thread';
 import { useAuth } from './AuthContext';
 import { invalidateSessions } from '../services/collab';
 import { getApiUrl } from '../utils/url';
+import { toast } from 'sonner';
 
 interface AppState {
   pages: Page[];
@@ -375,6 +376,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Handle thread-specific messages
       if (message.type === 'thread_created') {
         dispatch({ type: 'ADD_THREAD', payload: message.thread });
+        if (message.thread?.type === 'worker') {
+          toast.info(`Agent started: ${message.thread.name}`, { description: message.thread.goal });
+        }
       } else if (message.type === 'thread_status' && message.thread_id && message.status) {
         dispatch({
           type: 'UPDATE_THREAD',
@@ -383,6 +387,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             updates: { status: message.status as ThreadStatus }
           }
         });
+        // Toast for important status changes
+        if (message.status === 'need_help') {
+          toast.info(`Agent needs help`, { description: message.message || 'Waiting for your input' });
+        } else if (message.status === 'review') {
+          toast.success(`Agent ready for review`, { description: message.message || 'Changes are ready to be reviewed' });
+        }
       } else if (message.type === 'thread_deleted' && message.thread_id) {
         dispatch({ type: 'REMOVE_THREAD', payload: message.thread_id });
       } else if (message.type === 'thread_list' && message.threads) {
@@ -804,8 +814,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const tree = await treeApi.getTree();
         dispatch({ type: 'SET_PAGE_TREE', payload: tree });
       } catch (err) {
-        dispatch({ type: 'SET_ERROR', payload: 'Failed to delete page' });
         console.error('Error deleting page:', err);
+        toast.error(err instanceof Error ? err.message : 'Failed to delete page');
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
       }
@@ -813,6 +823,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentPage: async (page: Page | null) => {
       if (!page) {
         dispatch({ type: 'SET_CURRENT_PAGE', payload: null });
+        return;
+      }
+
+      // Images don't need content loading - they're served via /api/assets/
+      const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(page.path);
+      if (isImage) {
+        dispatch({ type: 'SET_CURRENT_PAGE', payload: { ...page, file_type: 'image' as const } });
         return;
       }
 
@@ -879,8 +896,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const tree = await treeApi.getTree();
         dispatch({ type: 'SET_PAGE_TREE', payload: tree });
       } catch (err) {
-        dispatch({ type: 'SET_ERROR', payload: 'Failed to create page' });
         console.error('Error creating page:', err);
+        toast.error(err instanceof Error ? err.message : 'Failed to create page');
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
       }
@@ -976,7 +993,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       } catch (err) {
         console.error('Failed to move item:', err);
-        dispatch({ type: 'SET_ERROR', payload: 'Failed to move item' });
+        toast.error(err instanceof Error ? err.message : 'Failed to move item');
         try {
           const tree = await treeApi.getTree();
           dispatch({ type: 'SET_PAGE_TREE', payload: tree });
@@ -993,7 +1010,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dispatch({ type: 'SET_PAGE_TREE', payload: tree });
       } catch (err) {
         console.error('Failed to create folder:', err);
-        dispatch({ type: 'SET_ERROR', payload: 'Failed to create folder' });
+        toast.error(err instanceof Error ? err.message : 'Failed to create folder');
       }
     },
 
@@ -1004,7 +1021,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dispatch({ type: 'SET_PAGE_TREE', payload: tree });
       } catch (err) {
         console.error('Failed to delete folder:', err);
-        dispatch({ type: 'SET_ERROR', payload: 'Failed to delete folder' });
+        toast.error(err instanceof Error ? err.message : 'Failed to delete folder');
       }
     },
 

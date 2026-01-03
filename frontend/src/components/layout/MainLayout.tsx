@@ -3,6 +3,7 @@ import LeftPanel from './LeftPanel';
 import CenterPanel from './CenterPanel';
 import RightPanel from './RightPanel';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
+import { AppDndProvider } from '../../contexts/DndContext';
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -14,28 +15,30 @@ const MainLayout: React.FC = () => {
   useKeyboardShortcuts();
 
   return (
-    <div className="h-screen bg-background overflow-hidden relative">
-      <ResizablePanelGroup direction="horizontal" className="h-full">
-        {/* Left Panel - Page Tree */}
-        <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>
-          <LeftPanel />
-        </ResizablePanel>
+    <AppDndProvider>
+      <div className="h-screen bg-background overflow-hidden relative">
+        <ResizablePanelGroup direction="horizontal" className="h-full">
+          {/* Left Panel - Page Tree */}
+          <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>
+            <LeftPanel />
+          </ResizablePanel>
 
-        <ResizableHandle />
+          <ResizableHandle />
 
-        {/* Center Panel - Page Content */}
-        <ResizablePanel defaultSize={40} minSize={30}>
-          <CenterPanel />
-        </ResizablePanel>
+          {/* Center Panel - Page Content */}
+          <ResizablePanel defaultSize={40} minSize={30}>
+            <CenterPanel />
+          </ResizablePanel>
 
-        <ResizableHandle />
+          <ResizableHandle />
 
-        {/* Right Panel - AI Chat */}
-        <ResizablePanel defaultSize={40} minSize={20} maxSize={40}>
-          <RightPanel />
-        </ResizablePanel>
-      </ResizablePanelGroup>
-    </div>
+          {/* Right Panel - AI Chat */}
+          <ResizablePanel defaultSize={40} minSize={20} maxSize={40}>
+            <RightPanel />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
+    </AppDndProvider>
   );
 };
 
