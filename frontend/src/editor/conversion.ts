@@ -1,19 +1,69 @@
 import { Node as ProseMirrorNode } from 'prosemirror-model';
 import { MarkdownParser, MarkdownSerializer, defaultMarkdownParser, defaultMarkdownSerializer } from 'prosemirror-markdown';
+import MarkdownIt from 'markdown-it';
 import { schema } from './schema';
+
+/**
+ * Create markdown-it instance with GFM tables enabled
+ */
+const markdownIt = MarkdownIt('default', { html: false }).enable('table');
+
+/**
+ * Custom token handler for table cells that wraps content in a paragraph
+ */
+function tableCellHandler(nodeType: 'table_header' | 'table_cell') {
+  return {
+    block: nodeType,
+    getAttrs: (tok: { attrGet: (name: string) => string | null }) => {
+      const style = tok.attrGet('style') || '';
+      const match = style.match(/text-align:\s*(\w+)/);
+      return { alignment: match ? match[1] : null };
+    },
+  };
+}
 
 /**
  * Parser to convert markdown string to ProseMirror document
  */
 export const markdownParser = new MarkdownParser(
   schema,
-  defaultMarkdownParser.tokenizer,
+  markdownIt,
   {
     ...defaultMarkdownParser.tokens,
     // Ensure inline code is handled
     code_inline: { mark: 'code' },
+    // Table tokens - cells need special handling to wrap content in paragraphs
+    table: { block: 'table' },
+    thead: { ignore: true },
+    tbody: { ignore: true },
+    tr: { block: 'table_row' },
+    th: tableCellHandler('table_header'),
+    td: tableCellHandler('table_cell'),
   }
 );
+
+/**
+ * Helper to serialize cell content inline
+ * Cells contain inline content directly (text with marks)
+ */
+function serializeCellContent(node: ProseMirrorNode): string {
+  let content = '';
+  node.forEach((child) => {
+    if (child.isText) {
+      let text = child.text || '';
+      // Apply marks
+      child.marks.forEach((mark) => {
+        if (mark.type.name === 'strong') text = `**${text}**`;
+        else if (mark.type.name === 'em') text = `*${text}*`;
+        else if (mark.type.name === 'code') text = `\`${text}\``;
+        else if (mark.type.name === 'link') text = `[${text}](${mark.attrs.href})`;
+      });
+      content += text;
+    }
+  });
+  // Escape pipe characters in cell content
+  return content.replace(/\|/g, '\\|').trim();
+}
 
 /**
  * Serializer to convert ProseMirror document to markdown string
@@ -39,6 +89,80 @@ export const markdownSerializer = new MarkdownSerializer(
         return state.repeat(" ", maxW - nStr.length) + nStr + ". ";
       });
     },
+    // Table serialization to GFM format
+    table(state, node) {
+      const rows: { cells: string[]; alignments: (string | null)[] }[] = [];
+      let headerAlignments: (string | null)[] = [];
+      let isFirstRow = true;
+
+      node.forEach((row) => {
+        const cells: string[] = [];
+        const alignments: (string | null)[] = [];
+
+        row.forEach((cell) => {
+          cells.push(serializeCellContent(cell));
+          alignments.push(cell.attrs.alignment || null);
+        });
+
+        if (isFirstRow) {
+          headerAlignments = alignments;
+          isFirstRow = false;
+        }
+
+        rows.push({ cells, alignments });
+      });
+
+      if (rows.length === 0) return;
+
+      // Calculate column widths for nice formatting
+      const colCount = rows[0].cells.length;
+      const colWidths: number[] = [];
+      for (let i = 0; i < colCount; i++) {
+        let maxWidth = 3; // Minimum width for separator
+        rows.forEach((row) => {
+          if (row.cells[i]) {
+            maxWidth = Math.max(maxWidth, row.cells[i].length);
+          }
+        });
+        colWidths.push(maxWidth);
+      }
+
+      // Write header row
+      state.write('| ');
+      rows[0].cells.forEach((cell, i) => {
+        state.write(cell.padEnd(colWidths[i]));
+        state.write(' | ');
+      });
+      state.write('\n');
+
+      // Write separator row with alignments
+      state.write('| ');
+      headerAlignments.forEach((align, i) => {
+        let sep = '-'.repeat(colWidths[i]);
+        if (align === 'left') sep = ':' + sep.slice(1);
+        else if (align === 'right') sep = sep.slice(1) + ':';
+        else if (align === 'center') sep = ':' + sep.slice(2) + ':';
+        state.write(sep);
+        state.write(' | ');
+      });
+      state.write('\n');
+
+      // Write body rows
+      for (let i = 1; i < rows.length; i++) {
+        state.write('| ');
+        rows[i].cells.forEach((cell, j) => {
+          state.write((cell || '').padEnd(colWidths[j]));
+          state.write(' | ');
+        });
+        state.write('\n');
+      }
+
+      state.write('\n');
+    },
+    // These are handled by table serializer
+    table_row() {},
+    table_header() {},
+    table_cell() {},
   },
   defaultMarkdownSerializer.marks
 );

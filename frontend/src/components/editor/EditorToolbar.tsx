@@ -3,10 +3,25 @@ import { EditorView } from 'prosemirror-view';
 import type { Command } from 'prosemirror-state';
 import { toggleMark, setBlockType } from 'prosemirror-commands';
 import { wrapInList, liftListItem } from 'prosemirror-schema-list';
+import {
+  addRowAfter,
+  addColumnAfter,
+  deleteRow,
+  deleteColumn,
+  deleteTable,
+  isInTable,
+} from 'prosemirror-tables';
 import type { MarkType, NodeType } from 'prosemirror-model';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import {
   Bold,
   Italic,
@@ -19,6 +34,13 @@ import {
   Link as LinkIcon,
   CodeSquare,
   Minus,
+  Table2,
+  Trash2,
+  ChevronDown,
+  Rows3,
+  Rows2,
+  Columns3,
+  Columns2,
 } from 'lucide-react';
 import { schema } from '../../editor/schema';
 
@@ -168,6 +190,41 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
     editorView.focus();
   };
 
+  // Insert a new 3x3 table with header row
+  const handleInsertTable = () => {
+    const currentState = editorView.state;
+    const { tr } = currentState;
+
+    // Create header cells
+    const headerCells = [];
+    for (let i = 0; i < 3; i++) {
+      const cell = schema.nodes.table_header.createAndFill();
+      if (cell) headerCells.push(cell);
+    }
+
+    // Create body cells
+    const createBodyRow = () => {
+      const cells = [];
+      for (let i = 0; i < 3; i++) {
+        const cell = schema.nodes.table_cell.createAndFill();
+        if (cell) cells.push(cell);
+      }
+      return schema.nodes.table_row.create(null, cells);
+    };
+
+    const headerRow = schema.nodes.table_row.create(null, headerCells);
+    const bodyRow1 = createBodyRow();
+    const bodyRow2 = createBodyRow();
+
+    const table = schema.nodes.table.create(null, [headerRow, bodyRow1, bodyRow2]);
+
+    editorView.dispatch(tr.replaceSelectionWith(table));
+    editorView.focus();
+  };
+
+  // Check if cursor is in a table
+  const inTable = isInTable(state);
+
   return (
     <TooltipProvider>
       <div className="flex items-center gap-1 p-2 border-b border-border bg-background sticky top-0 z-10 flex-wrap">
@@ -250,6 +307,52 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
           tooltip="Horizontal Rule"
           icon={<Minus className="h-4 w-4" />}
         />
+
+        <Separator orientation="vertical" className="mx-1 h-6" />
+
+        {/* Table controls */}
+        <ToolbarButton
+          onClick={handleInsertTable}
+          active={false}
+          tooltip="Insert Table"
+          icon={<Table2 className="h-4 w-4" />}
+        />
+
+        {/* Edit Table dropdown - visible when cursor is in table */}
+        {inTable && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 px-2 gap-1">
+                Edit table
+                <ChevronDown className="h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => runCommand(addRowAfter)}>
+                <Rows3 className="h-4 w-4 mr-2" />
+                Add Row Below
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => runCommand(addColumnAfter)}>
+                <Columns3 className="h-4 w-4 mr-2" />
+                Add Column Right
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => runCommand(deleteRow)}>
+                <Rows2 className="h-4 w-4 mr-2" />
+                Delete Row
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => runCommand(deleteColumn)}>
+                <Columns2 className="h-4 w-4 mr-2" />
+                Delete Column
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => runCommand(deleteTable)}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete Table
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
     </TooltipProvider>
   );

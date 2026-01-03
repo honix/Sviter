@@ -217,3 +217,66 @@
   line-height: 1.2;
   z-index: 100;
 }
+
+/* ========================================
+   Table Styles
+   ======================================== */
+
+.ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 1.5em 0;
+  overflow: hidden;
+}
+
+.ProseMirror td,
+.ProseMirror th {
+  border: 1px solid hsl(var(--border));
+  padding: 0.5rem 0.75rem;
+  vertical-align: top;
+  position: relative;
+  min-width: 50px;
+}
+
+.ProseMirror th {
+  background-color: hsl(var(--muted));
+  font-weight: 600;
+  text-align: left;
+}
+
+/* Paragraph inside cells - remove margins */
+.ProseMirror td > p,
+.ProseMirror th > p {
+  margin: 0;
+}
+
+/* Cell alignment */
+.ProseMirror td[style*="text-align: center"],
+.ProseMirror th[style*="text-align: center"] {
+  text-align: center;
+}
+
+.ProseMirror td[style*="text-align: right"],
+.ProseMirror th[style*="text-align: right"] {
+  text-align: right;
+}
+
+/* Selected cell - prosemirror-tables adds this class */
+.ProseMirror .selectedCell {
+  background-color: hsl(var(--primary) / 0.1);
+}
+
+.ProseMirror .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid hsl(var(--primary));
+}
+
+/* Table wrapper for responsive overflow */
+.ProseMirror .tableWrapper {
+  overflow-x: auto;
+  margin: 1em 0;
+}

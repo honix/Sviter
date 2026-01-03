@@ -1,8 +1,9 @@
 import { keymap } from 'prosemirror-keymap';
 import { undo, redo } from 'prosemirror-history';
-import { toggleMark, setBlockType } from 'prosemirror-commands';
+import { toggleMark, setBlockType, chainCommands } from 'prosemirror-commands';
 import type { Command } from 'prosemirror-state';
 import { wrapInList, liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-list';
+import { goToNextCell } from 'prosemirror-tables';
 import { schema } from './schema';
 
 /**
@@ -32,11 +33,16 @@ export function buildKeymap() {
   keys['Shift-Ctrl-8'] = wrapInList(schema.nodes.bullet_list);
   keys['Shift-Ctrl-9'] = wrapInList(schema.nodes.ordered_list);
 
-  // List item manipulation
+  // List item manipulation + table cell navigation
+  // Tab/Shift+Tab: try table navigation first, then list indentation
   if (schema.nodes.list_item) {
     keys['Enter'] = splitListItem(schema.nodes.list_item);
-    keys['Tab'] = sinkListItem(schema.nodes.list_item);
-    keys['Shift-Tab'] = liftListItem(schema.nodes.list_item);
+    keys['Tab'] = chainCommands(goToNextCell(1), sinkListItem(schema.nodes.list_item));
+    keys['Shift-Tab'] = chainCommands(goToNextCell(-1), liftListItem(schema.nodes.list_item));
+  } else {
+    // If no list support, just use table navigation
+    keys['Tab'] = goToNextCell(1);
+    keys['Shift-Tab'] = goToNextCell(-1);
   }
 
   // History

@@ -10,6 +10,7 @@ import { keymap } from 'prosemirror-keymap';
 import { baseKeymap } from 'prosemirror-commands';
 // Using y-prosemirror's undo/redo instead of prosemirror-history
 import { inputRules, wrappingInputRule, textblockTypeInputRule, smartQuotes, emDash, ellipsis } from 'prosemirror-inputrules';
+import { tableEditing } from 'prosemirror-tables';
 import { ySyncPlugin, yCursorPlugin, yUndoPlugin, undo as yUndo, redo as yRedo } from 'y-prosemirror';
 import * as Y from 'yjs';
 
@@ -207,6 +208,7 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
           ySyncPlugin(yXmlFragment),
           yCursorPlugin(awareness, { cursorBuilder }),
           yUndoPlugin(),
+          tableEditing(),            // Table editing behavior (cell selection, navigation)
           keymap({
             'Mod-z': yUndo,
             'Mod-y': yRedo,

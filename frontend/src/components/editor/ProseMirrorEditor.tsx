@@ -5,6 +5,7 @@ import { history } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
 import { baseKeymap } from 'prosemirror-commands';
 import { inputRules, wrappingInputRule, textblockTypeInputRule, smartQuotes, emDash, ellipsis } from 'prosemirror-inputrules';
+import { tableEditing } from 'prosemirror-tables';
 import { schema } from '../../editor/schema';
 import { markdownToProseMirror, prosemirrorToMarkdown } from '../../editor/conversion';
 import { buildKeymap } from '../../editor/keymap';
@@ -73,6 +74,7 @@ export const ProseMirrorEditor = forwardRef<ProseMirrorEditorHandle, ProseMirror
         doc,
         plugins: [
           history(),
+          tableEditing(),        // Table editing behavior (cell selection, etc.)
           buildKeymap(),         // Custom keybindings (Ctrl+B, etc.)
           keymap(baseKeymap),    // Base ProseMirror keybindings
           buildInputRules(),     // Markdown shortcuts (## → heading)
