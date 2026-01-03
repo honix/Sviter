@@ -143,3 +143,38 @@ Include a check for each element type.
         print(f"Details: {result.details}")
 
         assert result.passed, f"Test failed: {result.details}"
+
+
+class TestThreadWorkflow:
+    """Tests for thread creation, editing, and approval workflow."""
+
+    def test_thread_create_file_and_approve(self, base_url):
+        """Test creating a file via thread, adding content, and approving."""
+        prompt = f"""
+Using Chrome MCP tools, test {base_url}:
+
+1. Navigate to {base_url}
+2. In chat, send "start a thread to create a new page called ABC"
+3. Wait for thread creation, click "Threads" tab, click the thread
+4. Verify ABC appears in thread changes
+5. Send "add 'This is test content' to ABC"
+6. Click Accept button
+7. Verify ABC appears in left sidebar and contains "This is test content"
+
+Set passed=true only if ALL conditions are met:
+- Thread was created
+- ABC file appears in thread changes
+- Content was added
+- Changes were accepted
+- ABC file visible in main branch
+"""
+        result = run_claude_test(prompt, model="haiku", timeout=600)
+
+        print(f"\n=== Test Output ===")
+        print(f"Passed: {result.passed}")
+        print(f"Details: {result.details}")
+        print(f"Checks: {result.checks}")
+        if not result.passed:
+            print(f"Raw output:\n{result.raw_output[:3000]}")
+
+        assert result.passed, f"Test failed: {result.details}"
