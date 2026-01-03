@@ -777,11 +777,15 @@ class ThreadManager:
 
     async def _handle_accept_thread(self, client_id: str, thread_id: str) -> Dict[str, Any]:
         """Accept thread changes with merge blocking and conflict detection."""
+        print(f"🔄 _handle_accept_thread called: client={client_id}, thread_id={thread_id}")
         thread = self._get_thread(thread_id)
         if not thread:
+            print(f"❌ Thread not found: {thread_id}")
             return {"type": "error", "message": "Thread not found"}
 
+        print(f"📋 Thread found: status={thread.status}, branch={getattr(thread, 'branch', None)}")
         if not thread.can_accept():
+            print(f"❌ Thread cannot be accepted: status={thread.status}")
             return {"type": "error", "message": "Thread cannot be accepted"}
 
         # Check if merge is blocked by active editors
@@ -810,7 +814,9 @@ class ThreadManager:
         print(f"🔍 Thread {thread_id} affects pages: {affected_pages}")
 
         # No conflicts, proceed with merge
+        print(f"🚀 Calling thread.accept() for thread {thread_id}")
         result = thread.accept(self.wiki)
+        print(f"📊 thread.accept() returned: {result}")
 
         if result == AcceptResult.SUCCESS:
             await self.broadcast({

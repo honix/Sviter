@@ -18,17 +18,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY backend/ .
 
-# Configure git for container (needed for GitPython operations)
-RUN git config --global user.email "test@test.com" && \
-    git config --global user.name "Test User"
-
 # Copy test wiki fixtures and initialize as git repo
 COPY tests/fixtures/wiki /wiki
-RUN cd /wiki && git init && git add -A && git commit -m "Initial test fixtures"
+# Configure git globally for root (needed for initial commit)
+RUN git config --global user.email "test@test.com" && \
+    git config --global user.name "Test User" && \
+    cd /wiki && git init -b main && git add -A && git commit -m "Initial test fixtures"
 
 # Set ownership and switch to non-root user
 RUN chown -R appuser:appuser /app /wiki
 USER appuser
+
+# Configure git for appuser (needed for merge operations at runtime)
+RUN git config --global user.email "test@test.com" && \
+    git config --global user.name "Test User"
 
 # Expose port
 EXPOSE 8000

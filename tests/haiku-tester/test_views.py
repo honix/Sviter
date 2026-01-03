@@ -154,19 +154,22 @@ class TestThreadWorkflow:
 Using Chrome MCP tools, test {base_url}:
 
 1. Navigate to {base_url}
-2. In chat, send "start a thread to create a new page called ABC"
-3. Wait for thread creation, click "Threads" tab, click the thread
-4. Verify ABC appears in thread changes
-5. Send "add 'This is test content' to ABC"
-6. Click Accept button
-7. Verify ABC appears in left sidebar and contains "This is test content"
+2. In the chat input on the right side, type "start a thread to create a new page called ABC" and press Enter
+3. Wait for the AI response (may take 10-20 seconds) - it should show a thread was created
+4. Wait for the thread to complete - a toast notification "Agent ready for review" may appear
+5. Find and click the thread link (like "create-abc-page-XXXXX") in the chat messages
+6. This opens thread review mode - verify ABC.md appears in the left sidebar with a green highlight
+7. Click on ABC.md to view its content - verify it has a title and some introduction text
+8. Click the green "Accept Changes" button on the right side
+9. Navigate to main branch (click Home or use URL http://localhost:5173/main/ABC.md/view)
+10. Verify ABC.md appears in the left sidebar on main branch
 
 Set passed=true only if ALL conditions are met:
-- Thread was created
-- ABC file appears in thread changes
-- Content was added
-- Changes were accepted
-- ABC file visible in main branch
+- Thread was created (chat shows thread link)
+- ABC.md appears in thread review mode
+- ABC.md has content (title and text)
+- Changes were accepted (status shows "Accepted")
+- ABC.md visible in main branch sidebar
 """
         result = run_claude_test(prompt, model="haiku", timeout=600)
 

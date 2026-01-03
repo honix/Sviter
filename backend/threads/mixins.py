@@ -228,7 +228,9 @@ class ReviewMixin:
             return AcceptResult.ERROR
 
         # Try to merge
+        print(f"🔀 Calling git_ops.merge_thread(wiki, {self.branch})")
         result = git_ops.merge_thread(wiki, self.branch)
+        print(f"🔀 merge_thread result: {result}")
 
         if result["success"]:
             # Clean up worktree, keep branch for history
