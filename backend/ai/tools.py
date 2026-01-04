@@ -6,6 +6,7 @@ ToolBuilder: Factory for creating composable tool sets
 
 Claude Code-style tools:
 - Read: read_page (with line numbers), grep_pages, glob_pages, list_pages
+- Git: git_history (branch commit history), git_diff (branch comparison)
 - Write: write_page, edit_page (exact match), insert_at_line
 """
 from typing import Dict, List, Any, Callable, TYPE_CHECKING
@@ -194,6 +195,104 @@ def _list_pages(wiki: GitWiki, args: Dict[str, Any]) -> str:
         lines.append(f"{i}. {page_path}")
 
     return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Git Tools
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _git_history(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """Get commit history for a branch"""
+    branch = args.get("branch")  # None = current branch
+    limit = args.get("limit", 20)
+    since_main = args.get("since_main", False)
+
+    if isinstance(limit, str):
+        limit = int(limit)
+
+    # Handle string booleans from LLM
+    if isinstance(since_main, str):
+        since_main = since_main.lower() in ('true', '1', 'yes')
+
+    limit = min(limit, 100)
+
+    try:
+        history = wiki.get_branch_history(branch, limit, since_main)
+
+        if not history:
+            branch_name = branch or wiki.get_current_branch()
+            if since_main:
+                return f"No commits on '{branch_name}' since diverging from main."
+            return f"No commits found on '{branch_name}'."
+
+        branch_name = branch or wiki.get_current_branch()
+        header = f"Commit history for '{branch_name}'"
+        if since_main:
+            header += " (since main)"
+        header += f" ({len(history)} commits):\n"
+
+        lines = [header]
+        for commit in history:
+            lines.append(f"\n[{commit['short_sha']}] {commit['message']}")
+            lines.append(f"  Author: {commit['author']} | {commit['date'][:10]}")
+            if commit['files_changed']:
+                files_str = ", ".join(commit['files_changed'][:5])
+                if len(commit['files_changed']) > 5:
+                    files_str += f" (+{len(commit['files_changed']) - 5} more)"
+                lines.append(f"  Files: {files_str}")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Error getting git history: {e}"
+
+
+def _git_diff(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """Get diff between two branches/refs"""
+    base = args.get("base", "main")
+    target = args.get("target")
+    stat_only = args.get("stat_only", False)
+
+    # Handle string booleans from LLM
+    if isinstance(stat_only, str):
+        stat_only = stat_only.lower() in ('true', '1', 'yes')
+
+    if not target:
+        # Default to current branch
+        try:
+            target = wiki.get_current_branch()
+        except Exception:
+            return "Error: Could not determine current branch. Please specify 'target' branch."
+
+    if base == target:
+        return f"No differences - '{base}' and '{target}' are the same."
+
+    try:
+        if stat_only:
+            # Get statistics only
+            stats = wiki.get_diff_stat(base, target)
+            if not stats.get('files_changed'):
+                return f"No differences between '{base}' and '{target}'."
+
+            lines = [f"Diff stats: {base}..{target}\n"]
+            for file_info in stats['files_changed']:
+                lines.append(f"  {file_info['path']}: {file_info['changes']}")
+            lines.append(f"\n{stats['summary']}")
+            return "\n".join(lines)
+        else:
+            # Get full diff
+            diff = wiki.get_diff(base, target)
+            if not diff:
+                return f"No differences between '{base}' and '{target}'."
+
+            # Truncate if too long
+            if len(diff) > 15000:
+                diff = diff[:15000] + "\n\n... (diff truncated, use stat_only=true for overview)"
+
+            return f"Diff: {base}..{target}\n\n{diff}"
+
+    except Exception as e:
+        return f"Error getting diff: {e}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -534,7 +633,7 @@ class ToolBuilder:
 
     @staticmethod
     def read_tools(wiki) -> List[WikiTool]:
-        """Read-only wiki tools: read_page, grep_pages, glob_pages, list_pages"""
+        """Read-only wiki tools: read_page, grep_pages, glob_pages, list_pages, git_history, git_diff"""
         return [
             WikiTool(
                 name="read_page",
@@ -617,6 +716,54 @@ TIP: Read agents/index.md first for page descriptions and navigation.""",
                     "required": []
                 },
                 function=lambda args, w=wiki: _list_pages(w, args)
+            )
+        ] + ToolBuilder.git_tools(wiki)
+
+    @staticmethod
+    def git_tools(wiki) -> List[WikiTool]:
+        """Git history and diff tools: git_history, git_diff"""
+        return [
+            WikiTool(
+                name="git_history",
+                description="""View commit history for a branch. Use this to see what changes were made and by whom.
+
+Use cases:
+- See what a thread agent did on its branch (use branch="thread/name-xyz")
+- Check recent commits on main
+- Understand change history before making edits
+
+With since_main=true, shows only commits since branch diverged from main - useful for reviewing thread work.""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "branch": {"type": "string", "description": "Branch name to show history for. Omit for current branch. Example: 'thread/fix-typos-abc123'"},
+                        "limit": {"type": "integer", "description": "Max commits to show (default: 20, max: 100)"},
+                        "since_main": {"type": "boolean", "description": "If true, only show commits since branch diverged from main (default: false)"}
+                    },
+                    "required": []
+                },
+                function=lambda args, w=wiki: _git_history(w, args)
+            ),
+            WikiTool(
+                name="git_diff",
+                description="""Show differences between two branches. Use this to see exactly what changed.
+
+Use cases:
+- Compare thread branch to main to see what will be merged
+- Review changes before accepting a thread
+- Understand what pages were modified
+
+Use stat_only=true for a quick overview (files changed, lines added/removed).""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "base": {"type": "string", "description": "Base branch to compare from (default: 'main')"},
+                        "target": {"type": "string", "description": "Target branch to compare to. Omit for current branch. Example: 'thread/update-docs-xyz'"},
+                        "stat_only": {"type": "boolean", "description": "If true, show only statistics (files, lines changed). If false, show full diff (default: false)"}
+                    },
+                    "required": []
+                },
+                function=lambda args, w=wiki: _git_diff(w, args)
             )
         ]
 
