@@ -17,7 +17,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, FileText, FileSpreadsheet, FileCode, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, LogIn, MessageSquarePlus, Waypoints, ImagePlus, Loader2, Image, File } from 'lucide-react';
+import { Plus, FileText, FileSpreadsheet, FileCode, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, MessageSquarePlus, Waypoints, ImagePlus, Loader2, Image, File, Github, Key } from 'lucide-react';
 import { useSelection } from '../../contexts/SelectionContext';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -179,7 +179,7 @@ const PageTree: React.FC<PageTreeProps> = ({
   onToggleFolder,
   onMoveItem
 }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, loginWithProvider, providers } = useAuth();
   const { addPathToContext } = useSelection();
   const { draggedItem, overId: dndOverId, setTreeDragEndHandler } = useAppDnd();
   const [diffStats, setDiffStats] = useState<PageDiffStats>({});
@@ -621,27 +621,24 @@ const PageTree: React.FC<PageTreeProps> = ({
               {isGuest ? 'Signed in as guest' : `Signed in via ${user?.oauth_provider || 'OAuth'}`}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {isGuest ? (
+            {isGuest && providers?.providers && providers.providers.length > 0 ? (
               <>
-                <DropdownMenuItem
-                  onClick={() => window.location.href = `${getApiUrl()}/auth/google`}
-                  className="cursor-pointer"
-                >
-                  <LogIn className="h-4 w-4" />
-                  Login with Google
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => window.location.href = `${getApiUrl()}/auth/github`}
-                  className="cursor-pointer"
-                >
-                  <LogIn className="h-4 w-4" />
-                  Login with GitHub
-                </DropdownMenuItem>
+                {providers.providers.map((provider) => (
+                  <DropdownMenuItem
+                    key={provider.id}
+                    onClick={() => loginWithProvider(provider.id)}
+                    className="cursor-pointer"
+                  >
+                    {provider.icon === 'github' && <Github className="h-4 w-4" />}
+                    {provider.icon === 'key' && <Key className="h-4 w-4" />}
+                    Sign in with {provider.name}
+                  </DropdownMenuItem>
+                ))}
               </>
             ) : (
               <DropdownMenuItem onClick={logout} className="cursor-pointer">
                 <LogOut className="h-4 w-4" />
-                Logout
+                Sign out
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>

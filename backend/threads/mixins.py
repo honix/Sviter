@@ -209,12 +209,15 @@ class ReviewMixin:
         self.status = ThreadStatus.REVIEW
         db_update_thread(self.id, status='review', review_summary=summary)
 
-    def accept(self, wiki: 'GitWiki') -> AcceptResult:
+    def accept(self, wiki: 'GitWiki', author: str = "System",
+               author_email: Optional[str] = None) -> AcceptResult:
         """
         Accept thread changes - merge to main.
 
         Args:
             wiki: Main GitWiki instance (not worktree)
+            author: Author name for the merge commit
+            author_email: Author's email for the merge commit
 
         Returns:
             AcceptResult indicating success, conflict, or error
@@ -227,8 +230,8 @@ class ReviewMixin:
         if self.status != ThreadStatus.REVIEW:
             return AcceptResult.ERROR
 
-        # Try to merge
-        result = git_ops.merge_thread(wiki, self.branch)
+        # Try to merge with author info
+        result = git_ops.merge_thread(wiki, self.branch, author=author, author_email=author_email)
 
         if result["success"]:
             # Clean up worktree, keep branch for history

@@ -244,13 +244,16 @@ def return_to_main(wiki: GitWiki) -> None:
         pass
 
 
-def merge_thread(wiki: GitWiki, branch: str) -> Dict[str, Any]:
+def merge_thread(wiki: GitWiki, branch: str, author: str = "System",
+                 author_email: Optional[str] = None) -> Dict[str, Any]:
     """
     Merge thread branch into main.
 
     Args:
         wiki: GitWiki instance
         branch: Thread branch to merge
+        author: Author name for the merge commit
+        author_email: Author's email for the merge commit
 
     Returns:
         Dict with:
@@ -262,8 +265,8 @@ def merge_thread(wiki: GitWiki, branch: str) -> Dict[str, Any]:
         # Ensure we're on main
         wiki.checkout_branch("main")
 
-        # Try to merge
-        wiki.merge_branch(branch, "main")
+        # Try to merge with author info
+        wiki.merge_branch(branch, "main", author=author, author_email=author_email)
 
         return {"success": True, "conflict": False, "error": None}
 

@@ -1,5 +1,6 @@
 import type { Page, PageRevision } from '../types/page';
 import { getApiUrl } from '../utils/url';
+import { getAuthHeaders } from './auth-api';
 
 const API_BASE_URL = `${getApiUrl()}/api`;
 
@@ -36,6 +37,7 @@ export async function createPage(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...getAuthHeaders(),
     },
     body: JSON.stringify({
       title,
@@ -65,6 +67,7 @@ export async function updatePage(
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
+      ...getAuthHeaders(),
     },
     body: JSON.stringify(updates),
   });
@@ -75,9 +78,10 @@ export async function updatePage(
   return response.json();
 }
 
-export async function deletePage(title: string, author: string = 'user'): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/pages/${encodeURIComponent(title)}?author=${encodeURIComponent(author)}`, {
+export async function deletePage(title: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/pages/${encodeURIComponent(title)}`, {
     method: 'DELETE',
+    headers: getAuthHeaders(),
   });
 
   if (!response.ok) {

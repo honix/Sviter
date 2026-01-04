@@ -64,7 +64,8 @@ class CollabPersistence:
         self,
         page_path: str,
         content: str,
-        author: str = "Collaborative Edit"
+        author: str = "Collaborative Edit",
+        author_email: Optional[str] = None
     ):
         """
         Save page content to git storage.
@@ -73,6 +74,7 @@ class CollabPersistence:
             page_path: The page path
             content: New markdown content
             author: Author name for git commit
+            author_email: Author's email for git commit
         """
         lock = self._get_lock(page_path)
 
@@ -90,7 +92,8 @@ class CollabPersistence:
                         title=title,
                         content=content,
                         author=author,
-                        commit_msg=f"Collaborative edit: {title}"
+                        commit_msg=f"Collaborative edit: {title}",
+                        author_email=author_email
                     )
                 )
 

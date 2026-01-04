@@ -1,4 +1,5 @@
 import { getApiUrl } from '../utils/url';
+import { getAuthHeaders } from './auth-api';
 
 // Re-export from shared utility for backwards compatibility
 export { isImageFile } from '../utils/files';
@@ -17,16 +18,15 @@ export interface UploadResponse {
  */
 export async function uploadImage(
   file: File,
-  folder: string = 'images',
-  author: string = 'user'
+  folder: string = 'images'
 ): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('folder', folder);
-  formData.append('author', author);
 
   const response = await fetch(`${API_BASE_URL}/upload`, {
     method: 'POST',
+    headers: getAuthHeaders(),
     body: formData,
   });
 

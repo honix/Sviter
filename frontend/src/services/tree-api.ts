@@ -1,5 +1,6 @@
 import type { TreeItem, MoveOperation, FolderCreate } from '../types/page';
 import { getApiUrl } from '../utils/url';
+import { getAuthHeaders } from './auth-api';
 
 const API_BASE = getApiUrl();
 
@@ -19,7 +20,7 @@ export const treeApi = {
   async moveItem(operation: MoveOperation): Promise<void> {
     const response = await fetch(`${API_BASE}/api/pages/move`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({
         source_path: operation.sourcePath,
         target_parent_path: operation.targetParentPath,
@@ -35,7 +36,7 @@ export const treeApi = {
   async createFolder(data: FolderCreate): Promise<TreeItem> {
     const response = await fetch(`${API_BASE}/api/folders`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({
         name: data.name,
         parent_path: data.parentPath
@@ -50,7 +51,8 @@ export const treeApi = {
 
   async deleteFolder(path: string): Promise<void> {
     const response = await fetch(`${API_BASE}/api/folders/${encodeURIComponent(path)}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: getAuthHeaders()
     });
     if (!response.ok) {
       const error = await response.json();

@@ -128,8 +128,20 @@ class GitWiki:
         return created
 
     @staticmethod
-    def _create_author(author_name: str) -> Actor:
-        """Create a git Actor object from author name"""
+    def _create_author(author_name: str, author_email: Optional[str] = None) -> Actor:
+        """
+        Create a git Actor object from author name and email.
+
+        Args:
+            author_name: Author's display name
+            author_email: Author's email (optional, generates placeholder if not provided)
+
+        Returns:
+            Git Actor object for commits
+        """
+        if author_email:
+            return Actor(author_name, author_email)
+        # Generate placeholder email from name
         return Actor(author_name, f"{author_name.replace(' ', '').lower()}@wiki.local")
 
     @staticmethod
@@ -352,7 +364,7 @@ class GitWiki:
         return self._parse_page(filepath)
 
     def create_page(self, title: str, content: str, author: str = "AI Agent",
-                   tags: Optional[List[str]] = None) -> Dict[str, Any]:
+                   tags: Optional[List[str]] = None, author_email: Optional[str] = None) -> Dict[str, Any]:
         """
         Create a new page.
 
@@ -361,6 +373,7 @@ class GitWiki:
             content: Page content (markdown)
             author: Author name
             tags: List of tags
+            author_email: Author's email for git commit
 
         Returns:
             Created page dictionary
@@ -383,7 +396,7 @@ class GitWiki:
         try:
             relative_path = filepath.relative_to(self.repo_path)
             self.repo.index.add([str(relative_path)])
-            self.repo.index.commit(f"Create page: {title}", author=self._create_author(author))
+            self.repo.index.commit(f"Create page: {title}", author=self._create_author(author, author_email))
         except GitCommandError as e:
             # Rollback: delete the file
             filepath.unlink()
@@ -392,7 +405,8 @@ class GitWiki:
         return self._parse_page(filepath)
 
     def update_page(self, title: str, content: str, author: str = "AI Agent",
-                   tags: Optional[List[str]] = None, commit_msg: Optional[str] = None) -> Dict[str, Any]:
+                   tags: Optional[List[str]] = None, commit_msg: Optional[str] = None,
+                   author_email: Optional[str] = None) -> Dict[str, Any]:
         """
         Update an existing page.
 
@@ -402,6 +416,7 @@ class GitWiki:
             author: Author name (for git commit)
             tags: List of tags (unused, kept for API compatibility)
             commit_msg: Custom commit message (optional)
+            author_email: Author's email for git commit
 
         Returns:
             Updated page dictionary
@@ -437,19 +452,20 @@ class GitWiki:
                 # Only commit if there are actual changes staged
                 if self.repo.index.diff("HEAD"):
                     message = commit_msg or f"Update page: {title}"
-                    self.repo.index.commit(message, author=self._create_author(author))
+                    self.repo.index.commit(message, author=self._create_author(author, author_email))
         except GitCommandError as e:
             raise GitWikiException(f"Git commit failed: {e}")
 
         return self._parse_page(filepath)
 
-    def delete_page(self, title: str, author: str = "AI Agent") -> bool:
+    def delete_page(self, title: str, author: str = "AI Agent", author_email: Optional[str] = None) -> bool:
         """
         Delete a page.
 
         Args:
             title: Page title
             author: Author name
+            author_email: Author's email for git commit
 
         Returns:
             True if deleted successfully
@@ -467,7 +483,7 @@ class GitWiki:
         try:
             relative_path = filepath.relative_to(self.repo_path)
             self.repo.index.remove([str(relative_path)])
-            self.repo.index.commit(f"Delete page: {title}", author=self._create_author(author))
+            self.repo.index.commit(f"Delete page: {title}", author=self._create_author(author, author_email))
 
             # Delete the file
             filepath.unlink()
@@ -476,7 +492,8 @@ class GitWiki:
 
         return True
 
-    def rename_page(self, old_path: str, new_name: str, author: str = "User") -> Dict[str, Any]:
+    def rename_page(self, old_path: str, new_name: str, author: str = "User",
+                   author_email: Optional[str] = None) -> Dict[str, Any]:
         """
         Rename a page (change filename only, keep in same folder).
 
@@ -486,6 +503,7 @@ class GitWiki:
             old_path: Current page path (e.g., "home.md", "agents/index.md")
             new_name: New filename (with or without .md extension)
             author: Author name for commit
+            author_email: Author's email for git commit
 
         Returns:
             Updated page dictionary with new path
@@ -526,7 +544,7 @@ class GitWiki:
             self.repo.git.mv(str(old_rel), str(new_rel))
             self.repo.index.commit(
                 f"Rename: {old_filepath.name} → {sanitized}",
-                author=self._create_author(author)
+                author=self._create_author(author, author_email)
             )
 
         except GitCommandError as e:
@@ -783,7 +801,7 @@ class GitWiki:
         return build_tree(self.repo_path)
 
     def create_folder(self, name: str, parent_path: Optional[str] = None,
-                     author: str = "System") -> Dict[str, Any]:
+                     author: str = "System", author_email: Optional[str] = None) -> Dict[str, Any]:
         """
         Create a new folder with automatic ordering.
 
@@ -791,6 +809,7 @@ class GitWiki:
             name: Folder name (will be converted to slug)
             parent_path: Parent folder path (None for root)
             author: Author name for commit
+            author_email: Author's email for git commit
 
         Returns:
             Dictionary with folder info
@@ -829,7 +848,7 @@ class GitWiki:
         try:
             relative_path = gitkeep.relative_to(self.repo_path)
             self.repo.index.add([str(relative_path)])
-            self.repo.index.commit(f"Create folder: {name}", author=self._create_author(author))
+            self.repo.index.commit(f"Create folder: {name}", author=self._create_author(author, author_email))
         except GitCommandError as e:
             # Rollback
             gitkeep.unlink()
@@ -846,13 +865,14 @@ class GitWiki:
             "children": []
         }
 
-    def delete_folder(self, path: str, author: str = "System") -> bool:
+    def delete_folder(self, path: str, author: str = "System", author_email: Optional[str] = None) -> bool:
         """
         Delete a folder and all its contents recursively.
 
         Args:
             path: Folder path relative to wiki root
             author: Author name for commit
+            author_email: Author's email for git commit
 
         Returns:
             True if deleted successfully
@@ -887,7 +907,7 @@ class GitWiki:
 
             # Commit if we removed tracked files
             if has_tracked_files:
-                self.repo.index.commit(f"Delete folder: {path}", author=self._create_author(author))
+                self.repo.index.commit(f"Delete folder: {path}", author=self._create_author(author, author_email))
 
         except Exception as e:
             raise GitWikiException(f"Failed to delete folder: {e}")
@@ -895,7 +915,7 @@ class GitWiki:
         return True
 
     def move_item(self, source_path: str, target_parent: Optional[str],
-                 new_order: int, author: str = "System") -> Dict[str, Any]:
+                 new_order: int, author: str = "System", author_email: Optional[str] = None) -> Dict[str, Any]:
         """
         Move a page or folder to a new location.
 
@@ -906,6 +926,7 @@ class GitWiki:
             target_parent: Target parent folder path (None for root)
             new_order: Ignored (kept for API compatibility)
             author: Author name for commit
+            author_email: Author's email for git commit
 
         Returns:
             Dictionary with new path info
@@ -950,7 +971,7 @@ class GitWiki:
             self.repo.git.mv(str(source_rel), str(target_rel))
 
             self.repo.index.commit(f"Move {source_path} to {target_rel}",
-                                  author=self._create_author(author))
+                                  author=self._create_author(author, author_email))
 
         except GitCommandError as e:
             raise GitWikiException(f"Failed to move item: {e}")
@@ -1079,7 +1100,8 @@ class GitWiki:
             raise GitWikiException(f"Failed to delete branch '{branch_name}': {e}")
 
     def merge_branch(self, source_branch: str, target_branch: str = None,
-                    author: str = "AI Agent", no_ff: bool = True) -> bool:
+                    author: str = "AI Agent", no_ff: bool = True,
+                    author_email: Optional[str] = None) -> bool:
         """
         Merge source branch into target branch.
 
@@ -1088,6 +1110,7 @@ class GitWiki:
             target_branch: Branch to merge into (default: current branch)
             author: Author for merge commit
             no_ff: Create merge commit even if fast-forward is possible
+            author_email: Author's email for merge commit
 
         Returns:
             True if successful
@@ -1114,9 +1137,18 @@ class GitWiki:
             if original_branch != target_branch:
                 self.repo.git.checkout(target_branch)
 
-            # Perform merge
+            # Set up author for merge commit
+            actor = self._create_author(author, author_email)
+
+            # Perform merge with author info via environment
             merge_args = ['--no-ff'] if no_ff else []
-            self.repo.git.merge(source_branch, *merge_args)
+            with self.repo.git.custom_environment(
+                GIT_AUTHOR_NAME=actor.name,
+                GIT_AUTHOR_EMAIL=actor.email,
+                GIT_COMMITTER_NAME=actor.name,
+                GIT_COMMITTER_EMAIL=actor.email,
+            ):
+                self.repo.git.merge(source_branch, *merge_args)
 
             return True
         except GitCommandError as e:
