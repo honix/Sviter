@@ -1391,6 +1391,59 @@ class GitWiki:
         except GitCommandError:
             return []  # Branch doesn't exist or other git error
 
+    def get_branch_history(self, branch: str = None, limit: int = 50, since_main: bool = False) -> List[Dict[str, Any]]:
+        """
+        Get commit history for a branch.
+
+        Args:
+            branch: Branch name (default: current branch)
+            limit: Maximum number of commits to return
+            since_main: If True, only show commits since branch diverged from main
+
+        Returns:
+            List of commit dictionaries with sha, message, author, date, files_changed
+
+        Raises:
+            GitWikiException: If branch doesn't exist or operation fails
+        """
+        try:
+            if branch is None:
+                branch = self.repo.active_branch.name
+            elif branch not in [b.name for b in self.repo.branches]:
+                raise GitWikiException(f"Branch '{branch}' does not exist")
+
+            # Build git log command
+            if since_main and branch != "main":
+                # Show commits since diverging from main
+                commit_range = f"main..{branch}"
+            else:
+                commit_range = branch
+
+            commits = list(self.repo.iter_commits(commit_range, max_count=limit))
+
+            history = []
+            for commit in commits:
+                # Get list of changed files
+                files_changed = []
+                if commit.parents:
+                    diff = commit.diff(commit.parents[0])
+                    files_changed = [d.a_path or d.b_path for d in diff]
+
+                history.append({
+                    "sha": commit.hexsha,
+                    "short_sha": commit.hexsha[:7],
+                    "message": commit.message.strip(),
+                    "author": commit.author.name,
+                    "date": commit.committed_datetime.isoformat(),
+                    "timestamp": commit.committed_date,
+                    "files_changed": files_changed
+                })
+
+            return history
+
+        except Exception as e:
+            raise GitWikiException(f"Failed to get branch history: {e}")
+
     def get_diff_stats_by_page(self, base: str, target: str) -> Dict[str, Dict[str, int]]:
         """
         Get per-page diff statistics between two refs.
