@@ -556,6 +556,11 @@ class ThreadManager:
             thread.set_error(str(e))
             if hasattr(thread, 'request_help_status'):
                 thread.request_help_status()
+        finally:
+            # Clean up executor when thread finishes (REVIEW, NEED_HELP, or error)
+            # This disconnects the Claude SDK client to prevent CPU spinning
+            if thread.is_finished() or thread.status in (ThreadStatus.REVIEW, ThreadStatus.NEED_HELP):
+                await self._cleanup_executor(thread.id)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Message Handling
@@ -909,8 +914,13 @@ If the conflicts are complex and you need guidance, use request_help to ask the 
                     "is_system": True
                 })
 
-        # Re-run the executor if available
+        # Re-run the executor (restart if it was cleaned up)
         executor = self.executors.get(thread.id)
+        if not executor:
+            # Executor was cleaned up, restart it for conflict resolution
+            await self._start_executor(thread, client_id)
+            executor = self.executors.get(thread.id)
+
         if executor:
             wiki = self._get_wiki_for_thread(thread)
             callbacks = self._prepare_thread_callbacks(thread, client_id)
@@ -938,6 +948,10 @@ If the conflicts are complex and you need guidance, use request_help to ask the 
                 "thread_id": thread.id,
                 "message": f"Conflict resolution failed: {e}"
             })
+        finally:
+            # Clean up executor when done to prevent CPU spinning
+            if thread.is_finished() or thread.status in (ThreadStatus.REVIEW, ThreadStatus.NEED_HELP):
+                await self._cleanup_executor(thread.id)
 
     async def _handle_reject_thread(self, client_id: str, thread_id: str) -> Dict[str, Any]:
         """Reject thread changes."""
