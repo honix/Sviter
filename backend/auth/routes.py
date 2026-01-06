@@ -1,9 +1,10 @@
 """Authentication API routes with OAuth support."""
 
 import secrets
+import time
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
@@ -43,8 +44,21 @@ if "oidc" in AUTH_PROVIDERS and OIDC_CLIENT_ID:
     providers["oidc"] = OIDCProvider()
 
 # OAuth state storage (in production, use Redis or database)
-# Maps state -> {provider, guest_id, code_verifier}
+# Maps state -> {provider, guest_id, code_verifier, created_at}
 _oauth_states: dict[str, dict] = {}
+_OAUTH_STATE_TTL_SECONDS = 600  # 10 minutes
+
+
+def _cleanup_expired_oauth_states() -> None:
+    """Remove OAuth states older than TTL to prevent memory leaks."""
+    now = time.time()
+    expired = [
+        state
+        for state, data in _oauth_states.items()
+        if now - data.get("created_at", 0) > _OAUTH_STATE_TTL_SECONDS
+    ]
+    for state in expired:
+        _oauth_states.pop(state, None)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -209,7 +223,9 @@ async def oauth_login(
     else:
         auth_url = oauth_provider.get_authorization_url(state)
 
-    _oauth_states[state] = state_data
+    # Clean up expired states and store new state with timestamp
+    _cleanup_expired_oauth_states()
+    _oauth_states[state] = {**state_data, "created_at": time.time()}
 
     return RedirectResponse(url=auth_url)
 
@@ -355,13 +371,13 @@ async def refresh_tokens(request: RefreshRequest):
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(
-    authorization: Optional[str] = Query(None, alias="token"),
+    authorization: Optional[str] = Header(None),
     user_id: Optional[str] = Query(None, description="Legacy: User ID"),
 ):
     """
     Get current authenticated user info.
 
-    Accepts either JWT token or legacy user_id query param.
+    Accepts JWT token via Authorization header or legacy user_id query param.
     """
     user = None
 

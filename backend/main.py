@@ -15,7 +15,7 @@ import uvicorn
 import shutil
 import mimetypes
 import re
-from config import WIKI_REPO_PATH, OPENROUTER_API_KEY
+from config import WIKI_REPO_PATH, OPENROUTER_API_KEY, JWT_SECRET_KEY
 from db import init_db, get_user
 from auth import router as auth_router, get_optional_user
 
@@ -103,6 +103,10 @@ async def startup_event():
         # Initialize database
         init_db()
         print("✅ Database initialized")
+
+        # Warn about default JWT secret
+        if JWT_SECRET_KEY == "dev-secret-change-in-production":
+            print("⚠️  WARNING: Using default JWT secret! Set JWT_SECRET_KEY for production.")
 
         pages = wiki.list_pages(limit=1)
         print(f"✅ Wiki repository loaded successfully ({WIKI_REPO_PATH})")

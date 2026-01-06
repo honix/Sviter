@@ -160,7 +160,9 @@ export async function getUser(): Promise<User> {
     throw new Error('Not authenticated');
   }
 
-  const response = await fetch(`${API_BASE}/auth/me?token=${encodeURIComponent(accessToken)}`);
+  const response = await fetch(`${API_BASE}/auth/me`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
   if (response.status === 401) {
     // Try to refresh
