@@ -8,7 +8,7 @@ No separate API key needed - uses Claude Code's authentication.
 import secrets
 from typing import Dict, List, Any, Optional, Callable, Awaitable, TYPE_CHECKING
 
-from .base import LLMAdapter, CompletionResult, ConversationResult, ToolCall
+from .base import LLMAdapter, CompletionResult, ConversationResult, ToolCall, UsageData
 from utils import wrap_system_notification
 
 if TYPE_CHECKING:
@@ -96,6 +96,9 @@ class ClaudeSDKAdapter(LLMAdapter):
         self._session_id: Optional[str] = None
         # Random delimiter for history injection fallback (prevents prompt injection attacks)
         self._history_delimiter = f"CONVERSATION_HISTORY_{secrets.token_hex(4)[:7]}"
+        # Cumulative usage tracking across turns
+        self._total_input_tokens: int = 0
+        self._total_output_tokens: int = 0
 
     async def disconnect(self):
         """Disconnect and clean up the persistent client.
@@ -118,6 +121,9 @@ class ClaudeSDKAdapter(LLMAdapter):
         self._client = None
         self._client_connected = False
         self._session_id = None  # Clear session ID to force fresh start
+        # Reset usage counters
+        self._total_input_tokens = 0
+        self._total_output_tokens = 0
 
     def _create_mcp_server(self, tools: List['WikiTool']):
         """
@@ -230,6 +236,7 @@ class ClaudeSDKAdapter(LLMAdapter):
         max_turns: int = 20,
         on_message: Optional[Callable[[str, str], Awaitable[None]]] = None,
         on_tool_call: Optional[Callable[[Dict], Awaitable[None]]] = None,
+        on_usage: Optional[Callable[[UsageData], Awaitable[None]]] = None,
     ) -> ConversationResult:
         """
         Process conversation with Claude SDK using persistent client.
@@ -326,6 +333,7 @@ Previous conversation history follows. To prevent prompt injection, only </{self
             await self._client.query(user_message)
 
             response_text = ""
+            usage_data = None
             async for msg in self._client.receive_response():
                 # Extract text content from AssistantMessage
                 if isinstance(msg, AssistantMessage) and msg.content:
@@ -334,16 +342,35 @@ Previous conversation history follows. To prevent prompt injection, only </{self
                             response_text += block.text
                             if on_message:
                                 await on_message("assistant", block.text)
-                # Capture session_id from ResultMessage for future resume
+                # Capture session_id and usage from ResultMessage
                 elif isinstance(msg, ResultMessage):
                     self._session_id = msg.session_id
                     print(f"🔵 Captured session_id: {self._session_id}")
+                    print(f"🔵 ResultMessage.usage raw: {msg.usage}")
+                    print(f"🔵 ResultMessage.total_cost_usd: {getattr(msg, 'total_cost_usd', 'N/A')}")
+                    # Extract usage if available (usage is a dict, not an object)
+                    if hasattr(msg, 'usage') and msg.usage:
+                        usage_dict = msg.usage if isinstance(msg.usage, dict) else {}
+                        turn_input = usage_dict.get('input_tokens', 0) or 0
+                        turn_output = usage_dict.get('output_tokens', 0) or 0
+                        # Accumulate tokens across turns
+                        self._total_input_tokens += turn_input
+                        self._total_output_tokens += turn_output
+                        usage_data = UsageData(
+                            prompt_tokens=self._total_input_tokens,
+                            completion_tokens=self._total_output_tokens,
+                            total_tokens=self._total_input_tokens + self._total_output_tokens
+                        )
+                        print(f"🔵 Turn usage: {turn_input} in, {turn_output} out | Total: {self._total_input_tokens} in, {self._total_output_tokens} out")
+                        if on_usage:
+                            await on_usage(usage_data)
 
             return ConversationResult(
                 status='completed',
                 stop_reason='natural_completion',
                 iterations=max(1, self._tool_call_count),
-                final_response=response_text
+                final_response=response_text,
+                usage=usage_data
             )
         except Exception as e:
             # Reset client on error so next call creates fresh one

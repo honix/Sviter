@@ -10,6 +10,7 @@ from storage.git_wiki import GitWiki
 from ai.tools import WikiTool, ToolBuilder
 from ai.adapters import OpenRouterAdapter, LLMAdapter
 from ai.adapters.claude_sdk import ClaudeSDKAdapter, CLAUDE_SDK_AVAILABLE
+from ai.adapters.base import UsageData
 from .config import GlobalAgentConfig
 from config import LLM_MODEL, LLM_PROVIDER
 from utils import wrap_system_notification
@@ -101,6 +102,8 @@ class AgentExecutor:
                                 Dict], Awaitable[None]]] = None,
                             on_branch_created: Union[Callable[[
                                 str], None], Callable[[str], Awaitable[None]]] = None,
+                            on_usage: Union[Callable[[UsageData], None], Callable[[
+                                UsageData], Awaitable[None]]] = None,
                             # Config dict parameters (preferred over agent_class)
                             model: str = None,
                             provider: str = None,
@@ -119,6 +122,7 @@ class AgentExecutor:
             on_message: Callback for streaming messages (type, content)
             on_tool_call: Callback for streaming tool calls
             on_branch_created: Callback when branch is created
+            on_usage: Callback for token usage updates
             model: Model to use (e.g., 'claude-sonnet-4-5')
             provider: Provider ('claude' or 'openrouter')
             human_in_loop: If True, waits for user input between turns
@@ -132,6 +136,7 @@ class AgentExecutor:
         self.on_message = on_message
         self.on_tool_call = on_tool_call
         self.on_branch_created = on_branch_created
+        self.on_usage = on_usage
         self.current_agent_class = agent_class
         self.branch_created = None
 
@@ -270,6 +275,8 @@ class AgentExecutor:
                     self.on_message, t, c),
                 on_tool_call=lambda d: self._call_callback(
                     self.on_tool_call, d),
+                on_usage=lambda u: self._call_callback(
+                    self.on_usage, u),
             )
 
             self.iteration_count += result.iterations

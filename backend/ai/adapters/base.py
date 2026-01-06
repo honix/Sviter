@@ -8,8 +8,30 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Callable, Awaitable, TYPE_CHECKING
 
+import os
+
 if TYPE_CHECKING:
     from ai.tools import WikiTool
+
+
+# Default context limit from env, fallback to 200k
+CONTEXT_LIMIT = int(os.environ.get("CONTEXT_LIMIT", 200000))
+
+
+@dataclass
+class UsageData:
+    """Token usage data from LLM completion"""
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    context_limit: int = CONTEXT_LIMIT
+
+    @property
+    def context_percent(self) -> float:
+        """Percentage of context window used by prompt tokens"""
+        if self.context_limit == 0:
+            return 0.0
+        return (self.prompt_tokens / self.context_limit) * 100
 
 
 @dataclass
@@ -20,6 +42,7 @@ class ConversationResult:
     iterations: int
     final_response: str
     error: Optional[str] = None
+    usage: Optional[UsageData] = None  # Aggregated usage across iterations
 
 
 @dataclass
@@ -41,6 +64,7 @@ class CompletionResult:
     content: str  # Text content from the response
     tool_calls: List[ToolCall] = field(default_factory=list)
     raw_message: Any = None  # Original message for conversation history
+    usage: Optional[UsageData] = None  # Token usage for this completion
 
 
 class LLMAdapter(ABC):
@@ -130,6 +154,7 @@ class LLMAdapter(ABC):
         max_turns: int = 20,
         on_message: Optional[Callable[[str, str], Awaitable[None]]] = None,
         on_tool_call: Optional[Callable[[Dict], Awaitable[None]]] = None,
+        on_usage: Optional[Callable[[UsageData], Awaitable[None]]] = None,
     ) -> ConversationResult:
         """
         Process a full conversation turn (handles loop internally).
@@ -141,6 +166,7 @@ class LLMAdapter(ABC):
             max_turns: Maximum iterations before stopping
             on_message: Callback for streaming messages (type, content)
             on_tool_call: Callback for tool execution details
+            on_usage: Callback for token usage updates
 
         Returns:
             ConversationResult with final response and metadata

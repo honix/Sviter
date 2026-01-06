@@ -34,6 +34,7 @@ import { ArrowUp, GitBranch, Loader2, AlertCircle, CheckCircle, Check, XCircle }
 import type { Thread } from '../../types/thread';
 import type { MarkdownLinkHandler } from '@/components/ui/markdown';
 import { ThreadChangesView } from '../threads/ThreadChangesView';
+import { ContextUsageBar } from './ContextUsageBar';
 
 interface ChatInterfaceProps {
   threadId: string;  // Always required - assistant or worker thread ID
@@ -42,7 +43,7 @@ interface ChatInterfaceProps {
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
   const { state, websocket, actions } = useAppContext();
-  const { connectionStatus, assistantThreadId } = state;
+  const { connectionStatus, assistantThreadId, contextUsage } = state;
   const { messages, sendMessage, clearMessages, isGenerating } = useChat(threadId);
   const [inputValue, setInputValue] = useState('');
   const [expandedSystemPrompts, setExpandedSystemPrompts] = useState<Set<string>>(new Set());
@@ -440,6 +441,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
           <ChatContainerScrollAnchor />
         </ChatContainerContent>
       </ChatContainerRoot>
+
+      {/* Context Usage Bar */}
+      {contextUsage[threadId] && (
+        <ContextUsageBar
+          promptTokens={contextUsage[threadId].promptTokens}
+          completionTokens={contextUsage[threadId].completionTokens}
+          totalTokens={contextUsage[threadId].totalTokens}
+          contextLimit={contextUsage[threadId].contextLimit}
+          contextPercent={contextUsage[threadId].contextPercent}
+        />
+      )}
 
       {/* Bottom section - Chat input always available */}
       <div
