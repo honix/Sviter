@@ -309,37 +309,87 @@ class AgentExecutor:
         Used when reconnecting to an existing thread to give the LLM
         context about previous conversation.
 
-        Args:
-            messages: List of message dicts with 'role' and 'content' keys.
-                      Only user and assistant messages are restored.
-                      Tool calls are skipped (assistant responses summarize them).
+        Reconstructs full OpenAI-compatible format including tool calls:
+        - Assistant messages with tool_calls array
+        - Tool result messages with role: "tool" and tool_call_id
         """
-        for msg in messages:
+        import json
+
+        tool_call_counter = 0
+        i = 0
+
+        while i < len(messages):
+            msg = messages[i]
             role = msg.get('role', '')
             content = msg.get('content', '')
 
-            # Skip empty messages and tool calls
-            # Tool calls are implementation details - assistant responses summarize them
-            if not content or role == 'tool_call':
-                continue
-
-            # Map roles to LLM-compatible format
             if role == 'user':
-                self.conversation_history.append({
-                    "role": "user",
-                    "content": content
-                })
+                if content:  # Skip empty
+                    self.conversation_history.append({
+                        "role": "user",
+                        "content": content
+                    })
+                i += 1
+
             elif role == 'assistant':
-                self.conversation_history.append({
+                # Look ahead to collect any following tool_call messages
+                tool_calls = []
+                j = i + 1
+                while j < len(messages) and messages[j].get('role') == 'tool_call':
+                    tc_msg = messages[j]
+                    tool_call_id = f"restored_call_{tool_call_counter}"
+                    tool_call_counter += 1
+
+                    tool_calls.append({
+                        "id": tool_call_id,
+                        "type": "function",
+                        "function": {
+                            "name": tc_msg.get('tool_name', 'unknown'),
+                            "arguments": json.dumps(tc_msg.get('tool_args', {}))
+                        }
+                    })
+                    j += 1
+
+                # Build assistant message
+                assistant_msg = {
                     "role": "assistant",
-                    "content": content
-                })
+                    "content": content or ""
+                }
+                if tool_calls:
+                    assistant_msg["tool_calls"] = tool_calls
+
+                self.conversation_history.append(assistant_msg)
+
+                # Add tool result messages
+                tool_idx = 0
+                for k in range(i + 1, j):
+                    tc_msg = messages[k]
+                    tool_call_id = f"restored_call_{tool_call_counter - len(tool_calls) + tool_idx}"
+                    self.conversation_history.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": str(tc_msg.get('tool_result', tc_msg.get('content', '')))
+                    })
+                    tool_idx += 1
+
+                i = j  # Skip past processed tool_calls
+
             elif role == 'system':
                 # System messages from conflict resolution etc.
-                self.conversation_history.append({
-                    "role": "user",
-                    "content": wrap_system_notification(content)
-                })
+                if content:
+                    self.conversation_history.append({
+                        "role": "user",
+                        "content": wrap_system_notification(content)
+                    })
+                i += 1
+
+            elif role == 'tool_call':
+                # Orphan tool_call without preceding assistant - skip
+                # (shouldn't happen but handle gracefully)
+                i += 1
+
+            else:
+                i += 1
 
     async def end_session(self, call_on_finish: bool = True) -> Dict[str, Any]:
         """
