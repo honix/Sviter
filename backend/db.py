@@ -148,6 +148,95 @@ def get_or_create_guest(user_id: str) -> dict:
     return create_user(user_id, user_type="guest")
 
 
+def get_user_by_oauth(provider: str, oauth_id: str) -> Optional[dict]:
+    """Get user by OAuth provider and provider-specific ID."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE oauth_provider = ? AND oauth_id = ?",
+            (provider, oauth_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_user_by_email(email: str) -> Optional[dict]:
+    """Get user by email address."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE email = ?",
+            (email,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def create_oauth_user(
+    user_id: str,
+    provider: str,
+    oauth_id: str,
+    email: Optional[str] = None,
+    name: Optional[str] = None
+) -> dict:
+    """Create a new OAuth user."""
+    return create_user(
+        user_id=user_id,
+        user_type="oauth",
+        oauth_provider=provider,
+        oauth_id=oauth_id,
+        email=email,
+        name=name,
+    )
+
+
+def upgrade_guest_to_oauth(
+    guest_id: str,
+    provider: str,
+    oauth_id: str,
+    email: Optional[str] = None,
+    name: Optional[str] = None
+) -> dict:
+    """
+    Upgrade a guest user to an OAuth user, preserving their data.
+
+    All threads, shares, and other data remain linked to the same user ID.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE users
+            SET type = 'oauth',
+                oauth_provider = ?,
+                oauth_id = ?,
+                email = ?,
+                name = ?,
+                last_seen_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (provider, oauth_id, email, name, guest_id)
+        )
+        conn.commit()
+    return get_user(guest_id)
+
+
+def update_user_oauth_info(
+    user_id: str,
+    email: Optional[str] = None,
+    name: Optional[str] = None
+) -> dict:
+    """Update OAuth user's email and name (e.g., if changed on provider)."""
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE users
+            SET email = COALESCE(?, email),
+                name = COALESCE(?, name),
+                last_seen_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (email, name, user_id)
+        )
+        conn.commit()
+    return get_user(user_id)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Thread Operations
 # ─────────────────────────────────────────────────────────────────────────────

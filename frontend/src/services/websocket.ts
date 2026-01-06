@@ -1,5 +1,6 @@
 import type { WebSocketMessage } from '../types/chat';
 import { getWsUrl } from '../utils/url';
+import { getAccessToken } from './auth-api';
 
 export type WebSocketEventHandler = (message: WebSocketMessage) => void;
 export type ConnectionStatusHandler = (status: 'connecting' | 'connected' | 'disconnected' | 'error') => void;
@@ -27,7 +28,14 @@ export class WebSocketService {
     this.notifyStatus('connecting');
 
     try {
-      this.ws = new WebSocket(`${this.url}/${this.clientId}`);
+      // Build WebSocket URL with optional JWT token for authentication
+      let wsUrl = `${this.url}/${this.clientId}`;
+      const token = getAccessToken();
+      if (token) {
+        wsUrl += `?token=${encodeURIComponent(token)}`;
+      }
+
+      this.ws = new WebSocket(wsUrl);
       this.setupEventListeners();
     } catch (error) {
       console.error('Failed to create WebSocket connection:', error);

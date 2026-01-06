@@ -23,6 +23,7 @@ from db import (
     unshare_thread as db_unshare_thread,
     get_thread_shares,
 )
+from auth import get_current_user
 
 
 router = APIRouter(prefix="/api/threads", tags=["threads"])
@@ -45,15 +46,6 @@ class ThreadUpdate(BaseModel):
 
 class ShareRequest(BaseModel):
     user_id: str
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helper to get current user (simplified - use proper auth in production)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def get_current_user(user_id: str = Query(..., description="User ID")) -> str:
-    """Get current user from query param (simplified auth)."""
-    return user_id
 
 
 # ─────────────────────────────────────────────────────────────────────────────

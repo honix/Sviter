@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, HTTPException, BackgroundTasks, UploadFile, File, Form
+from fastapi import FastAPI, WebSocket, HTTPException, BackgroundTasks, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from storage import GitWiki, PageNotFoundException, GitWikiException
@@ -9,15 +9,15 @@ from api.threads import router as threads_router
 from collab import initialize_collab_manager
 from collab import manager as collab_module  # Access collab_manager at runtime
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 import uvicorn
 import shutil
 import mimetypes
 import re
-from config import WIKI_REPO_PATH, OPENROUTER_API_KEY
-from db import init_db
-from auth import router as auth_router
+from config import WIKI_REPO_PATH, OPENROUTER_API_KEY, JWT_SECRET_KEY
+from db import init_db, get_user
+from auth import router as auth_router, get_optional_user
 
 # Pydantic models for request/response
 class PageCreate(BaseModel):
@@ -49,6 +49,30 @@ class ImageUploadResponse(BaseModel):
 # Initialize GitWiki
 wiki = GitWiki(WIKI_REPO_PATH)
 
+
+def get_author_info(user_id: Optional[str]) -> Tuple[str, Optional[str]]:
+    """
+    Get author name and email from user ID.
+
+    Args:
+        user_id: User ID from auth context
+
+    Returns:
+        Tuple of (author_name, author_email)
+    """
+    if not user_id:
+        return "user", None
+
+    user = get_user(user_id)
+    if not user:
+        return "user", None
+
+    # Use name if available, otherwise use user_id
+    author_name = user.get("name") or user_id
+    author_email = user.get("email")
+
+    return author_name, author_email
+
 # Create FastAPI app
 app = FastAPI(
     title="AI Wiki Backend",
@@ -79,6 +103,10 @@ async def startup_event():
         # Initialize database
         init_db()
         print("✅ Database initialized")
+
+        # Warn about default JWT secret
+        if JWT_SECRET_KEY == "dev-secret-change-in-production":
+            print("⚠️  WARNING: Using default JWT secret! Set JWT_SECRET_KEY for production.")
 
         pages = wiki.list_pages(limit=1)
         print(f"✅ Wiki repository loaded successfully ({WIKI_REPO_PATH})")
@@ -201,7 +229,7 @@ def sanitize_filename(filename: str) -> str:
 async def upload_image(
     file: UploadFile = File(...),
     folder: str = Form(default="images"),
-    author: str = Form(default="user")
+    user_id: Optional[str] = Depends(get_optional_user)
 ):
     """Upload an image file to the wiki and commit to git"""
     # Validate file type
@@ -235,12 +263,15 @@ async def upload_image(
     finally:
         await file.close()
 
+    # Get author info from authenticated user
+    author_name, author_email = get_author_info(user_id)
+
     # Git add and commit
     relative_path = target_path.relative_to(wiki.repo_path)
     wiki.repo.index.add([str(relative_path)])
     wiki.repo.index.commit(
         f"Upload image: {target_path.name}",
-        author=wiki._create_author(author)
+        author=wiki._create_author(author_name, author_email)
     )
 
     # Return paths for frontend (simple relative paths, frontend converts to API URLs)
@@ -349,14 +380,20 @@ async def get_page(title: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/pages")
-async def create_page(page_data: PageCreate):
+async def create_page(page_data: PageCreate, user_id: Optional[str] = Depends(get_optional_user)):
     """Create a new page"""
     try:
+        # Get author info from authenticated user or fallback to request data
+        author_name, author_email = get_author_info(user_id)
+        if page_data.author != "user":
+            author_name = page_data.author
+
         new_page = wiki.create_page(
             title=page_data.title,
             content=page_data.content,
-            author=page_data.author,
-            tags=page_data.tags
+            author=author_name,
+            tags=page_data.tags,
+            author_email=author_email
         )
         return new_page
     except GitWikiException as e:
@@ -365,14 +402,20 @@ async def create_page(page_data: PageCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/pages/{title:path}")
-async def update_page(title: str, page_data: PageUpdate):
+async def update_page(title: str, page_data: PageUpdate, user_id: Optional[str] = Depends(get_optional_user)):
     """Update an existing page"""
     try:
+        # Get author info from authenticated user
+        author_name, author_email = get_author_info(user_id)
+        if page_data.author:
+            author_name = page_data.author
+
         updated_page = wiki.update_page(
             title=title,
             content=page_data.content if page_data.content is not None else wiki.get_page(title)["content"],
-            author=page_data.author or "user",
-            tags=page_data.tags
+            author=author_name,
+            tags=page_data.tags,
+            author_email=author_email
         )
         return updated_page
     except PageNotFoundException:
@@ -383,10 +426,11 @@ async def update_page(title: str, page_data: PageUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/pages/{title:path}")
-async def delete_page(title: str, author: str = "user"):
+async def delete_page(title: str, user_id: Optional[str] = Depends(get_optional_user)):
     """Delete a page"""
     try:
-        wiki.delete_page(title, author)
+        author_name, author_email = get_author_info(user_id)
+        wiki.delete_page(title, author_name, author_email)
         return {"message": f"Page '{title}' deleted successfully"}
     except PageNotFoundException:
         raise HTTPException(status_code=404, detail=f"Page '{title}' not found")
@@ -398,17 +442,18 @@ async def delete_page(title: str, author: str = "user"):
 
 class PageRename(BaseModel):
     new_name: str
-    author: str = "user"
 
 
 @app.post("/api/pages/{title:path}/rename")
-async def rename_page(title: str, data: PageRename):
+async def rename_page(title: str, data: PageRename, user_id: Optional[str] = Depends(get_optional_user)):
     """Rename a page (change filename, keep in same folder)"""
     try:
+        author_name, author_email = get_author_info(user_id)
         renamed_page = wiki.rename_page(
             old_path=title,
             new_name=data.new_name,
-            author=data.author
+            author=author_name,
+            author_email=author_email
         )
         return renamed_page
     except PageNotFoundException:
@@ -421,14 +466,16 @@ async def rename_page(title: str, data: PageRename):
 
 # Folder API endpoints
 @app.post("/api/pages/move")
-async def move_page_item(request: MoveRequest):
+async def move_page_item(request: MoveRequest, user_id: Optional[str] = Depends(get_optional_user)):
     """Move a page or folder to a new location with specified order"""
     try:
+        author_name, author_email = get_author_info(user_id)
         result = wiki.move_item(
             source_path=request.source_path,
             target_parent=request.target_parent_path,
             new_order=request.new_order,
-            author="user"
+            author=author_name,
+            author_email=author_email
         )
         return result
     except PageNotFoundException as e:
@@ -439,13 +486,15 @@ async def move_page_item(request: MoveRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/folders")
-async def create_folder(request: FolderCreate):
+async def create_folder(request: FolderCreate, user_id: Optional[str] = Depends(get_optional_user)):
     """Create a new folder"""
     try:
+        author_name, author_email = get_author_info(user_id)
         folder = wiki.create_folder(
             name=request.name,
             parent_path=request.parent_path,
-            author="user"
+            author=author_name,
+            author_email=author_email
         )
         return folder
     except GitWikiException as e:
@@ -454,10 +503,11 @@ async def create_folder(request: FolderCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/folders/{path:path}")
-async def delete_folder(path: str):
+async def delete_folder(path: str, user_id: Optional[str] = Depends(get_optional_user)):
     """Delete an empty folder"""
     try:
-        wiki.delete_folder(path, author="user")
+        author_name, author_email = get_author_info(user_id)
+        wiki.delete_folder(path, author=author_name, author_email=author_email)
         return {"message": f"Folder '{path}' deleted successfully"}
     except GitWikiException as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -127,10 +127,8 @@ async function saveDocument(pagePath: string, pageTitle: string): Promise<void> 
 
   notifySaveStatus(pagePath, 'saving');
   try {
-    await updatePage(pageTitle, {
-      content,
-      author: 'collaborative',
-    });
+    // Don't pass author - backend will use authenticated user's name from JWT
+    await updatePage(pageTitle, { content });
     state.lastSavedContent = content;
     notifySaveStatus(pagePath, 'saved');
     console.log(`Saved document: ${pagePath}`);

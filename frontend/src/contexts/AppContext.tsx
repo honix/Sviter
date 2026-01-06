@@ -7,6 +7,7 @@ import type { Thread, ThreadMessage, ThreadStatus } from '../types/thread';
 import { useAuth } from './AuthContext';
 import { invalidateSessions } from '../services/collab';
 import { getApiUrl } from '../utils/url';
+import { getAuthHeaders } from '../services/auth-api';
 import { toast } from 'sonner';
 
 interface AppState {
@@ -780,7 +781,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const response = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(title)}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify(updates),
         });
 
@@ -802,8 +803,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dispatch({ type: 'SET_ERROR', payload: null });
 
       try {
-        const response = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(path)}?author=user`, {
+        const response = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(path)}`, {
           method: 'DELETE',
+          headers: getAuthHeaders(),
         });
 
         if (!response.ok) {
@@ -876,11 +878,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const response = await fetch(`${getApiUrl()}/api/pages`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({
             title,
             content,
-            author: 'user',
             tags: []
           }),
         });

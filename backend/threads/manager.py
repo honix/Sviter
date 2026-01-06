@@ -27,6 +27,7 @@ from threads.accept_result import AcceptResult
 from db import (
     get_or_create_guest,
     get_thread as db_get_thread,
+    get_user,
     list_threads_for_user,
     list_worker_threads,
     can_access_thread,
@@ -813,9 +814,17 @@ class ThreadManager:
         affected_pages = self.get_thread_affected_pages(thread_id)
         print(f"🔍 Thread {thread_id} affects pages: {affected_pages}")
 
+        # Get user info for merge commit author
+        author_name = "System"
+        author_email = None
+        user = get_user(client_id)
+        if user:
+            author_name = user.get("name") or client_id
+            author_email = user.get("email")
+
         # No conflicts, proceed with merge
         print(f"🚀 Calling thread.accept() for thread {thread_id}")
-        result = thread.accept(self.wiki)
+        result = thread.accept(self.wiki, author=author_name, author_email=author_email)
         print(f"📊 thread.accept() returned: {result}")
 
         if result == AcceptResult.SUCCESS:
