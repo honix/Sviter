@@ -8,7 +8,7 @@ import json
 from openai import AsyncOpenAI
 from typing import Dict, List, Any, Optional, Callable, Awaitable, TYPE_CHECKING
 
-from .base import LLMAdapter, CompletionResult, ConversationResult, ToolCall
+from .base import LLMAdapter, CompletionResult, ConversationResult, ToolCall, UsageData, CONTEXT_LIMIT
 
 if TYPE_CHECKING:
     from ai.tools import WikiTool
@@ -173,6 +173,13 @@ class OpenRouterAdapter(LLMAdapter):
             message = completion.choices[0].message
             content = message.content or ""
             tool_calls_raw = message.tool_calls or []
+
+            # Track token usage
+            usage = UsageData(
+                input_tokens=getattr(completion.usage, 'prompt_tokens', 0) if completion.usage else 0,
+                output_tokens=getattr(completion.usage, 'completion_tokens', 0) if completion.usage else 0,
+                context_limit=CONTEXT_LIMIT
+            )
 
             non_system_messages.append(message)
             conversation_history.append(message)  # Persist for next turn

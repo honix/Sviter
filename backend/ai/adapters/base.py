@@ -12,6 +12,18 @@ if TYPE_CHECKING:
     from ai.tools import WikiTool
 
 
+# Default context limit for LLM adapters (in tokens)
+CONTEXT_LIMIT = 128000
+
+
+@dataclass
+class UsageData:
+    """Token usage data from LLM completion"""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    context_limit: int = CONTEXT_LIMIT
+
+
 @dataclass
 class ConversationResult:
     """Result of a full conversation turn (may include multiple iterations)"""
