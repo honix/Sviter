@@ -41,8 +41,10 @@ This is an AI-powered wiki system with a FastAPI backend and React frontend. The
 
 ## Running the Application
 
+**Requires [uv](https://docs.astral.sh/uv/) - fast Python package manager**
+
 ```bash
-make setup    # Create venv + install all dependencies (first time only)
+make setup    # Install Python + Node dependencies (first time only)
 make run      # Start both backend and frontend
 ```
 
@@ -50,8 +52,11 @@ Other commands:
 
 - `make backend` - Start backend only (port 8000)
 - `make frontend` - Start frontend only (port 5173)
-- `make clean` - Remove venv and node_modules
+- `make clean` - Remove .venv and node_modules
+- `make test` - Run pytest
 - `make haiku-tester` - Run browser UI tests with Claude haiku
+
+**Windows**: Install make via `choco install make` (requires Chocolatey)
 
 ## Project Structure
 
@@ -61,7 +66,7 @@ Other commands:
 ├── tests/                    # Test infrastructure (Docker, haiku-tester)
 ├── backend/                  # Python FastAPI backend
 │   ├── main.py               # FastAPI app entry point
-│   ├── requirements.txt      # Python dependencies
+│   ├── pyproject.toml        # Python dependencies (uv)
 │   ├── storage/             # Git-based wiki storage (GitWiki)
 │   ├── ai/                  # AI integration
 │   │   ├── prompts.py       # System prompts (ASSISTANT_PROMPT, THREAD_PROMPT)

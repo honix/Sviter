@@ -1,17 +1,11 @@
 .PHONY: setup backend frontend run clean test haiku-tester
 
-VENV = backend/venv
-PYTHON = $(VENV)/bin/python
-PIP = $(VENV)/bin/pip
-
 setup:
-	python3 -m venv $(VENV)
-	$(PIP) install -r backend/requirements.txt
-	$(PIP) install -r tests/requirements.txt
+	cd backend && uv sync
 	cd frontend && npm install
 
 backend:
-	cd backend && ../$(PYTHON) main.py
+	cd backend && uv run python main.py
 
 frontend:
 	cd frontend && npm run dev
@@ -21,11 +15,11 @@ run:
 	@$(MAKE) -j2 backend frontend
 
 clean:
-	rm -rf $(VENV)
+	rm -rf backend/.venv
 	rm -rf frontend/node_modules
 
 test:
-	@echo "No unit tests yet"
+	cd backend && uv run pytest
 
 haiku-tester:
-	$(PYTHON) -m pytest tests/haiku-tester/ -v
+	cd backend && uv run pytest ../tests/haiku-tester/ -v
