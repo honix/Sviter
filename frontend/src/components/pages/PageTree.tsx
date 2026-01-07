@@ -17,7 +17,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, FileText, FileSpreadsheet, FileCode, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, MessageSquarePlus, Waypoints, ImagePlus, Loader2, Image, File, Github, Key } from 'lucide-react';
+import { Plus, FileText, FileSpreadsheet, FileCode, FileJson, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, MessageSquarePlus, Waypoints, ImagePlus, Loader2, Image, File, Github, Key } from 'lucide-react';
 import { useSelection } from '../../contexts/SelectionContext';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -52,6 +52,7 @@ const FileName: React.FC<{ path: string }> = ({ path }) => {
 const getFileIcon = (path: string) => {
   if (path.endsWith('.csv')) return FileSpreadsheet;
   if (path.endsWith('.tsx')) return FileCode;
+  if (path.endsWith('.json')) return FileJson;
   if (path.endsWith('.md')) return FileText;
   if (isImagePath(path)) return Image;
   return File; // Unknown file type

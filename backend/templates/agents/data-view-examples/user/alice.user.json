@@ -1,0 +1,7 @@
+{
+  "name": "Alice Johnson",
+  "email": "alice@example.com",
+  "role": "Software Engineer",
+  "bio": "Full-stack developer passionate about React and TypeScript.",
+  "tags": ["react", "typescript", "nodejs"]
+}

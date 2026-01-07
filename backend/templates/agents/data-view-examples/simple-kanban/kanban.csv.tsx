@@ -1,8 +1,8 @@
-// Kanban board with drag-and-drop task management
-// Demonstrates useCSV for data, useState for drag state, and dynamic columns
+// Kanban board view template for *.kanban.csv files
+// Demonstrates typed data views with useCSV for data, useState for drag state
 
-export default function Kanban() {
-  const tasks = useCSV('agents/examples/kanban-tasks.csv');
+export default function KanbanView({ pagePath }) {
+  const tasks = useCSV(pagePath);
   const [draggedTask, setDraggedTask] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
 

@@ -1,0 +1,7 @@
+{
+  "name": "Bob Smith",
+  "email": "bob@example.com",
+  "role": "Product Manager",
+  "bio": "Turning ideas into reality, one sprint at a time.",
+  "tags": ["agile", "roadmap", "analytics"]
+}

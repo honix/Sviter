@@ -10,6 +10,8 @@ import { transform } from 'sucrase';
 import { useCSV } from '../../hooks/useCSV';
 import type { DataRow, SaveStatus } from '../../hooks/useCSV';
 import { usePage } from '../../hooks/usePage';
+import { useFolder } from '../../hooks/useFolder';
+import { usePageActions } from '../../hooks/usePageActions';
 import { useAuth } from '../../contexts/AuthContext';
 import type { CollabStatus } from '../editor/CollaborativeCodeMirrorEditor';
 import { getApiUrl } from '../../utils/url';
@@ -201,12 +203,14 @@ class ViewErrorBoundary extends React.Component<
 
 /**
  * Create the scope object available to user views.
- * Includes React, hooks, UI components, useCSV, usePage, and useComponent.
+ * Includes React, hooks, UI components, useCSV, usePage, useComponent, useFolder, usePageActions.
  */
 const createScope = (
   useCSVHook: typeof useCSV,
   usePageHook: typeof usePage,
-  useComponentHook: (path: string) => React.ComponentType<any> | null
+  useComponentHook: (path: string) => React.ComponentType<any> | null,
+  useFolderHook: typeof useFolder,
+  usePageActionsHook: typeof usePageActions
 ) => ({
   // React
   React,
@@ -231,6 +235,12 @@ const createScope = (
 
   // Component loader hook (for reusing other TSX components)
   useComponent: useComponentHook,
+
+  // Folder listing hook (for typed data collections)
+  useFolder: useFolderHook,
+
+  // Page CRUD actions (create/delete pages from views)
+  usePageActions: usePageActionsHook,
 
   // UI components
   Button,
@@ -370,7 +380,7 @@ export const ViewRuntime: React.FC<ViewRuntimeProps> = ({
 
           // Compile the component using the same scope
           // Note: This creates a simplified scope for reusable components
-          const componentScope = createScope(useCSVWithStatus, usePage, useComponentHook);
+          const componentScope = createScope(useCSVWithStatus, usePage, useComponentHook, useFolder, usePageActions);
           const compiled = compileTSXToComponent(tsxSource, componentScope);
 
           componentCache.set(cacheKey, {
@@ -428,7 +438,7 @@ export const ViewRuntime: React.FC<ViewRuntimeProps> = ({
 
       // Create function from transformed code
       // Use the wrapped useCSV that tracks save status
-      const scope = createScope(useCSVWithStatus, usePage, useComponentHook);
+      const scope = createScope(useCSVWithStatus, usePage, useComponentHook, useFolder, usePageActions);
       const scopeKeys = Object.keys(scope);
       const scopeValues = Object.values(scope);
 

@@ -30,6 +30,19 @@ const getFileName = (path: string): string => {
   return parts[parts.length - 1];
 };
 
+// Info card shown when viewing a view template directly
+const ViewTemplateInfo: React.FC<{ path: string }> = ({ path }) => {
+  const filename = getFileName(path);
+  const parts = filename.split('.');
+  const viewType = parts.slice(0, -1).join('.');
+
+  return (
+    <div className="h-full flex items-center justify-center">
+      <p className="text-muted-foreground">View for <code className="px-1.5 py-0.5 bg-muted rounded text-sm">*.{viewType}</code></p>
+    </div>
+  );
+};
+
 // Render filename with dimmed extension
 const FileName: React.FC<{ path: string; className?: string }> = ({ path, className }) => {
   const name = getFileName(path);
@@ -82,6 +95,50 @@ const CenterPanel: React.FC = () => {
   // Find thread for current branch
   const currentThread = threads.find(t => t.branch === currentBranch);
   const isResolving = currentThread?.status === 'resolving';
+
+  // View template state (for typed data views)
+  const [viewTemplate, setViewTemplate] = useState<{ path: string; content: string } | null>(null);
+  const [viewTemplateLoading, setViewTemplateLoading] = useState(false);
+
+  // Fetch view template when currentPage has view_path
+  useEffect(() => {
+    const viewPath = currentPage?.view_path;
+    if (!viewPath) {
+      setViewTemplate(null);
+      return;
+    }
+
+    // Skip if we already have this view template cached
+    if (viewTemplate?.path === viewPath) {
+      return;
+    }
+
+    setViewTemplateLoading(true);
+    fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(viewPath)}`)
+      .then(res => {
+        if (!res.ok) throw new Error(`Failed to fetch view: ${res.statusText}`);
+        return res.json();
+      })
+      .then(page => {
+        setViewTemplate({ path: viewPath, content: page.content || '' });
+      })
+      .catch(err => {
+        console.error('Failed to load view template:', err);
+        setViewTemplate(null);
+      })
+      .finally(() => {
+        setViewTemplateLoading(false);
+      });
+  }, [currentPage?.view_path, viewTemplate?.path]);
+
+  // Check if a TSX file is a view template (matches *.*.tsx pattern like kanban.csv.tsx)
+  const isViewTemplate = useMemo(() => {
+    if (!currentPage?.path) return false;
+    const filename = getFileName(currentPage.path);
+    // View templates have pattern: type.format.tsx (at least 3 parts)
+    const parts = filename.split('.');
+    return parts.length >= 3 && parts[parts.length - 1] === 'tsx';
+  }, [currentPage?.path]);
 
   // Determine file type from current page
   const fileType: FileType = useMemo(() => {
@@ -510,7 +567,23 @@ const CenterPanel: React.FC = () => {
             {(mainTab === 'view' || mainTab === 'edit') && !viewingRevision && (
               <div className="flex-1 overflow-hidden mt-0 flex flex-col">
                 <div className="flex-1 overflow-auto min-h-0">
-                  {fileType === 'csv' ? (
+                  {/* Typed data view: render with view template */}
+                  {viewTemplate && mainTab === 'view' ? (
+                    <div className="h-full p-4">
+                      <ViewRuntime
+                        key={`view-${viewTemplate.path}-${currentPage.path}`}
+                        tsxCode={viewTemplate.content}
+                        pagePath={viewTemplate.path}
+                        viewProps={{ pagePath: currentPage.path }}
+                        onCollabStatusChange={handleCollabStatusChange}
+                      />
+                    </div>
+                  ) : viewTemplateLoading && mainTab === 'view' ? (
+                    /* Loading view template */
+                    <div className="h-full flex items-center justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : fileType === 'csv' ? (
                     /* CSV: Table editor */
                     <CSVEditor
                       key={`csv-${currentPage.path}`}
@@ -520,16 +593,8 @@ const CenterPanel: React.FC = () => {
                       className="h-full p-4"
                     />
                   ) : fileType === 'tsx' ? (
-                    /* TSX: View renders component, Edit shows code */
-                    mainTab === 'view' ? (
-                      <div className="h-full p-4">
-                        <ViewRuntime
-                          tsxCode={currentPage.content || ''}
-                          pagePath={currentPage.path}
-                          onCollabStatusChange={handleCollabStatusChange}
-                        />
-                      </div>
-                    ) : (
+                    /* TSX: View templates show info in View mode, regular TSX renders */
+                    mainTab === 'edit' ? (
                       <CollaborativeCodeMirrorEditor
                         key={`collab-cm-${currentPage.path}`}
                         pagePath={currentPage.path}
@@ -539,6 +604,16 @@ const CenterPanel: React.FC = () => {
                         onCollabStatusChange={handleCollabStatusChange}
                         className="h-full"
                       />
+                    ) : isViewTemplate ? (
+                      <ViewTemplateInfo path={currentPage.path} />
+                    ) : (
+                      <div className="h-full p-4">
+                        <ViewRuntime
+                          tsxCode={currentPage.content || ''}
+                          pagePath={currentPage.path}
+                          onCollabStatusChange={handleCollabStatusChange}
+                        />
+                      </div>
                     )
                   ) : fileType === 'image' ? (
                     /* Image: Display image */
@@ -550,14 +625,28 @@ const CenterPanel: React.FC = () => {
                       />
                     </div>
                   ) : fileType === 'unknown' ? (
-                    /* Unknown: No viewer available */
-                    <div className="h-full flex items-center justify-center p-8">
-                      <div className="text-center text-muted-foreground">
-                        <FileText className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                        <p className="text-lg">No view for this file</p>
-                        <p className="text-sm mt-1 opacity-70">{currentPage.path}</p>
-                      </div>
-                    </div>
+                    /* Unknown file type: edit as text, view shows message or raw */
+                    mainTab === 'edit' ? (
+                      <CollaborativeCodeMirrorEditor
+                        key={`collab-cm-${currentPage.path}`}
+                        pagePath={currentPage.path}
+                        pageTitle={currentPage.title}
+                        initialContent={currentPage.content || ''}
+                        editable={true}
+                        onCollabStatusChange={handleCollabStatusChange}
+                        className="h-full"
+                      />
+                    ) : (
+                      <CollaborativeCodeMirrorEditor
+                        key={`collab-cm-view-${currentPage.path}`}
+                        pagePath={currentPage.path}
+                        pageTitle={currentPage.title}
+                        initialContent={currentPage.content || ''}
+                        editable={false}
+                        onCollabStatusChange={handleCollabStatusChange}
+                        className="h-full"
+                      />
+                    )
                   ) : (
                     /* Markdown: Formatted or raw mode */
                     formatMode === 'raw' ? (
@@ -722,14 +811,19 @@ const CenterPanel: React.FC = () => {
                     className="h-full p-4"
                   />
                 ) : fileType === 'tsx' ? (
-                  <div className="h-full p-4">
-                    <ViewRuntime
-                      key={`tsx-view-${currentPage.path}-${currentBranch}-${pageUpdateCounter}`}
-                      tsxCode={currentPage.content || ''}
-                      pagePath={currentPage.path}
-                      branchRef={currentBranch}
-                    />
-                  </div>
+                  /* View templates show info, regular TSX renders as view */
+                  isViewTemplate ? (
+                    <ViewTemplateInfo path={currentPage.path} />
+                  ) : (
+                    <div className="h-full p-4">
+                      <ViewRuntime
+                        key={`tsx-view-${currentPage.path}-${currentBranch}-${pageUpdateCounter}`}
+                        tsxCode={currentPage.content || ''}
+                        pagePath={currentPage.path}
+                        branchRef={currentBranch}
+                      />
+                    </div>
+                  )
                 ) : fileType === 'image' ? (
                   <div className="h-full flex items-center justify-center p-8">
                     <img
@@ -739,13 +833,13 @@ const CenterPanel: React.FC = () => {
                     />
                   </div>
                 ) : fileType === 'unknown' ? (
-                  <div className="h-full flex items-center justify-center p-8">
-                    <div className="text-center text-muted-foreground">
-                      <FileText className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                      <p className="text-lg">No view for this file</p>
-                      <p className="text-sm mt-1 opacity-70">{currentPage.path}</p>
-                    </div>
-                  </div>
+                  /* Unknown file type: show as raw text */
+                  <CodeMirrorEditor
+                    key={`cm-view-${currentPage.path}-${currentBranch}-${pageUpdateCounter}`}
+                    content={currentPage.content || ''}
+                    editable={false}
+                    className="h-full"
+                  />
                 ) : (
                   <div className="h-full p-4">
                     <ProseMirrorEditor

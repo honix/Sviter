@@ -6,6 +6,7 @@ export interface Page {
   content: string; // File content (markdown, CSV, or TSX source)
   title: string; // Filename (e.g., "home.md", "tasks.csv")
   file_type: FileType; // Type of file
+  view_path: string | null; // Path to view template (e.g., "views/user.json.tsx") or null
   // CSV-specific fields
   headers?: string[]; // CSV column headers
   rows?: Record<string, string>[]; // CSV rows as objects

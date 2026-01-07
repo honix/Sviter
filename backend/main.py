@@ -395,6 +395,15 @@ async def create_page(page_data: PageCreate, user_id: Optional[str] = Depends(ge
             tags=page_data.tags,
             author_email=author_email
         )
+
+        # Broadcast page created event for real-time tree updates
+        if threads_module.thread_manager:
+            await threads_module.thread_manager.broadcast({
+                "type": "page_updated",
+                "title": new_page.get("path", page_data.title),
+                "operation": "create"
+            })
+
         return new_page
     except GitWikiException as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -431,6 +440,15 @@ async def delete_page(title: str, user_id: Optional[str] = Depends(get_optional_
     try:
         author_name, author_email = get_author_info(user_id)
         wiki.delete_page(title, author_name, author_email)
+
+        # Broadcast page deleted event for real-time tree updates
+        if threads_module.thread_manager:
+            await threads_module.thread_manager.broadcast({
+                "type": "page_updated",
+                "title": title,
+                "operation": "delete"
+            })
+
         return {"message": f"Page '{title}' deleted successfully"}
     except PageNotFoundException:
         raise HTTPException(status_code=404, detail=f"Page '{title}' not found")

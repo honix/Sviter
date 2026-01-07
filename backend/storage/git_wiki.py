@@ -25,7 +25,7 @@ TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
 
 # Supported file extensions for wiki content
-SUPPORTED_EXTENSIONS = {'.md', '.csv', '.tsx', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
+SUPPORTED_EXTENSIONS = {'.md', '.csv', '.tsx', '.json', '.txt', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
 
 
 
@@ -66,6 +66,10 @@ class GitWiki:
         # Initialize agents/ folder with default files if missing
         self._ensure_agents_folder()
 
+        # Cache for view templates: maps "type.format" -> "path/to/type.format.tsx"
+        self._view_cache: Dict[str, Optional[str]] = {}
+        self._view_cache_valid = False
+
     def _ensure_agents_folder(self):
         """
         Ensure agents/ folder exists.
@@ -75,6 +79,103 @@ class GitWiki:
         """
         agents_dir = self.repo_path / "agents"
         agents_dir.mkdir(exist_ok=True)
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # View Resolution
+    # ─────────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_view_key(filename: str) -> Optional[str]:
+        """
+        Extract view key (type.format) from a data filename.
+
+        Examples:
+            - maria.user.json -> user.json
+            - tasks.csv -> tasks.csv
+            - 342.order.txt -> order.txt
+            - readme.md -> readme.md
+
+        Args:
+            filename: Just the filename (no path)
+
+        Returns:
+            View key like "user.json" or None if not a valid pattern
+        """
+        parts = filename.split('.')
+        if len(parts) < 2:
+            return None
+
+        # Get format (last part)
+        fmt = parts[-1].lower()
+
+        # Skip TSX files - they are views, not data
+        if fmt == 'tsx':
+            return None
+
+        if len(parts) >= 3:
+            # name.type.format -> type.format
+            view_type = parts[-2]
+            return f"{view_type}.{fmt}"
+        else:
+            # type.format (no name prefix)
+            view_type = parts[0]
+            return f"{view_type}.{fmt}"
+
+    def _rebuild_view_cache(self) -> None:
+        """
+        Scan wiki for all view templates (*.*.tsx files) and cache them.
+        """
+        self._view_cache.clear()
+
+        for filepath in self.repo_path.rglob("*.tsx"):
+            # Skip .git directory
+            if '.git' in filepath.parts:
+                continue
+
+            filename = filepath.name
+            # View templates must have pattern: type.format.tsx (at least 3 parts)
+            parts = filename.split('.')
+            if len(parts) >= 3 and parts[-1].lower() == 'tsx':
+                # Extract type.format from type.format.tsx
+                view_key = '.'.join(parts[:-1]).lower()  # e.g., "user.json"
+                rel_path = str(filepath.relative_to(self.repo_path))
+
+                # Only store first match (could have multiple views for same type)
+                if view_key not in self._view_cache:
+                    self._view_cache[view_key] = rel_path
+
+        self._view_cache_valid = True
+
+    def invalidate_view_cache(self) -> None:
+        """
+        Invalidate the view cache. Call when files are created/deleted.
+        """
+        self._view_cache_valid = False
+
+    def find_view_for_page(self, page_path: str) -> Optional[str]:
+        """
+        Find a view template for a given page path.
+
+        Args:
+            page_path: Page path like "profiles/maria.user.json"
+
+        Returns:
+            Path to view template like "views/user.json.tsx" or None
+        """
+        # Rebuild cache if needed
+        if not self._view_cache_valid:
+            self._rebuild_view_cache()
+
+        # Extract filename from path
+        filename = Path(page_path).name
+
+        # Get view key
+        view_key = self._extract_view_key(filename)
+        if not view_key:
+            return None
+
+        # Look up in cache (case-insensitive)
+        return self._view_cache.get(view_key.lower())
 
     def ensure_templates(self) -> List[str]:
         """
@@ -266,15 +367,20 @@ class GitWiki:
             filepath: Path to the file
 
         Returns:
-            Dictionary with page data (path, content, file_type, and type-specific fields)
+            Dictionary with page data (path, content, file_type, view_path, and type-specific fields)
         """
         raw_content = filepath.read_text(encoding='utf-8')
         file_type = self._get_file_type(filepath)
+        rel_path = str(filepath.relative_to(self.repo_path))
+
+        # Find matching view template for this page
+        view_path = self.find_view_for_page(rel_path)
 
         base_result = {
-            "path": str(filepath.relative_to(self.repo_path)),
+            "path": rel_path,
             "title": filepath.name,
             "file_type": file_type,
+            "view_path": view_path,
             "has_conflicts": "<<<<<<" in raw_content or "=======" in raw_content
         }
 
@@ -402,6 +508,10 @@ class GitWiki:
             filepath.unlink()
             raise GitWikiException(f"Git commit failed: {e}")
 
+        # Invalidate view cache if a TSX file was created (could be a new view template)
+        if filepath.suffix.lower() == '.tsx':
+            self.invalidate_view_cache()
+
         return self._parse_page(filepath)
 
     def update_page(self, title: str, content: str, author: str = "AI Agent",
@@ -479,6 +589,9 @@ class GitWiki:
         if not filepath.exists():
             raise PageNotFoundException(f"Page '{title}' not found")
 
+        # Check if this is a TSX file (for cache invalidation later)
+        is_tsx = filepath.suffix.lower() == '.tsx'
+
         # Git remove and commit
         try:
             relative_path = filepath.relative_to(self.repo_path)
@@ -489,6 +602,10 @@ class GitWiki:
             filepath.unlink()
         except GitCommandError as e:
             raise GitWikiException(f"Git commit failed: {e}")
+
+        # Invalidate view cache if a TSX file was deleted (could be a view template)
+        if is_tsx:
+            self.invalidate_view_cache()
 
         return True
 
