@@ -11,6 +11,7 @@ AI-powered wiki where autonomous agents help you build and maintain knowledge.
 - **AI Chat** — Ask questions, get answers from your wiki content
 - **Autonomous Agents** — Request changes, AI works on a branch, you review and accept/reject
 - **Git Under the Hood** — Full version control without the complexity
+- **You Own Your Data** — Plain markdown files in your git repo, no database, no lock-in
 - **Real-time Collaboration** — Live updates, markdown editing
 - **Pluggable LLM** — Claude SDK or OpenRouter - BYOK or connect to your local inference services
 - **On-demand Custom Views for your data** — Ask AI to create an interactive view just with prompt
