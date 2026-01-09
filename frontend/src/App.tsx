@@ -23,7 +23,7 @@ function App() {
           <SelectionProvider>
             <UrlStateInitializer />
             <div className="App">
-              <MainLayout />
+              <BrokenComponent />
               <Toaster position="bottom-center" />
             </div>
           </SelectionProvider>
