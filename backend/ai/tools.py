@@ -7,7 +7,7 @@ ToolBuilder: Factory for creating composable tool sets
 Claude Code-style tools:
 - Read: read_page (with line numbers), grep_pages, glob_pages, list_pages
 - Git: git_history (branch commit history), git_diff (branch comparison)
-- Write: write_page, edit_page (exact match), insert_at_line
+- Write: write_page, edit_page (exact match), insert_at_line, delete_page, rename_page, move_page
 """
 from typing import Dict, List, Any, Callable, TYPE_CHECKING
 from dataclasses import dataclass
@@ -496,6 +496,31 @@ def _delete_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
         return f"Error deleting page: {e}"
 
 
+def _rename_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """Rename a wiki page (change filename, keep in same folder)"""
+    path = args.get("path", "")
+    new_name = args.get("new_name", "")
+    author = args.get("author", "AI Agent")
+
+    if not path:
+        return "Error: path is required"
+    if not new_name:
+        return "Error: new_name is required"
+
+    try:
+        result = wiki.rename_page(
+            old_path=path,
+            new_name=new_name,
+            author=author
+        )
+        new_path = result.get("path", new_name)
+        return f"Page renamed successfully from '{path}' to '{new_path}'."
+    except PageNotFoundException:
+        return f"Error: Page '{path}' not found."
+    except Exception as e:
+        return f"Error renaming page: {e}"
+
+
 def _move_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
     """Move a wiki page to a new location"""
     source_path = args.get("source_path", "") or args.get("path", "")
@@ -619,7 +644,7 @@ class ToolBuilder:
 
     Tool Categories:
     - read: read_page, grep_pages, glob_pages, list_pages
-    - write: write_page, edit_page, insert_at_line
+    - write: write_page, edit_page, insert_at_line, delete_page, rename_page, move_page
     - thread: spawn_thread, list_threads (main only)
     - lifecycle: request_help, mark_for_review (thread only)
 
@@ -769,7 +794,7 @@ Use stat_only=true for a quick overview (files changed, lines added/removed)."""
 
     @staticmethod
     def write_tools(wiki) -> List[WikiTool]:
-        """Write wiki tools: write_page, edit_page, insert_at_line"""
+        """Write wiki tools: write_page, edit_page, insert_at_line, delete_page, rename_page, move_page"""
         return [
             WikiTool(
                 name="write_page",
@@ -865,6 +890,29 @@ After deleting, consider updating agents/index.md to remove navigation entry."""
                     "required": ["path"]
                 },
                 function=lambda args, w=wiki: _delete_page(w, args)
+            ),
+            WikiTool(
+                name="rename_page",
+                description="""Rename a wiki page (change filename only, stays in same folder).
+
+Use this to rename files without moving them to a different folder. Supports Unicode characters and spaces in filenames.
+IMPORTANT: Use the file path (e.g., 'home.md', 'agents/index.md') not display titles.
+
+Examples:
+- Rename 'old-name.md' to 'new-name.md': path='old-name.md', new_name='new-name.md'
+- Rename file in subfolder: path='docs/guide.md', new_name='tutorial.md'
+
+After renaming, consider updating agents/index.md navigation entries.""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Current path of the page to rename"},
+                        "new_name": {"type": "string", "description": "New filename (with or without extension). Can include Unicode and spaces."},
+                        "author": {"type": "string", "description": "Author name for git commit (default: 'AI Agent')"}
+                    },
+                    "required": ["path", "new_name"]
+                },
+                function=lambda args, w=wiki: _rename_page(w, args)
             ),
             WikiTool(
                 name="move_page",
