@@ -227,31 +227,34 @@ make e2e           # Run all E2E tests in Docker
 make e2e-clean     # Clean up containers
 ```
 
-**Web - try local first, fall back to GitHub Actions:**
+**Claude Code on the web - Use GitHub Actions ONLY:**
+
+⚠️ **Local Playwright does NOT work in Claude Code on the web** - Chromium crashes in the sandbox.
+This is a fundamental limitation, not fixable by configuration.
+
 ```bash
-# One-time setup: install Playwright browser
-cd frontend && npx playwright install chromium --with-deps
+# 1. Push changes to session branch
+git push -u origin claude/your-feature-SESSION_ID
 
-# Start backend (terminal 1)
-cd backend && LLM_PROVIDER=mock uv run uvicorn main:app --port 8000
-
-# Start frontend (terminal 2)
-cd frontend && npm run dev
-
-# Run tests (terminal 3)
-cd frontend && npx playwright test
-
-# Take screenshot for debugging
-# In test: await page.screenshot({ path: 'debug.png' })
-```
-
-If local doesn't work (missing deps), use GitHub Actions:
-```bash
-git push origin my-branch
+# 2. Create PR (triggers CI)
 gh pr create --title "feat: ..." --body "..."
-gh pr checks --watch        # Wait for CI (no token burn)
-gh run view --log-failed    # Check failures
+
+# 3. Wait for CI (no token burn - just waits)
+gh pr checks --watch
+
+# 4. If failed, check logs
+gh run view --log-failed
+
+# 5. Fix and push again, repeat until green
+git add . && git commit -m "fix: ..." && git push
 ```
+
+### Quick Reference
+
+| Environment | E2E Testing | Unit Tests |
+|-------------|-------------|------------|
+| CLI (local) | `make e2e` | `make test` |
+| Claude Code on the web | `gh pr checks --watch` | `make test` |
 
 ### Test Files
 
@@ -274,7 +277,7 @@ await page.screenshot({ path: 'debug.png' })
 GitHub Actions runs E2E tests on every PR (`.github/workflows/e2e-tests.yml`).
 After pushing, use `gh pr checks --watch` to wait for CI without burning tokens.
 
-## Claude Code Web Workflow
+## Claude Code on the web Workflow
 
 When running in **Claude Code on the web** (not CLI):
 
