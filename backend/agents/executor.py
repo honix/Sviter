@@ -8,7 +8,7 @@ import asyncio
 from typing import Dict, Any, List, Optional, Callable, Union, Awaitable
 from storage.git_wiki import GitWiki
 from ai.tools import WikiTool, ToolBuilder
-from ai.adapters import OpenRouterAdapter, LLMAdapter
+from ai.adapters import OpenRouterAdapter, LLMAdapter, MockAdapter
 from ai.adapters.claude_sdk import ClaudeSDKAdapter, CLAUDE_SDK_AVAILABLE
 from .config import GlobalAgentConfig
 from config import LLM_MODEL, LLM_PROVIDER
@@ -184,7 +184,13 @@ class AgentExecutor:
             }]
 
             # Create adapter based on provider
-            if self.current_provider == "claude":
+            if self.current_provider == "mock":
+                # Mock adapter for E2E testing - no API calls
+                self.adapter = MockAdapter(
+                    system_prompt=agent_prompt,
+                    model=self.current_model
+                )
+            elif self.current_provider == "claude":
                 if not CLAUDE_SDK_AVAILABLE:
                     return {
                         "success": False,

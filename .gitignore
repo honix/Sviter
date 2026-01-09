@@ -78,6 +78,11 @@ coverage.xml
 .playwright-mcp/
 tests/.env
 
+# Playwright E2E tests
+playwright-report/
+test-results/
+playwright/.cache/
+
 # Jupyter Notebook
 .ipynb_checkpoints
 

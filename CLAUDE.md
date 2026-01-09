@@ -215,6 +215,65 @@ tests/
 - **Flexbox Scrolling**: Use `min-h-0` on flex children to enable proper scrolling
 - **Real-time Features**: Full bidirectional communication between frontend and backend
 
+## E2E Testing
+
+E2E tests use Playwright with a mock LLM adapter (no API calls needed).
+
+### Running E2E Tests
+
+**CLI (local with Docker):**
+```bash
+make e2e           # Run all E2E tests in Docker
+make e2e-clean     # Clean up containers
+```
+
+**Web - try local first, fall back to GitHub Actions:**
+```bash
+# One-time setup: install Playwright browser
+cd frontend && npx playwright install chromium --with-deps
+
+# Start backend (terminal 1)
+cd backend && LLM_PROVIDER=mock uv run uvicorn main:app --port 8000
+
+# Start frontend (terminal 2)
+cd frontend && npm run dev
+
+# Run tests (terminal 3)
+cd frontend && npx playwright test
+
+# Take screenshot for debugging
+# In test: await page.screenshot({ path: 'debug.png' })
+```
+
+If local doesn't work (missing deps), use GitHub Actions:
+```bash
+git push origin my-branch
+gh pr create --title "feat: ..." --body "..."
+gh pr checks --watch        # Wait for CI (no token burn)
+gh run view --log-failed    # Check failures
+```
+
+### Test Files
+
+- `frontend/e2e/app.spec.ts` - Basic app tests (panels, page tree)
+- `frontend/e2e/user-journey.spec.ts` - Full workflow (chat → thread → accept → verify)
+
+### Debugging Failed Tests
+
+Playwright auto-captures screenshots/videos on failure. Check:
+- `frontend/test-results/` - Screenshots, videos, traces
+- `npx playwright show-trace <trace.zip>` - Interactive trace viewer
+
+For manual debugging:
+```typescript
+await page.screenshot({ path: 'debug.png' })
+```
+
+### CI/CD
+
+GitHub Actions runs E2E tests on every PR (`.github/workflows/e2e-tests.yml`).
+After pushing, use `gh pr checks --watch` to wait for CI without burning tokens.
+
 ## Claude Code Web Workflow
 
 When running in **Claude Code on the web** (not CLI):
@@ -223,6 +282,8 @@ When running in **Claude Code on the web** (not CLI):
 - Push all changes to the assigned session branch (e.g., `claude/feature-name-<session-id>`)
 - Create a PR for merging to main instead of direct push
 - The wiki submodule (`Sviter-wiki/`) can be pushed to main directly since it's a separate repo
+- **Testing**: Push and let GitHub Actions run tests (see E2E Testing section above)
+- **Validate before PR**: Use `gh pr checks --watch` to wait for CI, fix failures, repeat until green
 
 ## Real-time Thread Updates
 

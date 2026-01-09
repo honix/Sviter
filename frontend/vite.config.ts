@@ -14,5 +14,7 @@ export default defineConfig({
     watch: {
       usePolling: true,
     },
+    // Allow Docker container hostnames for E2E testing
+    allowedHosts: ['frontend', 'localhost'],
   },
 } as any)
