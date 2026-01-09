@@ -287,7 +287,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
 
       {/* Chat Messages */}
       <ChatContainerRoot className="flex-1 min-h-0">
-        <ChatContainerContent className="px-4 pt-4 pb-1">
+        <ChatContainerContent className="px-4 pt-4 pb-1" data-testid="chat-messages">
           {displayMessages.length === 0 && (
             <div className="text-center text-muted-foreground text-sm py-8">
               {isAssistantMode

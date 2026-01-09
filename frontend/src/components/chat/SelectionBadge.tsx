@@ -31,6 +31,7 @@ export const SelectionBadge: React.FC = () => {
           <Tooltip key={index}>
             <TooltipTrigger asChild>
               <div
+                data-testid="context-badge"
                 className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-md bg-pink-400 text-white shadow-md cursor-default transform hover:scale-105 transition-transform"
               >
                 <span className="font-medium">

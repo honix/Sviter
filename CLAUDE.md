@@ -292,12 +292,21 @@ After pushing, use `gh pr checks --watch` to wait for CI without burning tokens.
 
 When running in **Claude Code on the web** (not CLI):
 
+**MANDATORY: Always create a PR and verify E2E tests pass before considering work complete.**
+
 - **DO NOT push directly to `main`** — use session branch only
 - Push all changes to the assigned session branch (e.g., `claude/feature-name-<session-id>`)
-- Create a PR for merging to main instead of direct push
+- **ALWAYS create a PR** for any code changes - this triggers CI/CD pipeline
+- **ALWAYS wait for E2E tests** to pass using `gh pr checks --watch`
 - The wiki submodule (`Sviter-wiki/`) can be pushed to main directly since it's a separate repo
-- **Testing**: Push and let GitHub Actions run tests (see E2E Testing section above)
-- **Validate before PR**: Use `gh pr checks --watch` to wait for CI, fix failures, repeat until green
+
+### Required Workflow
+
+1. Push changes to session branch: `git push -u origin claude/feature-SESSION_ID`
+2. Create PR: `gh pr create --title "..." --body "..."`
+3. Wait for E2E tests: `gh pr checks --watch --fail-fast`
+4. If tests fail: fix, commit, push, repeat step 3
+5. Only consider work complete when E2E tests are green
 
 ## Real-time Thread Updates
 
