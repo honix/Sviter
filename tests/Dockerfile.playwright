@@ -19,5 +19,5 @@ COPY e2e/ ./e2e/
 RUN mkdir -p playwright-report test-results
 
 # Run Playwright tests
-# Exit code will be passed to Docker Compose
-CMD ["npx", "playwright", "test", "--reporter=html,github"]
+# Reporters: list (console), html (downloadable report), github (PR annotations)
+CMD ["npx", "playwright", "test", "--reporter=list,html,github"]
