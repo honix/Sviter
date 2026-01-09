@@ -49,8 +49,8 @@ services:
 
   playwright:
     build:
-      context: ../frontend
-      dockerfile: ../tests/Dockerfile.playwright
+      context: ..
+      dockerfile: tests/Dockerfile.playwright
     environment:
       - CI=true
       - FRONTEND_URL=http://frontend:5173
