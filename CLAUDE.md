@@ -221,37 +221,60 @@ E2E tests use Playwright with a mock LLM adapter (no API calls needed).
 
 ### Running E2E Tests
 
-**CLI (local with Docker):**
+**CLI (local with Docker) - RECOMMENDED:**
 ```bash
 make e2e           # Run all E2E tests in Docker
 make e2e-clean     # Clean up containers
 ```
 
-**Web - try local first, fall back to GitHub Actions:**
+**Local Development (NOT Claude Code web):**
 ```bash
 # One-time setup: install Playwright browser
 cd frontend && npx playwright install chromium --with-deps
 
-# Start backend (terminal 1)
-cd backend && LLM_PROVIDER=mock uv run uvicorn main:app --port 8000
+# Start backend with mock LLM (terminal 1)
+make backend-mock
 
 # Start frontend (terminal 2)
-cd frontend && npm run dev
+make frontend
 
 # Run tests (terminal 3)
-cd frontend && npx playwright test
-
-# Take screenshot for debugging
-# In test: await page.screenshot({ path: 'debug.png' })
+make e2e-quick     # Quick smoke test
+make e2e-local     # Full test suite
+make e2e-headed    # See browser during tests
+make e2e-ui        # Interactive UI mode
 ```
 
-If local doesn't work (missing deps), use GitHub Actions:
+**Claude Code Web - Use GitHub Actions:**
+
+⚠️ **Local Playwright does NOT work in Claude Code web** - Chromium crashes in the sandbox.
+Use GitHub Actions for E2E validation:
+
 ```bash
-git push origin my-branch
+# 1. Push changes to your session branch
+git push -u origin claude/your-feature-SESSION_ID
+
+# 2. Create PR (triggers CI)
 gh pr create --title "feat: ..." --body "..."
-gh pr checks --watch        # Wait for CI (no token burn)
-gh run view --log-failed    # Check failures
+
+# 3. Wait for CI (no token burn - just waits for completion)
+gh pr checks --watch
+
+# 4. If failed, check logs
+gh run view --log-failed
+
+# 5. Fix and push again
+git add . && git commit -m "fix: ..." && git push
 ```
+
+### Quick Validation Commands
+
+| Environment | Command | Description |
+|-------------|---------|-------------|
+| Local CLI | `make e2e` | Docker-based full E2E |
+| Local CLI | `make e2e-quick` | Quick smoke test |
+| Claude Code Web | `gh pr checks --watch` | Wait for GitHub Actions |
+| Any | `make test` | Backend unit tests (fast) |
 
 ### Test Files
 
