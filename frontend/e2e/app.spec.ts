@@ -22,8 +22,7 @@ test.describe('Wiki App', () => {
   test('page tree is visible', async ({ page }) => {
     await page.goto('/')
 
-    // Look for the page tree area (left panel)
-    const leftPanel = page.locator('text=Pages').or(page.locator('[class*="tree"]')).first()
-    await expect(leftPanel).toBeVisible({ timeout: 5000 })
+    // Wait for app to load and look for Home.md in the tree (fixture file)
+    await expect(page.getByRole('button', { name: /Home/i })).toBeVisible({ timeout: 10000 })
   })
 })

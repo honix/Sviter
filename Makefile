@@ -1,4 +1,4 @@
-.PHONY: setup backend frontend run clean test haiku-tester
+.PHONY: setup backend frontend run clean test haiku-tester e2e e2e-docker
 
 setup:
 	cd backend && uv sync
@@ -23,3 +23,12 @@ test:
 
 haiku-tester:
 	cd backend && uv run pytest ../tests/haiku-tester/ -v
+
+# E2E tests in Docker with controlled test fixtures
+# This is the ONLY way to run E2E tests - ensures reproducible state
+e2e:
+	docker compose -f tests/docker-compose.e2e.yml up --build --abort-on-container-exit --exit-code-from playwright
+
+# E2E test cleanup
+e2e-clean:
+	docker compose -f tests/docker-compose.e2e.yml down --volumes --remove-orphans
