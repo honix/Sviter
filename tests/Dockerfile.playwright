@@ -5,7 +5,7 @@ FROM mcr.microsoft.com/playwright:v1.55.0-noble
 
 WORKDIR /app
 
-# Copy package files from frontend
+# Copy package files from frontend (context is repo root)
 COPY frontend/package.json frontend/package-lock.json ./
 
 # Install dependencies

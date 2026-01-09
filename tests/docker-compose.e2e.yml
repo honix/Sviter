@@ -9,7 +9,7 @@
 services:
   backend:
     build:
-      context: .
+      context: ..
       dockerfile: tests/Dockerfile.backend
     ports:
       - "8000:8000"
@@ -29,7 +29,7 @@ services:
 
   frontend:
     build:
-      context: frontend
+      context: ../frontend
       dockerfile: Dockerfile
     ports:
       - "5173:5173"
@@ -49,7 +49,7 @@ services:
 
   playwright:
     build:
-      context: .
+      context: ..
       dockerfile: tests/Dockerfile.playwright
     environment:
       - CI=true
@@ -61,8 +61,8 @@ services:
         condition: service_healthy
     volumes:
       # Mount test results for artifact collection
-      - frontend/playwright-report:/app/playwright-report
-      - frontend/test-results:/app/test-results
+      - ../frontend/playwright-report:/app/playwright-report
+      - ../frontend/test-results:/app/test-results
     networks:
       - e2e-network
 
