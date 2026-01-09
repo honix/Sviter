@@ -1,4 +1,3 @@
-import { BrokenImportForWorkflowTest } from './this-file-does-not-exist';
 import MainLayout from './components/layout/MainLayout';
 import { AppProvider } from './contexts/AppContext';
 import { AuthProvider } from './contexts/AuthContext';
