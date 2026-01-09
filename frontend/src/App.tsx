@@ -5,6 +5,7 @@ import { SelectionProvider } from './contexts/SelectionContext';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import { useUrlState } from './hooks/useUrlState';
 import { Toaster } from '@/components/ui/sonner';
+import { BrokenImportForWorkflowTest } from './this-file-does-not-exist';
 
 /**
  * Component that initializes URL state syncing.

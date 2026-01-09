@@ -55,7 +55,7 @@ export function parseMarkdown(content: string): React.ReactElement[] {
 
 export function formatInlineMarkdown(text: string): string {
   // Handle bold **text**
-  text = text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>');
+  text = text.replace(/\*\*\*(.*?)\*\*\*/g, '<strong class="font-semibold">$1</strong>');
 
   // Handle italic *text*
   text = text.replace(/\*(.*?)\*/g, '<em class="italic">$1</em>');
