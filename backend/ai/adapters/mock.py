@@ -6,9 +6,42 @@ Supports deterministic test scenarios for CI/CD pipelines.
 """
 
 import json
+import re
 from typing import Dict, List, Any, Optional, Callable, Awaitable, TYPE_CHECKING
 
 from .base import LLMAdapter, CompletionResult, ConversationResult, ToolCall
+
+
+def parse_user_context(message: str) -> tuple[str, List[Dict[str, str]]]:
+    """
+    Parse user-provided context from a message.
+
+    Returns (clean_message, contexts) where contexts is a list of:
+    - {'id': '#1', 'source': 'path/to/file.md', 'content': '...'}
+    """
+    # Pattern to find the context XML block at the end of message
+    context_pattern = r'<userProvidedContext>([\s\S]*?)</userProvidedContext>\s*$'
+    match = re.search(context_pattern, message)
+
+    if not match:
+        return message, []
+
+    # Remove context block from message
+    clean_message = re.sub(context_pattern, '', message).strip()
+
+    # Parse individual context items
+    contexts = []
+    context_block = match.group(1)
+    item_pattern = r'<contextItem\s+id="([^"]+)"(?:\s+source="([^"]*)")?>([\s\S]*?)</contextItem>'
+
+    for item_match in re.finditer(item_pattern, context_block):
+        contexts.append({
+            'id': item_match.group(1),
+            'source': item_match.group(2) or '',
+            'content': item_match.group(3).strip()
+        })
+
+    return clean_message, contexts
 
 if TYPE_CHECKING:
     from ai.tools import WikiTool
@@ -122,7 +155,38 @@ class MockAdapter(LLMAdapter):
         on_tool_call: Optional[Callable]
     ) -> ConversationResult:
         """Handle assistant thread conversation."""
-        user_lower = user_message.lower()
+        # Parse any user-provided context from the message
+        clean_message, contexts = parse_user_context(user_message)
+        user_lower = clean_message.lower()
+
+        # If user provided context, acknowledge it
+        if contexts:
+            context_count = len(contexts)
+            sources = [c['source'] for c in contexts if c['source']]
+            source_list = ', '.join(sources) if sources else 'selected text'
+
+            content = f"I see you provided {context_count} context{'s' if context_count > 1 else ''} from: {source_list}. "
+
+            # Provide a response based on the context content
+            if any('path:' in c['content'] for c in contexts):
+                # File path reference
+                content += "I can see the file reference you've shared. "
+            else:
+                # Text selection
+                first_content_preview = contexts[0]['content'][:50] + '...' if len(contexts[0]['content']) > 50 else contexts[0]['content']
+                content += f"The content starts with: \"{first_content_preview}\". "
+
+            content += "How would you like me to help with this?"
+
+            if on_message:
+                await on_message("assistant", content)
+
+            return ConversationResult(
+                status='completed',
+                stop_reason='natural_completion',
+                iterations=1,
+                final_response=content
+            )
 
         # Check if user is asking to edit/change/update something
         edit_keywords = ["edit", "change", "update", "modify", "add", "remove", "fix", "improve"]
