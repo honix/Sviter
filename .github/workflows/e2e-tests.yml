@@ -29,7 +29,7 @@ jobs:
           mkdir -p frontend/playwright-report frontend/test-results
 
       - name: Build images with cache
-        uses: docker/bake-action@v4
+        uses: docker/bake-action@v5
         with:
           files: tests/docker-compose.e2e.yml
           set: |
