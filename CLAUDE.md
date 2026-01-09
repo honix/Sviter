@@ -233,6 +233,9 @@ make e2e-clean     # Clean up containers
 This is a fundamental limitation, not fixable by configuration.
 
 ```bash
+# Install gh CLI if not available
+apt-get update && apt-get install -y gh
+
 # 1. Push changes to session branch
 git push -u origin claude/your-feature-SESSION_ID
 
