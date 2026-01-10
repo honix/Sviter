@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
 import { getApiUrl } from '../../utils/url';
 import { isImagePath } from '../../utils/files';
-import { useFileUpload } from '../../hooks/useImageUpload';
+import { useFileUpload } from '../../hooks/useFileUpload';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 
 // Extract filename from path
