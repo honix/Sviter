@@ -2,6 +2,7 @@ import MainLayout from './components/layout/MainLayout';
 import { AppProvider } from './contexts/AppContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { SelectionProvider } from './contexts/SelectionContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import { useUrlState } from './hooks/useUrlState';
 import { Toaster } from '@/components/ui/sonner';
@@ -18,17 +19,19 @@ function UrlStateInitializer() {
 function App() {
   return (
     <ErrorBoundary>
-      <AuthProvider>
-        <AppProvider>
-          <SelectionProvider>
-            <UrlStateInitializer />
-            <div className="App">
-              <MainLayout />
-              <Toaster position="bottom-center" />
-            </div>
-          </SelectionProvider>
-        </AppProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <AppProvider>
+            <SelectionProvider>
+              <UrlStateInitializer />
+              <div className="App">
+                <MainLayout />
+                <Toaster position="bottom-center" />
+              </div>
+            </SelectionProvider>
+          </AppProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 }

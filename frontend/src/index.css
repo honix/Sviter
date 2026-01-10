@@ -72,6 +72,28 @@
   --destructive-foreground: 210 40% 98%;
 }
 
+.sepia {
+  --background: 40 40% 92%;
+  --foreground: 30 20% 20%;
+  --muted: 40 20% 85%;
+  --muted-foreground: 30 15% 45%;
+  --popover: 40 35% 94%;
+  --popover-foreground: 30 20% 20%;
+  --card: 40 35% 94%;
+  --card-foreground: 30 20% 20%;
+  --border: 40 20% 80%;
+  --input: 40 20% 80%;
+  --ring: 30 20% 30%;
+  --primary: 142 50% 55%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 40 20% 85%;
+  --secondary-foreground: 30 20% 20%;
+  --accent: 40 20% 85%;
+  --accent-foreground: 30 20% 20%;
+  --destructive: 0 70% 50%;
+  --destructive-foreground: 40 40% 98%;
+}
+
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
@@ -125,6 +147,19 @@ body {
 .dark .chat-scrollbar::-webkit-scrollbar-thumb:hover,
 .dark .chat-scrollbar *::-webkit-scrollbar-thumb:hover {
   background: #64748b !important;
+}
+
+/* Sepia mode scrollbar */
+.sepia .custom-scrollbar::-webkit-scrollbar-thumb,
+.sepia .chat-scrollbar::-webkit-scrollbar-thumb,
+.sepia .chat-scrollbar *::-webkit-scrollbar-thumb {
+  background: #b8956a !important;
+}
+
+.sepia .custom-scrollbar::-webkit-scrollbar-thumb:hover,
+.sepia .chat-scrollbar::-webkit-scrollbar-thumb:hover,
+.sepia .chat-scrollbar *::-webkit-scrollbar-thumb:hover {
+  background: #9d7a4e !important;
 }
 
 /* Hide inactive Radix UI tab content panels only (not tab buttons) */

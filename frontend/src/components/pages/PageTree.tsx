@@ -24,6 +24,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { getApiUrl } from '../../utils/url';
 import { isImagePath } from '../../utils/files';
 import { useImageUpload } from '../../hooks/useImageUpload';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
 
 // Extract filename from path
 const getFileName = (path: string): string => {
@@ -600,10 +601,10 @@ const PageTree: React.FC<PageTreeProps> = ({
       </ScrollArea>
 
       {/* Profile Section */}
-      <div className="p-3 border-t border-border">
+      <div className="p-3 border-t border-border flex items-center gap-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-accent transition-colors text-left">
+            <button className="flex-1 flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-accent transition-colors text-left">
               {/* Avatar circle */}
               <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-medium flex-shrink-0">
                 {initials}
@@ -644,6 +645,7 @@ const PageTree: React.FC<PageTreeProps> = ({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        <ThemeToggle />
       </div>
     </div>
   );
