@@ -68,6 +68,24 @@ type AppAction =
   // Refresh trigger
   | { type: 'INCREMENT_PAGE_UPDATE_COUNTER' };
 
+// Load persisted state from localStorage
+const loadPersistedExpandedFolders = (): string[] => {
+  try {
+    const stored = localStorage.getItem('sviter:expandedFolders');
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const loadPersistedCurrentPagePath = (): string | null => {
+  try {
+    return localStorage.getItem('sviter:currentPagePath');
+  } catch {
+    return null;
+  }
+};
+
 const initialState: AppState = {
   pages: [],
   currentPage: null,
@@ -85,7 +103,7 @@ const initialState: AppState = {
   threadMessages: {},
   // Tree state
   pageTree: [],
-  expandedFolders: [],
+  expandedFolders: loadPersistedExpandedFolders(),
   // Branch state (for diff view - no actual checkout)
   currentBranch: 'main',
   branchViewMode: 'preview',
@@ -750,6 +768,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     loadPages(true);
   }, []); // Run only once on mount
+
+  // Persist expanded folders to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('sviter:expandedFolders', JSON.stringify(state.expandedFolders));
+    } catch (err) {
+      console.error('Failed to persist expanded folders:', err);
+    }
+  }, [state.expandedFolders]);
+
+  // Persist current page path to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      if (state.currentPage) {
+        localStorage.setItem('sviter:currentPagePath', state.currentPage.path);
+      } else {
+        localStorage.removeItem('sviter:currentPagePath');
+      }
+    } catch (err) {
+      console.error('Failed to persist current page path:', err);
+    }
+  }, [state.currentPage]);
+
+  // Load persisted current page on startup (after pages are loaded)
+  useEffect(() => {
+    const persistedPagePath = loadPersistedCurrentPagePath();
+    if (persistedPagePath && state.pages.length > 0 && !state.currentPage) {
+      // Find the persisted page in the loaded pages
+      const persistedPage = state.pages.find(p => p.path === persistedPagePath);
+      if (persistedPage) {
+        // Load the full page content
+        actions.setCurrentPage(persistedPage);
+      }
+    }
+  }, [state.pages.length]); // Run when pages are first loaded
 
   // Reload tree when branch for diff changes (entering/exiting review mode)
   useEffect(() => {

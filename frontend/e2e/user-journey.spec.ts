@@ -140,6 +140,50 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
     })
   })
 
+  test('nested folder navigation works correctly', async ({ page }) => {
+    await test.step('Expand nested folders and navigate to nested pages', async () => {
+      // Find and click on Docs folder to expand it
+      const docsFolder = page.locator('text=Docs').first()
+      await expect(docsFolder).toBeVisible({ timeout: 5000 })
+      await docsFolder.click()
+
+      // Wait for Getting-Started page to appear
+      await expect(page.locator('text=Getting-Started')).toBeVisible({ timeout: 5000 })
+
+      // Click Getting-Started page
+      await page.locator('text=Getting-Started').first().click()
+      await expect(page.locator('text=This guide will help you get up and running quickly')).toBeVisible({ timeout: 5000 })
+
+      // Find and click on Tutorials folder (nested inside Docs)
+      const tutorialsFolder = page.locator('text=Tutorials').first()
+      await expect(tutorialsFolder).toBeVisible({ timeout: 5000 })
+      await tutorialsFolder.click()
+
+      // Wait for Basic page to appear
+      await expect(page.locator('text=Basic')).toBeVisible({ timeout: 5000 })
+
+      // Click Basic tutorial page
+      await page.locator('text=Basic').first().click()
+      await expect(page.locator('text=This is a basic tutorial for beginners')).toBeVisible({ timeout: 5000 })
+
+      // Click Advanced tutorial page
+      await page.locator('text=Advanced').first().click()
+      await expect(page.locator('text=This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 5000 })
+
+      // Expand Projects folder
+      const projectsFolder = page.locator('text=Projects').first()
+      await expect(projectsFolder).toBeVisible({ timeout: 5000 })
+      await projectsFolder.click()
+
+      // Wait for Example-Project page to appear
+      await expect(page.locator('text=Example-Project')).toBeVisible({ timeout: 5000 })
+
+      // Click Example-Project page
+      await page.locator('text=Example-Project').first().click()
+      await expect(page.locator('text=This is an example project that showcases best practices')).toBeVisible({ timeout: 5000 })
+    })
+  })
+
   test('chat interface is responsive', async ({ page }) => {
     await test.step('Chat input accepts messages', async () => {
       const chatInput = page.locator('input[placeholder*="Type"], input[placeholder*="Ask"], textarea').first()
@@ -147,6 +191,57 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
 
       await chatInput.fill('Hello, can you help me?')
       await expect(chatInput).toHaveValue('Hello, can you help me?')
+    })
+  })
+
+  test('expanded folders and current page persist after reload', async ({ page }) => {
+    await test.step('Setup: Expand folders and navigate to nested page', async () => {
+      // Expand Docs folder
+      const docsFolder = page.locator('text=Docs').first()
+      await expect(docsFolder).toBeVisible({ timeout: 5000 })
+      await docsFolder.click()
+
+      // Wait for Getting-Started to appear (confirms folder is expanded)
+      await expect(page.locator('text=Getting-Started')).toBeVisible({ timeout: 5000 })
+
+      // Expand Tutorials folder (nested inside Docs)
+      const tutorialsFolder = page.locator('text=Tutorials').first()
+      await expect(tutorialsFolder).toBeVisible({ timeout: 5000 })
+      await tutorialsFolder.click()
+
+      // Wait for Basic to appear (confirms folder is expanded)
+      await expect(page.locator('text=Basic')).toBeVisible({ timeout: 5000 })
+
+      // Navigate to Advanced tutorial page (deeply nested page)
+      await page.locator('text=Advanced').first().click()
+      await expect(page.locator('text=This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 5000 })
+    })
+
+    await test.step('Reload page', async () => {
+      await page.reload()
+
+      // Wait for app to load again
+      await expect(page.locator('[data-panel]').first()).toBeVisible({ timeout: 15000 })
+      await page.waitForSelector('text=Home', { timeout: 10000 })
+    })
+
+    await test.step('Verify folders remain expanded', async () => {
+      // Docs folder should still be expanded - Getting-Started should be visible
+      await expect(page.locator('text=Getting-Started')).toBeVisible({ timeout: 5000 })
+
+      // Tutorials folder should still be expanded - Basic and Advanced should be visible
+      await expect(page.locator('text=Basic')).toBeVisible({ timeout: 5000 })
+      await expect(page.locator('text=Advanced')).toBeVisible({ timeout: 5000 })
+    })
+
+    await test.step('Verify current page is restored', async () => {
+      // The Advanced tutorial page should still be selected and displayed
+      await expect(page.locator('text=This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 5000 })
+
+      // Verify the page is highlighted/selected in the tree (has bg-primary class)
+      const advancedPageItem = page.locator('text=Advanced').first()
+      const parentDiv = advancedPageItem.locator('..')
+      await expect(parentDiv).toHaveClass(/bg-primary/, { timeout: 5000 })
     })
   })
 })
