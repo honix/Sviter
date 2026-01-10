@@ -40,7 +40,7 @@ class MoveRequest(BaseModel):
     target_parent_path: Optional[str] = None
     new_order: int
 
-class ImageUploadResponse(BaseModel):
+class FileUploadResponse(BaseModel):
     path: str
     url: str
     filename: str
@@ -224,22 +224,17 @@ def sanitize_filename(filename: str) -> str:
     return name or "file"
 
 
-# Image upload endpoint
-@app.post("/api/upload", response_model=ImageUploadResponse)
-async def upload_image(
+# File upload endpoint
+@app.post("/api/upload", response_model=FileUploadResponse)
+async def upload_file(
     file: UploadFile = File(...),
-    folder: str = Form(default="images"),
+    folder: str = Form(default="uploads"),
     user_id: Optional[str] = Depends(get_optional_user)
 ):
-    """Upload an image file to the wiki and commit to git"""
-    # Validate file type
-    allowed_types = {'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'}
-    content_type = file.content_type
-    if content_type not in allowed_types:
-        raise HTTPException(status_code=400, detail=f"File type {content_type} not allowed. Allowed types: {', '.join(allowed_types)}")
+    """Upload any file to the wiki and commit to git"""
 
     # Sanitize filename and handle collisions
-    original_filename = file.filename or "image"
+    original_filename = file.filename or "file"
     safe_filename = sanitize_filename(original_filename)
 
     # Create target directory if needed
@@ -270,17 +265,27 @@ async def upload_image(
     relative_path = target_path.relative_to(wiki.repo_path)
     wiki.repo.index.add([str(relative_path)])
     wiki.repo.index.commit(
-        f"Upload image: {target_path.name}",
+        f"Upload file: {target_path.name}",
         author=wiki._create_author(author_name, author_email)
     )
 
+    # Determine if file is an image for markdown formatting
+    content_type = file.content_type or ''
+    is_image = content_type.startswith('image/')
+
     # Return paths for frontend (simple relative paths, frontend converts to API URLs)
-    # Use angle brackets for paths with spaces: ![alt](<path with spaces>)
-    return ImageUploadResponse(
+    # Use angle brackets for paths with spaces: ![alt](<path with spaces>) for images
+    # Use regular links for non-images: [filename](<path>)
+    if is_image:
+        markdown = f"![{target_path.stem}](<{relative_path}>)"
+    else:
+        markdown = f"[{target_path.name}](<{relative_path}>)"
+
+    return FileUploadResponse(
         path=str(relative_path),
-        url=str(relative_path),  # Simple path like "images/foo.png"
+        url=str(relative_path),  # Simple path like "uploads/foo.pdf"
         filename=target_path.name,
-        markdown=f"![{target_path.stem}](<{relative_path}>)"
+        markdown=markdown
     )
 
 

@@ -1,17 +1,17 @@
 import { useRef, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { uploadImage, type UploadResponse } from '../services/upload-api';
-import { isImageFile } from '../utils/files';
 
-interface UseImageUploadOptions {
+interface UseFileUploadOptions {
   onUpload?: (result: UploadResponse) => void;
   onError?: (error: Error) => void;
 }
 
 /**
- * Hook for handling image file uploads with a hidden file input.
+ * Hook for handling file uploads with a hidden file input.
+ * Accepts any file type.
  */
-export function useImageUpload(options: UseImageUploadOptions = {}) {
+export function useFileUpload(options: UseFileUploadOptions = {}) {
   const { onUpload, onError } = options;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -27,10 +27,8 @@ export function useImageUpload(options: UseImageUploadOptions = {}) {
     setIsUploading(true);
     try {
       for (const file of Array.from(files)) {
-        if (isImageFile(file)) {
-          const result = await uploadImage(file);
-          onUpload?.(result);
-        }
+        const result = await uploadImage(file);
+        onUpload?.(result);
       }
     } catch (error) {
       console.error('Upload failed:', error);
@@ -51,7 +49,6 @@ export function useImageUpload(options: UseImageUploadOptions = {}) {
   const inputProps = {
     ref: fileInputRef,
     type: 'file' as const,
-    accept: 'image/*',
     multiple: true,
     onChange: handleFileSelect,
     className: 'hidden',
@@ -64,3 +61,7 @@ export function useImageUpload(options: UseImageUploadOptions = {}) {
     fileInputRef,
   };
 }
+
+// Backwards compatibility alias
+export const useImageUpload = useFileUpload;
+export type UseImageUploadOptions = UseFileUploadOptions;

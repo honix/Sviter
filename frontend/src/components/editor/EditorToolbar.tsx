@@ -233,7 +233,7 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
     fileInputRef.current?.click();
   };
 
-  // Handle image file selection
+  // Handle file selection (images and other files)
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!editorView) return;
     const files = e.target.files;
@@ -242,15 +242,22 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
     setIsUploading(true);
     try {
       for (const file of Array.from(files)) {
+        const result = await uploadImage(file);
+        const currentState = editorView.state;
+
         if (isImageFile(file)) {
-          const result = await uploadImage(file);
-          // Insert image at cursor
-          const currentState = editorView.state;
+          // Insert image node for image files
           const imageNode = schema.nodes.image.create({
             src: result.url,
             alt: file.name.replace(/\.[^.]+$/, ''),
           });
           editorView.dispatch(currentState.tr.replaceSelectionWith(imageNode));
+        } else {
+          // Insert link for non-image files
+          const linkText = schema.text(file.name);
+          const linkMark = schema.marks.link.create({ href: result.url });
+          const linkedText = linkText.mark([linkMark]);
+          editorView.dispatch(currentState.tr.replaceSelectionWith(linkedText));
         }
       }
       editorView.focus();
@@ -360,7 +367,6 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
           multiple
           onChange={handleImageSelect}
           className="hidden"
