@@ -3,5 +3,7 @@
 if [ "$CLAUDE_CODE_REMOTE" != "true" ]; then
   exit 0
 fi
-apt-get update && apt-get install -y gh
-exit 0
+if ! apt-get update || ! apt-get install -y gh; then
+  echo "Error: Failed to install gh CLI" >&2
+  exit 1
+fi
