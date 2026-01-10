@@ -277,6 +277,14 @@ async def upload_file(
         author=wiki._create_author(author_name, author_email)
     )
 
+    # Broadcast file uploaded event for real-time tree updates
+    if threads_module.thread_manager:
+        await threads_module.thread_manager.broadcast({
+            "type": "page_updated",
+            "title": str(relative_path),
+            "operation": "create"
+        })
+
     # Determine if file is an image for markdown formatting
     content_type = file.content_type or ''
     is_image = content_type.startswith('image/')
