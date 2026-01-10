@@ -792,17 +792,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [state.currentPage]);
 
   // Load persisted current page on startup (after pages are loaded)
+  const hasLoadedPersistedPageRef = useRef(false);
   useEffect(() => {
+    // Only run once when pages are first loaded
+    if (hasLoadedPersistedPageRef.current || state.pages.length === 0 || state.currentPage) {
+      return;
+    }
+
     const persistedPagePath = loadPersistedCurrentPagePath();
-    if (persistedPagePath && state.pages.length > 0 && !state.currentPage) {
+    if (persistedPagePath) {
       // Find the persisted page in the loaded pages
       const persistedPage = state.pages.find(p => p.path === persistedPagePath);
       if (persistedPage) {
-        // Load the full page content
-        actions.setCurrentPage(persistedPage);
+        hasLoadedPersistedPageRef.current = true;
+        // Load the full page content asynchronously
+        (async () => {
+          try {
+            const response = await fetch(`${getApiUrl()}/api/pages/${encodeURIComponent(persistedPage.path)}`);
+            if (response.ok) {
+              const fullPage = await response.json();
+              dispatch({ type: 'SET_CURRENT_PAGE', payload: fullPage });
+            }
+          } catch (err) {
+            console.error('Failed to load persisted page:', err);
+          }
+        })();
       }
     }
-  }, [state.pages.length]); // Run when pages are first loaded
+  }, [state.pages.length, state.currentPage]); // Run when pages are first loaded
 
   // Reload tree when branch for diff changes (entering/exiting review mode)
   useEffect(() => {
