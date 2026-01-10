@@ -34,6 +34,14 @@ interface AppState {
   branchViewMode: 'preview' | 'diff' | 'history';
   // Refresh trigger for real-time updates
   pageUpdateCounter: number;
+  // Context usage tracking
+  contextUsage: Record<string, {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    contextLimit: number;
+    contextPercent: number;
+  }>;
 }
 
 type AppAction =
@@ -66,7 +74,9 @@ type AppAction =
   | { type: 'SET_BRANCH_VIEW_MODE'; payload: 'preview' | 'diff' | 'history' }
   | { type: 'UPDATE_CURRENT_PAGE_CONTENT'; payload: string }
   // Refresh trigger
-  | { type: 'INCREMENT_PAGE_UPDATE_COUNTER' };
+  | { type: 'INCREMENT_PAGE_UPDATE_COUNTER' }
+  // Context usage
+  | { type: 'SET_CONTEXT_USAGE'; payload: { threadId: string; usage: AppState['contextUsage'][string] } };
 
 const initialState: AppState = {
   pages: [],
@@ -90,7 +100,9 @@ const initialState: AppState = {
   currentBranch: 'main',
   branchViewMode: 'preview',
   // Refresh trigger for real-time updates
-  pageUpdateCounter: 0
+  pageUpdateCounter: 0,
+  // Context usage tracking
+  contextUsage: {}
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -261,6 +273,15 @@ function appReducer(state: AppState, action: AppAction): AppState {
 
     case 'INCREMENT_PAGE_UPDATE_COUNTER':
       return { ...state, pageUpdateCounter: state.pageUpdateCounter + 1 };
+
+    case 'SET_CONTEXT_USAGE':
+      return {
+        ...state,
+        contextUsage: {
+          ...state.contextUsage,
+          [action.payload.threadId]: action.payload.usage
+        }
+      };
 
     default:
       return state;
@@ -524,6 +545,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           // Now increment counter to remount editors with fresh content
           dispatch({ type: 'INCREMENT_PAGE_UPDATE_COUNTER' });
         })();
+      } else if (message.type === 'context_usage' && message.thread_id) {
+        dispatch({
+          type: 'SET_CONTEXT_USAGE',
+          payload: {
+            threadId: message.thread_id,
+            usage: {
+              promptTokens: message.prompt_tokens || 0,
+              completionTokens: message.completion_tokens || 0,
+              totalTokens: message.total_tokens || 0,
+              contextLimit: message.context_limit || 200000,
+              contextPercent: message.context_percent || 0
+            }
+          }
+        });
       }
 
       // Notify all registered handlers

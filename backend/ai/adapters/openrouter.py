@@ -8,7 +8,7 @@ import json
 from openai import AsyncOpenAI
 from typing import Dict, List, Any, Optional, Callable, Awaitable, TYPE_CHECKING
 
-from .base import LLMAdapter, CompletionResult, ConversationResult, ToolCall
+from .base import LLMAdapter, CompletionResult, ConversationResult, ToolCall, UsageData
 
 if TYPE_CHECKING:
     from ai.tools import WikiTool
@@ -128,6 +128,7 @@ class OpenRouterAdapter(LLMAdapter):
         max_turns: int = 20,
         on_message: Optional[Callable[[str, str], Awaitable[None]]] = None,
         on_tool_call: Optional[Callable[[Dict], Awaitable[None]]] = None,
+        on_usage: Optional[Callable[[UsageData], Awaitable[None]]] = None,
     ) -> ConversationResult:
         """
         Process conversation with internal loop.
@@ -140,6 +141,7 @@ class OpenRouterAdapter(LLMAdapter):
 
         openai_tools = self._convert_tools(tools)
         iteration = 0
+        total_usage = UsageData(prompt_tokens=0, completion_tokens=0, total_tokens=0)
 
         # Extract system prompt from history
         system_prompt = ""
@@ -174,6 +176,22 @@ class OpenRouterAdapter(LLMAdapter):
             content = message.content or ""
             tool_calls_raw = message.tool_calls or []
 
+            # Capture usage data
+            if completion.usage:
+                usage = UsageData(
+                    prompt_tokens=completion.usage.prompt_tokens or 0,
+                    completion_tokens=completion.usage.completion_tokens or 0,
+                    total_tokens=completion.usage.total_tokens or 0
+                )
+                # Update totals (use latest prompt_tokens as it includes full context)
+                total_usage = UsageData(
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=total_usage.completion_tokens + usage.completion_tokens,
+                    total_tokens=usage.prompt_tokens + total_usage.completion_tokens + usage.completion_tokens
+                )
+                if on_usage:
+                    await on_usage(total_usage)
+
             non_system_messages.append(message)
             conversation_history.append(message)  # Persist for next turn
 
@@ -186,7 +204,8 @@ class OpenRouterAdapter(LLMAdapter):
                     status='completed',
                     stop_reason='natural_completion',
                     iterations=iteration,
-                    final_response=content
+                    final_response=content,
+                    usage=total_usage
                 )
 
             # Execute tool calls
@@ -228,5 +247,6 @@ class OpenRouterAdapter(LLMAdapter):
             status='completed',
             stop_reason='max_turns',
             iterations=iteration,
-            final_response=content if 'content' in dir() else ""
+            final_response=content if 'content' in dir() else "",
+            usage=total_usage
         )

@@ -406,6 +406,18 @@ class ThreadManager:
                     "operation": tool_name
                 })
 
+        # Usage callback
+        async def on_usage(usage_data):
+            await self.broadcast({
+                "type": "context_usage",
+                "thread_id": thread.id,
+                "prompt_tokens": usage_data.prompt_tokens,
+                "completion_tokens": usage_data.completion_tokens,
+                "total_tokens": usage_data.total_tokens,
+                "context_limit": usage_data.context_limit,
+                "context_percent": usage_data.context_percent
+            })
+
         # Start session
         result = await executor.start_session(
             system_prompt=thread.get_prompt(),
@@ -415,6 +427,7 @@ class ThreadManager:
             agent_name=thread.name,
             on_message=on_message,
             on_tool_call=on_tool_call,
+            on_usage=on_usage,
         )
 
         if not result["success"]:
