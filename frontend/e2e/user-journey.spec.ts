@@ -153,11 +153,11 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
       await docsText.click({ force: true })
       await page.waitForTimeout(1500)
 
-      // After expanding Docs, Getting-Started should appear
-      const gettingStartedText = page.locator('text=Getting-Started')
+      // After expanding Docs, Getting-Started.md should appear (with .md extension)
+      const gettingStartedText = page.locator('text=Getting-Started.md')
       await expect(gettingStartedText).toBeVisible({ timeout: 10000 })
 
-      // Click Getting-Started to view the page
+      // Click Getting-Started.md to view the page
       await gettingStartedText.click({ force: true })
       await page.waitForTimeout(1000)
 
@@ -170,17 +170,17 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
       await tutorialsText.click({ force: true })
       await page.waitForTimeout(1500)
 
-      // After expanding Tutorials, Basic should appear
-      const basicText = page.locator('text=Basic')
+      // After expanding Tutorials, Basic.md should appear (with .md extension)
+      const basicText = page.locator('text=Basic.md')
       await expect(basicText).toBeVisible({ timeout: 10000 })
 
-      // Click Basic to view the page
+      // Click Basic.md to view the page
       await basicText.click({ force: true })
       await page.waitForTimeout(1000)
       await expect(page.getByText('This is a basic tutorial for beginners')).toBeVisible({ timeout: 10000 })
 
-      // Click Advanced to view the page
-      const advancedText = page.locator('text=Advanced')
+      // Click Advanced.md to view the page (with .md extension)
+      const advancedText = page.locator('text=Advanced.md')
       await advancedText.click({ force: true })
       await page.waitForTimeout(1000)
       await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 10000 })
@@ -206,18 +206,18 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
       await page.locator('text=Docs').click({ force: true })
       await page.waitForTimeout(1500)
 
-      // Wait for Getting-Started to appear (confirms folder is expanded)
-      await expect(page.getByText('Getting-Started')).toBeVisible({ timeout: 10000 })
+      // Wait for Getting-Started.md to appear (confirms folder is expanded) - with .md extension
+      await expect(page.getByText('Getting-Started.md')).toBeVisible({ timeout: 10000 })
 
       // Expand Tutorials folder (nested inside Docs)
       await page.locator('text=Tutorials').click({ force: true })
       await page.waitForTimeout(1500)
 
-      // Wait for Basic to appear (confirms folder is expanded)
-      await expect(page.getByText('Basic')).toBeVisible({ timeout: 10000 })
+      // Wait for Basic.md to appear (confirms folder is expanded) - with .md extension
+      await expect(page.getByText('Basic.md')).toBeVisible({ timeout: 10000 })
 
-      // Navigate to Advanced tutorial page (deeply nested page)
-      await page.locator('text=Advanced').click({ force: true })
+      // Navigate to Advanced.md tutorial page (deeply nested page) - with .md extension
+      await page.locator('text=Advanced.md').click({ force: true })
       await page.waitForTimeout(1000)
       await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 10000 })
     })
@@ -233,12 +233,12 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
     })
 
     await test.step('Verify folders remain expanded', async () => {
-      // Docs folder should still be expanded - Getting-Started should be visible
-      await expect(page.getByText('Getting-Started')).toBeVisible({ timeout: 10000 })
+      // Docs folder should still be expanded - Getting-Started.md should be visible (with .md extension)
+      await expect(page.getByText('Getting-Started.md')).toBeVisible({ timeout: 10000 })
 
-      // Tutorials folder should still be expanded - Basic and Advanced should be visible
-      await expect(page.getByText('Basic')).toBeVisible({ timeout: 10000 })
-      await expect(page.getByText('Advanced')).toBeVisible({ timeout: 10000 })
+      // Tutorials folder should still be expanded - Basic.md and Advanced.md should be visible (with .md extension)
+      await expect(page.getByText('Basic.md')).toBeVisible({ timeout: 10000 })
+      await expect(page.getByText('Advanced.md')).toBeVisible({ timeout: 10000 })
     })
 
     await test.step('Verify current page is restored', async () => {
