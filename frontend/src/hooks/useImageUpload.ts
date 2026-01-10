@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import { uploadImage, type UploadResponse } from '../services/upload-api';
+import { uploadFile, type UploadResponse } from '../services/upload-api';
 
 interface UseFileUploadOptions {
   onUpload?: (result: UploadResponse) => void;
@@ -27,7 +27,7 @@ export function useFileUpload(options: UseFileUploadOptions = {}) {
     setIsUploading(true);
     try {
       for (const file of Array.from(files)) {
-        const result = await uploadImage(file);
+        const result = await uploadFile(file);
         onUpload?.(result);
       }
     } catch (error) {

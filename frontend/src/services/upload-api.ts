@@ -14,11 +14,11 @@ export interface UploadResponse {
 }
 
 /**
- * Upload an image file to the wiki
+ * Upload a file to the wiki
  */
-export async function uploadImage(
+export async function uploadFile(
   file: File,
-  folder: string = 'images'
+  folder: string = 'uploads'
 ): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append('file', file);
@@ -37,3 +37,6 @@ export async function uploadImage(
 
   return response.json();
 }
+
+// Backwards compatibility alias
+export const uploadImage = uploadFile;

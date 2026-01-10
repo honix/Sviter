@@ -230,7 +230,7 @@ MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
 @app.post("/api/upload", response_model=FileUploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
-    folder: str = Form(default="images"),
+    folder: str = Form(default="uploads"),
     user_id: Optional[str] = Depends(get_optional_user)
 ):
     """Upload any file to the wiki and commit to git"""

@@ -41,12 +41,12 @@ import {
   Rows2,
   Columns3,
   Columns2,
-  ImagePlus,
+  Upload,
   Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { schema } from '../../editor/schema';
-import { uploadImage, isImageFile } from '../../services/upload-api';
+import { uploadFile, isImageFile } from '../../services/upload-api';
 
 interface EditorToolbarProps {
   editorView: EditorView | null;
@@ -242,7 +242,7 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
     setIsUploading(true);
     try {
       for (const file of Array.from(files)) {
-        const result = await uploadImage(file);
+        const result = await uploadFile(file);
         const currentState = editorView.state;
 
         if (isImageFile(file)) {
@@ -361,8 +361,8 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
         <ToolbarButton
           onClick={handleImageClick}
           active={false}
-          tooltip="Insert Image"
-          icon={isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+          tooltip="Upload file"
+          icon={isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
         />
         <input
           ref={fileInputRef}
