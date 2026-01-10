@@ -145,10 +145,9 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
       // Wait for page tree to load
       await page.waitForTimeout(2000)
 
-      // Look for Docs folder button/text and click to expand
-      const docsFolder = page.getByRole('button').filter({ hasText: 'Docs' }).or(page.locator('div').filter({ hasText: /^Docs$/ })).first()
-      await expect(docsFolder).toBeVisible({ timeout: 5000 })
-      await docsFolder.click()
+      // Look for Docs folder - it's rendered as a div with span containing the title
+      // Click on the row to expand the folder
+      await page.locator('.flex.items-center').filter({ hasText: /^Docs/ }).first().click()
 
       // Wait a bit for folder to expand
       await page.waitForTimeout(1000)
@@ -156,30 +155,30 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
       // Check if Getting-Started appears after expanding Docs
       await expect(page.getByText('Getting-Started')).toBeVisible({ timeout: 5000 })
 
-      // Click Getting-Started page (look for button role or clickable div)
-      await page.getByRole('button').filter({ hasText: 'Getting-Started' }).or(page.getByText('Getting-Started')).first().click()
+      // Click Getting-Started page - click on the row
+      await page.locator('.flex.items-center').filter({ hasText: /Getting-Started/ }).first().click()
       await expect(page.getByText('This guide will help you get up and running quickly')).toBeVisible({ timeout: 5000 })
 
-      // Expand Tutorials folder (nested inside Docs)
-      await page.getByRole('button').filter({ hasText: 'Tutorials' }).or(page.locator('div').filter({ hasText: /^Tutorials$/ })).first().click()
+      // Expand Tutorials folder (nested inside Docs) - click on the row
+      await page.locator('.flex.items-center').filter({ hasText: /^Tutorials/ }).first().click()
       await page.waitForTimeout(1000)
 
-      // Navigate to Basic tutorial
-      await page.getByRole('button').filter({ hasText: 'Basic' }).or(page.getByText('Basic')).first().click()
+      // Navigate to Basic tutorial - click on the row
+      await page.locator('.flex.items-center').filter({ hasText: /^Basic/ }).first().click()
       await expect(page.getByText('This is a basic tutorial for beginners')).toBeVisible({ timeout: 5000 })
 
-      // Navigate to Advanced tutorial
-      await page.getByRole('button').filter({ hasText: 'Advanced' }).or(page.getByText('Advanced')).first().click()
+      // Navigate to Advanced tutorial - click on the row
+      await page.locator('.flex.items-center').filter({ hasText: /^Advanced/ }).first().click()
       await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 5000 })
     })
 
     await test.step('Navigate to Projects folder', async () => {
-      // Expand Projects folder
-      await page.getByRole('button').filter({ hasText: 'Projects' }).or(page.locator('div').filter({ hasText: /^Projects$/ })).first().click()
+      // Expand Projects folder - click on the row
+      await page.locator('.flex.items-center').filter({ hasText: /^Projects/ }).first().click()
       await page.waitForTimeout(1000)
 
-      // Navigate to Example-Project
-      await page.getByRole('button').filter({ hasText: 'Example-Project' }).or(page.getByText('Example-Project')).first().click()
+      // Navigate to Example-Project - click on the row
+      await page.locator('.flex.items-center').filter({ hasText: /Example-Project/ }).first().click()
       await expect(page.getByText('This is an example project that showcases best practices')).toBeVisible({ timeout: 5000 })
     })
   })
@@ -199,22 +198,22 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
       // Wait for tree to load
       await page.waitForTimeout(2000)
 
-      // Expand Docs folder
-      await page.getByRole('button').filter({ hasText: 'Docs' }).or(page.locator('div').filter({ hasText: /^Docs$/ })).first().click()
+      // Expand Docs folder - click on the row
+      await page.locator('.flex.items-center').filter({ hasText: /^Docs/ }).first().click()
       await page.waitForTimeout(1000)
 
       // Wait for Getting-Started to appear (confirms folder is expanded)
       await expect(page.getByText('Getting-Started')).toBeVisible({ timeout: 5000 })
 
-      // Expand Tutorials folder (nested inside Docs)
-      await page.getByRole('button').filter({ hasText: 'Tutorials' }).or(page.locator('div').filter({ hasText: /^Tutorials$/ })).first().click()
+      // Expand Tutorials folder (nested inside Docs) - click on the row
+      await page.locator('.flex.items-center').filter({ hasText: /^Tutorials/ }).first().click()
       await page.waitForTimeout(1000)
 
       // Wait for Basic to appear (confirms folder is expanded)
       await expect(page.getByText('Basic')).toBeVisible({ timeout: 5000 })
 
-      // Navigate to Advanced tutorial page (deeply nested page)
-      await page.getByRole('button').filter({ hasText: 'Advanced' }).or(page.getByText('Advanced')).first().click()
+      // Navigate to Advanced tutorial page (deeply nested page) - click on the row
+      await page.locator('.flex.items-center').filter({ hasText: /^Advanced/ }).first().click()
       await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 5000 })
     })
 
