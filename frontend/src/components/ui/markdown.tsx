@@ -41,15 +41,15 @@ function createBaseComponents(): Partial<Components> {
 
       if (isInline) {
         return (
-          <span
+          <code
             className={cn(
-              "bg-primary-foreground rounded-sm px-1 font-mono text-sm",
+              "bg-card border border-border rounded px-1.5 py-0.5 font-mono text-sm",
               className
             )}
             {...props}
           >
             {children}
-          </span>
+          </code>
         )
       }
 

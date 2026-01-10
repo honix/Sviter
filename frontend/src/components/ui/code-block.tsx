@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils"
 import React, { useEffect, useState } from "react"
 import { codeToHtml } from "shiki"
+import { useTheme } from "@/contexts/ThemeContext"
 
 export type CodeBlockProps = {
   children?: React.ReactNode
@@ -32,11 +33,15 @@ export type CodeBlockCodeProps = {
 function CodeBlockCode({
   code,
   language = "tsx",
-  theme = "github-light",
+  theme: themeProp,
   className,
   ...props
 }: CodeBlockCodeProps) {
+  const { theme: appTheme } = useTheme()
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null)
+
+  // Pick shiki theme based on app theme
+  const shikiTheme = themeProp ?? (appTheme === "dark" ? "github-dark" : "github-light")
 
   useEffect(() => {
     async function highlight() {
@@ -45,11 +50,11 @@ function CodeBlockCode({
         return
       }
 
-      const html = await codeToHtml(code, { lang: language, theme })
+      const html = await codeToHtml(code, { lang: language, theme: shikiTheme })
       setHighlightedHtml(html)
     }
     highlight()
-  }, [code, language, theme])
+  }, [code, language, shikiTheme])
 
   const classNames = cn(
     "w-full overflow-x-auto text-[13px] [&>pre]:px-4 [&>pre]:py-4",

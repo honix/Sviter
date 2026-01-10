@@ -49,16 +49,16 @@ test.describe('Theme Toggle', () => {
     await themeToggle.click();
 
     // Click sepia theme option
-    const sepiaOption = page.getByTestId('theme-option-sepia');
+    const sepiaOption = page.getByTestId('theme-option-theme-sepia');
     await sepiaOption.click();
 
-    // Verify sepia theme is applied
+    // Verify sepia theme is applied (class is 'theme-sepia' to avoid Tailwind's sepia filter utility)
     const html = page.locator('html');
-    await expect(html).toHaveClass(/sepia/);
+    await expect(html).toHaveClass(/theme-sepia/);
 
     // Verify localStorage is updated
     const theme = await page.evaluate(() => localStorage.getItem('theme'));
-    expect(theme).toBe('sepia');
+    expect(theme).toBe('theme-sepia');
   });
 
   test('should switch back to light theme', async ({ page }) => {

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
-export type Theme = 'light' | 'dark' | 'sepia';
+export type Theme = 'light' | 'dark' | 'theme-sepia';
 
 interface ThemeContextType {
   theme: Theme;
@@ -14,7 +14,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Check localStorage for saved theme, default to 'light'
     const savedTheme = localStorage.getItem('theme');
     // Validate that the saved theme is one of the valid theme values
-    return (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'sepia')
+    return (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'theme-sepia')
       ? savedTheme
       : 'light';
   });
@@ -23,7 +23,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const root = document.documentElement;
 
     // Remove all theme classes
-    root.classList.remove('light', 'dark', 'sepia');
+    root.classList.remove('light', 'dark', 'theme-sepia');
 
     // Add the current theme class
     root.classList.add(theme);

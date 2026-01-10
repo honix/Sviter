@@ -15,13 +15,13 @@ export const ThemeToggle: React.FC = () => {
   const themeIcons: Record<Theme, React.ReactNode> = {
     light: <Sun className="h-4 w-4" />,
     dark: <Moon className="h-4 w-4" />,
-    sepia: <Palette className="h-4 w-4" />,
+    'theme-sepia': <Palette className="h-4 w-4" />,
   };
 
   const themeLabels: Record<Theme, string> = {
     light: 'Light',
     dark: 'Dark',
-    sepia: 'Sepia',
+    'theme-sepia': 'Sepia',
   };
 
   return (
@@ -38,7 +38,7 @@ export const ThemeToggle: React.FC = () => {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {(['light', 'dark', 'sepia'] as Theme[]).map((themeOption) => (
+        {(['light', 'dark', 'theme-sepia'] as Theme[]).map((themeOption) => (
           <DropdownMenuItem
             key={themeOption}
             onClick={() => setTheme(themeOption)}
