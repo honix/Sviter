@@ -225,13 +225,21 @@ def sanitize_filename(filename: str) -> str:
 
 
 # File upload endpoint
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
+
 @app.post("/api/upload", response_model=FileUploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
-    folder: str = Form(default="uploads"),
+    folder: str = Form(default="images"),
     user_id: Optional[str] = Depends(get_optional_user)
 ):
     """Upload any file to the wiki and commit to git"""
+    # Validate file size
+    if file.size and file.size > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)} MB"
+        )
 
     # Sanitize filename and handle collisions
     original_filename = file.filename or "file"
