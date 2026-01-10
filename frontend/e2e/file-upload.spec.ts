@@ -69,8 +69,9 @@ test.describe('File Upload', () => {
       await uploadedFile.click()
 
       // Verify the file content is displayed
-      // For text files, the content should be shown in the center panel
-      await expect(page.getByText(testFileContent)).toBeVisible({ timeout: 10000 })
+      // For text files, the content is rendered in CodeMirror editor
+      // Use .cm-content selector to find the content within CodeMirror
+      await expect(page.locator('.cm-content')).toContainText(testFileContent, { timeout: 10000 })
     })
   })
 })
