@@ -7,7 +7,7 @@ ToolBuilder: Factory for creating composable tool sets
 Claude Code-style tools:
 - Read: read_page (with line numbers), grep_pages, glob_pages, list_pages
 - Git: git_history (branch commit history), git_diff (branch comparison)
-- Write: write_page, edit_page (exact match), insert_at_line
+- Write: write_page, edit_page (exact match), insert_at_line, delete_page, move (mv-style)
 """
 from typing import Dict, List, Any, Callable, TYPE_CHECKING
 from dataclasses import dataclass
@@ -496,27 +496,58 @@ def _delete_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
         return f"Error deleting page: {e}"
 
 
-def _move_page(wiki: GitWiki, args: Dict[str, Any]) -> str:
-    """Move a wiki page to a new location"""
-    source_path = args.get("source_path", "") or args.get("path", "")
-    target_parent = args.get("target_parent", "")
+def _move(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """Move/rename a wiki page (like Unix mv command)"""
+    from pathlib import Path
+
+    path = args.get("path", "")
+    new_path = args.get("new_path", "")
     author = args.get("author", "AI Agent")
 
-    if not source_path:
-        return "Error: source_path is required"
+    if not path:
+        return "Error: path is required"
+    if not new_path:
+        return "Error: new_path is required"
 
     try:
-        result = wiki.move_item(
-            source_path=source_path,
-            target_parent=target_parent,
-            author=author
-        )
-        new_path = result.get("new_path", target_parent + "/" + source_path.split("/")[-1])
-        return f"Page moved successfully from '{source_path}' to '{new_path}'."
+        old_file = Path(path)
+        new_file = Path(new_path)
+
+        # Check if this is a move to different folder or just rename
+        if old_file.parent != new_file.parent:
+            # Move to different folder (may also rename)
+            target_parent = str(new_file.parent) if str(new_file.parent) != '.' else ''
+
+            # First move to the new folder
+            result = wiki.move_item(
+                source_path=path,
+                target_parent=target_parent,
+                new_order=0,  # Ignored by move_item
+                author=author
+            )
+
+            # If new filename is different, rename it
+            if old_file.name != new_file.name:
+                moved_path = result.get("path", f"{target_parent}/{old_file.name}" if target_parent else old_file.name)
+                result = wiki.rename_page(
+                    old_path=moved_path,
+                    new_name=new_file.name,
+                    author=author
+                )
+        else:
+            # Just rename in same folder
+            result = wiki.rename_page(
+                old_path=path,
+                new_name=new_file.name,
+                author=author
+            )
+
+        final_path = result.get("path", new_path)
+        return f"Page moved/renamed successfully from '{path}' to '{final_path}'."
     except PageNotFoundException:
-        return f"Error: Page '{source_path}' not found."
+        return f"Error: Page '{path}' not found."
     except Exception as e:
-        return f"Error moving page: {e}"
+        return f"Error moving/renaming page: {e}"
 
 
 def _spawn_thread(
@@ -619,7 +650,7 @@ class ToolBuilder:
 
     Tool Categories:
     - read: read_page, grep_pages, glob_pages, list_pages
-    - write: write_page, edit_page, insert_at_line
+    - write: write_page, edit_page, insert_at_line, delete_page, move (mv-style)
     - thread: spawn_thread, list_threads (main only)
     - lifecycle: request_help, mark_for_review (thread only)
 
@@ -769,7 +800,7 @@ Use stat_only=true for a quick overview (files changed, lines added/removed)."""
 
     @staticmethod
     def write_tools(wiki) -> List[WikiTool]:
-        """Write wiki tools: write_page, edit_page, insert_at_line"""
+        """Write wiki tools: write_page, edit_page, insert_at_line, delete_page, move (mv-style)"""
         return [
             WikiTool(
                 name="write_page",
@@ -867,27 +898,29 @@ After deleting, consider updating agents/index.md to remove navigation entry."""
                 function=lambda args, w=wiki: _delete_page(w, args)
             ),
             WikiTool(
-                name="move_page",
-                description="""Move a wiki page to a new location (folder).
+                name="move",
+                description="""Move/rename a wiki page (Unix mv command).
 
-Use this to reorganize pages into different folders.
-IMPORTANT: Use the file path (e.g., 'home.md', 'docs/guide.md') not display titles.
+Use this to rename files, move them to different folders, or both in one operation. Supports Unicode characters and spaces.
+IMPORTANT: Use the file path (e.g., 'home.md', 'agents/index.md') not display titles.
 
 Examples:
-- Move 'guide.md' to 'docs/' folder: source_path='guide.md', target_parent='docs'
-- Move to root: source_path='docs/guide.md', target_parent=''
+- Rename in place: path='old-name.md', new_path='new-name.md'
+- Move to folder: path='file.md', new_path='docs/file.md'
+- Move + rename: path='old.md', new_path='docs/new.md'
+- Rename in subfolder: path='docs/old.md', new_path='docs/new.md'
 
-After moving, consider updating agents/index.md navigation entries.""",
+After moving/renaming, consider updating agents/index.md navigation entries.""",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "source_path": {"type": "string", "description": "Current path of the page to move"},
-                        "target_parent": {"type": "string", "description": "Target folder path (empty string for root)"},
+                        "path": {"type": "string", "description": "Current path of the page"},
+                        "new_path": {"type": "string", "description": "New path (can be different folder and/or filename)"},
                         "author": {"type": "string", "description": "Author name for git commit (default: 'AI Agent')"}
                     },
-                    "required": ["source_path", "target_parent"]
+                    "required": ["path", "new_path"]
                 },
-                function=lambda args, w=wiki: _move_page(w, args)
+                function=lambda args, w=wiki: _move(w, args)
             )
         ]
 
