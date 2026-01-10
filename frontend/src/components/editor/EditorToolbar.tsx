@@ -41,7 +41,7 @@ import {
   Rows2,
   Columns3,
   Columns2,
-  Upload,
+  ImagePlus,
   Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -228,13 +228,13 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
     editorView.focus();
   };
 
-  // Handle upload button click
-  const handleUploadClick = () => {
+  // Handle image upload button click
+  const handleImageClick = () => {
     fileInputRef.current?.click();
   };
 
-  // Handle file selection (images and other files)
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle image file selection
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!editorView) return;
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -242,22 +242,14 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
     setIsUploading(true);
     try {
       for (const file of Array.from(files)) {
-        const result = await uploadFile(file);
-        const currentState = editorView.state;
-
         if (isImageFile(file)) {
-          // Insert image node for image files
+          const result = await uploadFile(file);
+          const currentState = editorView.state;
           const imageNode = schema.nodes.image.create({
             src: result.url,
             alt: file.name.replace(/\.[^.]+$/, ''),
           });
           editorView.dispatch(currentState.tr.replaceSelectionWith(imageNode));
-        } else {
-          // Insert link for non-image files
-          const linkText = schema.text(file.name);
-          const linkMark = schema.marks.link.create({ href: result.url });
-          const linkedText = linkText.mark([linkMark]);
-          editorView.dispatch(currentState.tr.replaceSelectionWith(linkedText));
         }
       }
       editorView.focus();
@@ -359,16 +351,17 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
           icon={<Minus className="h-4 w-4" />}
         />
         <ToolbarButton
-          onClick={handleUploadClick}
+          onClick={handleImageClick}
           active={false}
-          tooltip="Upload file"
-          icon={isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          tooltip="Insert Image"
+          icon={isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
         />
         <input
           ref={fileInputRef}
           type="file"
+          accept="image/*"
           multiple
-          onChange={handleFileSelect}
+          onChange={handleImageSelect}
           className="hidden"
         />
 
