@@ -5,7 +5,7 @@ test.describe('Theme Toggle', () => {
     await page.goto('/');
 
     // Wait for app to load
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
 
     // Check for theme toggle button with Bird icon
     const themeToggle = page.getByTestId('theme-toggle-button');
@@ -16,7 +16,7 @@ test.describe('Theme Toggle', () => {
     await page.goto('/');
 
     // Wait for app to load
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
 
     // Initial state should be light theme
     const html = page.locator('html');
@@ -42,7 +42,7 @@ test.describe('Theme Toggle', () => {
     await page.goto('/');
 
     // Wait for app to load
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
 
     // Click theme toggle button
     const themeToggle = page.getByTestId('theme-toggle-button');
@@ -65,7 +65,7 @@ test.describe('Theme Toggle', () => {
     await page.goto('/');
 
     // Wait for app to load
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
 
     // Switch to dark first
     const themeToggle = page.getByTestId('theme-toggle-button');
@@ -94,7 +94,7 @@ test.describe('Theme Toggle', () => {
     await page.goto('/');
 
     // Wait for app to load
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
 
     // Switch to dark theme
     const themeToggle = page.getByTestId('theme-toggle-button');
@@ -120,7 +120,7 @@ test.describe('Theme Toggle', () => {
     await page.goto('/');
 
     // Wait for app to load
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
 
     // Open theme toggle menu
     const themeToggle = page.getByTestId('theme-toggle-button');
