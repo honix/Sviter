@@ -393,6 +393,7 @@ const PageTree: React.FC<PageTreeProps> = ({
       return (
         <FolderDropTarget id={`folder:${item.path}`} isOver={isDropTarget && !isItemDragging}>
           <div
+            data-testid={`folder-${item.path.replace(/\//g, '-')}`}
             className="flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-grab hover:bg-accent group"
             style={{ paddingLeft: `${8 + indent * 20}px` }}
             onClick={() => onToggleFolder(item.id)}
@@ -460,6 +461,7 @@ const PageTree: React.FC<PageTreeProps> = ({
 
     return (
       <div
+        data-testid={`page-${item.path.replace(/\//g, '-').replace(/\.[^.]+$/, '')}`}
         className={cn(
           "flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-grab group",
           isSelected ? "bg-primary text-primary-foreground" : "hover:bg-accent"
