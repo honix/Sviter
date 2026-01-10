@@ -227,14 +227,70 @@ make e2e           # Run all E2E tests in Docker
 make e2e-clean     # Clean up containers
 ```
 
-**Claude Code on the web - ALWAYS test via GitHub Actions:**
+### Test Files
 
-⚠️ **Local Playwright does NOT work** - Chromium crashes in the sandbox. Always push and let GitHub run tests.
+- `frontend/e2e/app.spec.ts` - Basic app tests (panels, page tree)
+- `frontend/e2e/user-journey.spec.ts` - Full workflow (chat → thread → accept → verify)
+
+### Debugging Failed Tests
+
+Playwright auto-captures screenshots/videos on failure. Check:
+- `frontend/test-results/` - Screenshots, videos, traces
+- `npx playwright show-trace <trace.zip>` - Interactive trace viewer
+
+For manual debugging:
+```typescript
+await page.screenshot({ path: 'debug.png' })
+```
+
+### CI/CD
+
+GitHub Actions runs E2E tests on every PR (`.github/workflows/e2e-tests.yml`).
+After pushing, use `gh pr checks --watch` to wait for CI without burning tokens.
+
+## Real-time Thread Updates
+
+### Branch & Page Lifecycle
+
+- **Branch creation**: Thread branches created when spawned via `spawn_thread`
+- **Live page updates**: Pages appear in tree as threads edit them (via `page_updated` WebSocket messages)
+- **Branch cleanup**: Rejected branches deleted, accepted branches merged to main
+
+### WebSocket Message Types
+
+- `thread_created` / `thread_updated` - Thread lifecycle and status changes
+- `page_updated` - Real-time page tree updates during thread execution
+- `assistant_message` / `tool_call` / `tool_result` - Streaming conversation
+
+### Implementation Notes
+
+- React 18 batching workaround: Use refs (`reloadFunctionsRef` in AppContext) to call reload functions from WebSocket callbacks with empty deps
+- System prompt bubble: Full width styling in ChatInterface
+
+## Claude Code on the web Workflow
+
+> Only applies when `CLAUDE_CODE_REMOTE` environment variable is set.
+
+When running in **Claude Code on the web** (not CLI):
+
+**MANDATORY: Always create a PR and verify E2E tests pass before considering work complete.**
+
+- **DO NOT push directly to `main`** — use session branch only
+- Push all changes to the assigned session branch (e.g., `claude/feature-name-<session-id>`)
+- **ALWAYS create a PR** for any code changes - this triggers CI/CD pipeline
+- **ALWAYS wait for E2E tests** to pass using `gh pr checks --watch`
+- The wiki submodule (`Sviter-wiki/`) can be pushed to main directly since it's a separate repo
+
+### Required Workflow
+
+1. Push changes to session branch: `git push -u origin claude/feature-SESSION_ID`
+2. Create PR: `gh pr create --title "..." --body "..."`
+3. Wait for E2E tests: `gh pr checks --watch --fail-fast`
+4. If tests fail: fix, commit, push, repeat step 3
+5. When E2E tests pass, check claude-review comments: `gh pr view --comments`
+6. Fix issues marked as High Priority / Fix before merge, then consider work complete
 
 ```bash
-# Install gh CLI if not available
-apt-get update && apt-get install -y gh
-
 # NOTE: Always use --repo flag (remote URL is proxied, gh can't detect repo)
 # Replace "honix/Sviter" with actual repo if different
 
@@ -257,72 +313,5 @@ git add . && git commit -m "fix: ..." && git push
 # 6. When E2E Tests green, wait for claude-review then read its feedback
 gh pr checks --repo honix/Sviter --watch
 gh pr view --repo honix/Sviter --comments
-# Fix issues marked as MUST / High Priority / Fix before merge - other suggestions can be ignored
+# Fix issues marked as High Priority / Fix before merge - other suggestions can be ignored
 ```
-
-### Quick Reference
-
-| Environment | E2E Testing | Unit Tests |
-|-------------|-------------|------------|
-| CLI (local) | `make e2e` | `make test` |
-| Claude Code on the web | `gh pr checks --watch` | `make test` |
-
-### Test Files
-
-- `frontend/e2e/app.spec.ts` - Basic app tests (panels, page tree)
-- `frontend/e2e/user-journey.spec.ts` - Full workflow (chat → thread → accept → verify)
-
-### Debugging Failed Tests
-
-Playwright auto-captures screenshots/videos on failure. Check:
-- `frontend/test-results/` - Screenshots, videos, traces
-- `npx playwright show-trace <trace.zip>` - Interactive trace viewer
-
-For manual debugging:
-```typescript
-await page.screenshot({ path: 'debug.png' })
-```
-
-### CI/CD
-
-GitHub Actions runs E2E tests on every PR (`.github/workflows/e2e-tests.yml`).
-After pushing, use `gh pr checks --watch` to wait for CI without burning tokens.
-
-## Claude Code on the web Workflow
-
-When running in **Claude Code on the web** (not CLI):
-
-**MANDATORY: Always create a PR and verify E2E tests pass before considering work complete.**
-
-- **DO NOT push directly to `main`** — use session branch only
-- Push all changes to the assigned session branch (e.g., `claude/feature-name-<session-id>`)
-- **ALWAYS create a PR** for any code changes - this triggers CI/CD pipeline
-- **ALWAYS wait for E2E tests** to pass using `gh pr checks --watch`
-- The wiki submodule (`Sviter-wiki/`) can be pushed to main directly since it's a separate repo
-
-### Required Workflow
-
-1. Push changes to session branch: `git push -u origin claude/feature-SESSION_ID`
-2. Create PR: `gh pr create --title "..." --body "..."`
-3. Wait for E2E tests: `gh pr checks --watch --fail-fast`
-4. If tests fail: fix, commit, push, repeat step 3
-5. Only consider work complete when E2E tests are green
-
-## Real-time Thread Updates
-
-### Branch & Page Lifecycle
-
-- **Branch creation**: Thread branches created when spawned via `spawn_thread`
-- **Live page updates**: Pages appear in tree as threads edit them (via `page_updated` WebSocket messages)
-- **Branch cleanup**: Rejected branches deleted, accepted branches merged to main
-
-### WebSocket Message Types
-
-- `thread_created` / `thread_updated` - Thread lifecycle and status changes
-- `page_updated` - Real-time page tree updates during thread execution
-- `assistant_message` / `tool_call` / `tool_result` - Streaming conversation
-
-### Implementation Notes
-
-- React 18 batching workaround: Use refs (`reloadFunctionsRef` in AppContext) to call reload functions from WebSocket callbacks with empty deps
-- System prompt bubble: Full width styling in ChatInterface
