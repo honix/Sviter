@@ -17,13 +17,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, FileText, FileSpreadsheet, FileCode, FileJson, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, MessageSquarePlus, Waypoints, ImagePlus, Loader2, Image, File, Github, Key } from 'lucide-react';
+import { Plus, FileText, FileSpreadsheet, FileCode, FileJson, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, Trash2, LogOut, MessageSquarePlus, Waypoints, Upload, Loader2, Image, File, Github, Key } from 'lucide-react';
 import { useSelection } from '../../contexts/SelectionContext';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
 import { getApiUrl } from '../../utils/url';
 import { isImagePath } from '../../utils/files';
-import { useImageUpload } from '../../hooks/useImageUpload';
+import { useFileUpload } from '../../hooks/useImageUpload';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 
 // Extract filename from path
@@ -185,7 +185,7 @@ const PageTree: React.FC<PageTreeProps> = ({
   const { addPathToContext } = useSelection();
   const { draggedItem, overId: dndOverId, setTreeDragEndHandler } = useAppDnd();
   const [diffStats, setDiffStats] = useState<PageDiffStats>({});
-  const { isUploading, triggerUpload, inputProps } = useImageUpload();
+  const { isUploading, triggerUpload, inputProps } = useFileUpload();
 
   // Track if we're dragging (for showing drop zones)
   const isDragging = draggedItem !== null;
@@ -538,13 +538,13 @@ const PageTree: React.FC<PageTreeProps> = ({
               onClick={triggerUpload}
               variant="outline"
               size="sm"
-              title="Upload Image"
+              title="Upload file"
               disabled={isUploading}
             >
               {isUploading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <ImagePlus className="h-4 w-4" />
+                <Upload className="h-4 w-4" />
               )}
             </Button>
             <input {...inputProps} />
