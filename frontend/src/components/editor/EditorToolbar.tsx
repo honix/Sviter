@@ -228,13 +228,13 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
     editorView.focus();
   };
 
-  // Handle image upload button click
-  const handleImageClick = () => {
+  // Handle upload button click
+  const handleUploadClick = () => {
     fileInputRef.current?.click();
   };
 
   // Handle file selection (images and other files)
-  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!editorView) return;
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -359,7 +359,7 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
           icon={<Minus className="h-4 w-4" />}
         />
         <ToolbarButton
-          onClick={handleImageClick}
+          onClick={handleUploadClick}
           active={false}
           tooltip="Upload file"
           icon={isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
@@ -368,7 +368,7 @@ export function EditorToolbar({ editorView }: EditorToolbarProps) {
           ref={fileInputRef}
           type="file"
           multiple
-          onChange={handleImageSelect}
+          onChange={handleFileSelect}
           className="hidden"
         />
 
