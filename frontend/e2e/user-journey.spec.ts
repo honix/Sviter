@@ -23,24 +23,24 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
     await expect(page.locator('[data-panel]').first()).toBeVisible({ timeout: 15000 })
 
     // Wait for page tree to load - should see Home from test fixtures
-    await page.waitForSelector('text=Home', { timeout: 10000 })
+    await expect(page.getByTestId('page-Home')).toBeVisible({ timeout: 10000 })
   })
 
   test('complete edit workflow with agent thread', async ({ page }) => {
     // Step 1: Click on Home page and verify fixture content
     await test.step('Open Home page and verify content', async () => {
-      await page.locator('text=Home').first().click()
+      await page.getByTestId('page-Home').click()
 
       // Test fixture Home.md has "Welcome to Test Wiki"
-      await expect(page.locator('text=Welcome to Test Wiki')).toBeVisible({ timeout: 5000 })
+      await expect(page.getByText('Welcome to Test Wiki')).toBeVisible({ timeout: 5000 })
     })
 
     // Step 2: Navigate to TestPage and verify fixture content
     await test.step('Open TestPage and verify content', async () => {
-      await page.locator('text=TestPage').first().click()
+      await page.getByTestId('page-TestPage').click()
 
       // Test fixture TestPage.md has "various formatting"
-      await expect(page.locator('text=various formatting')).toBeVisible({ timeout: 5000 })
+      await expect(page.getByText('various formatting')).toBeVisible({ timeout: 5000 })
     })
 
     // Step 3: Send a message to the assistant to trigger an edit
@@ -115,11 +115,11 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
     await test.step('Verify changes merged to main', async () => {
       // Navigate to TestPage and verify the mock edit was applied
       // The mock adapter edits TestPage to add "This section was added by the E2E test mock agent"
-      await page.locator('text=TestPage').first().click()
+      await page.getByTestId('page-TestPage').click()
 
-      // Use .first() since the text might appear multiple times (from retries or multiple edits)
+      // Verify the mock edit was applied
       await expect(
-        page.locator('text=This section was added by the E2E test mock agent').first()
+        page.getByText('This section was added by the E2E test mock agent').first()
       ).toBeVisible({ timeout: 5000 })
     })
   })
@@ -127,59 +127,54 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
   test('page navigation works correctly', async ({ page }) => {
     await test.step('Navigate between fixture pages', async () => {
       // Click Home - fixture has "Welcome to Test Wiki"
-      await page.getByRole('button', { name: /Home/i }).first().click()
-      await expect(page.locator('text=Welcome to Test Wiki')).toBeVisible({ timeout: 5000 })
+      await page.getByTestId('page-Home').click()
+      await expect(page.getByText('Welcome to Test Wiki')).toBeVisible({ timeout: 5000 })
 
       // Click TestPage - fixture has "various formatting"
-      await page.getByRole('button', { name: /TestPage/i }).first().click()
-      await expect(page.locator('text=various formatting')).toBeVisible({ timeout: 5000 })
+      await page.getByTestId('page-TestPage').click()
+      await expect(page.getByText('various formatting')).toBeVisible({ timeout: 5000 })
 
       // Click Concepts - verify the heading appears (use exact match)
-      await page.getByRole('button', { name: /Concepts/i }).first().click()
+      await page.getByTestId('page-Concepts').click()
       await expect(page.getByRole('heading', { name: 'Concepts', exact: true })).toBeVisible({ timeout: 5000 })
     })
   })
 
   test('nested folder navigation works correctly', async ({ page }) => {
     await test.step('Verify nested structure and navigate', async () => {
-      // Wait for page tree to load completely
-      await page.waitForTimeout(3000)
+      // Wait for page tree to load - Docs folder should be visible
+      const docsFolder = page.getByTestId('folder-Docs')
+      await expect(docsFolder).toBeVisible({ timeout: 10000 })
 
-      // First, let's verify the Docs folder exists in the tree
-      const docsText = page.locator('text=Docs')
-      await expect(docsText).toBeVisible({ timeout: 10000 })
+      // Click Docs folder to expand it
+      await docsFolder.click()
 
-      // Click anywhere on the line containing "Docs" to expand
-      await docsText.click({ force: true })
-      await page.waitForTimeout(1500)
+      // After expanding Docs, Getting-Started page should appear
+      const gettingStartedPage = page.getByTestId('page-Docs-Getting-Started')
+      await expect(gettingStartedPage).toBeVisible({ timeout: 10000 })
 
-      // After expanding Docs, Getting-Started.md should appear (with .md extension)
-      await expect(page.getByText('Getting-Started.md')).toBeVisible({ timeout: 10000 })
-
-      // Click Getting-Started.md to view the page
-      await page.getByText('Getting-Started.md').click({ force: true })
-      await page.waitForTimeout(1000)
+      // Click Getting-Started to view the page
+      await gettingStartedPage.click()
 
       // Verify the page content loaded
       await expect(page.getByText('This guide will help you get up and running quickly')).toBeVisible({ timeout: 10000 })
 
       // Now expand Tutorials folder (nested inside Docs)
-      // Use .first() because "Tutorials" appears in page content too
-      await expect(page.getByText('Tutorials').first()).toBeVisible({ timeout: 10000 })
-      await page.getByText('Tutorials').first().click({ force: true })
-      await page.waitForTimeout(1500)
+      const tutorialsFolder = page.getByTestId('folder-Docs-Tutorials')
+      await expect(tutorialsFolder).toBeVisible({ timeout: 10000 })
+      await tutorialsFolder.click()
 
-      // After expanding Tutorials, Basic.md should appear (with .md extension)
-      await expect(page.getByText('Basic.md').first()).toBeVisible({ timeout: 10000 })
+      // After expanding Tutorials, Basic page should appear
+      const basicPage = page.getByTestId('page-Docs-Tutorials-Basic')
+      await expect(basicPage).toBeVisible({ timeout: 10000 })
 
-      // Click Basic.md to view the page
-      await page.getByText('Basic.md').first().click({ force: true })
-      await page.waitForTimeout(1000)
+      // Click Basic to view the page
+      await basicPage.click()
       await expect(page.getByText('This is a basic tutorial for beginners')).toBeVisible({ timeout: 10000 })
 
-      // Click Advanced.md to view the page (with .md extension)
-      await page.getByText('Advanced.md').first().click({ force: true })
-      await page.waitForTimeout(1000)
+      // Click Advanced to view the page
+      const advancedPage = page.getByTestId('page-Docs-Tutorials-Advanced')
+      await advancedPage.click()
       await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 10000 })
     })
   })
@@ -195,28 +190,40 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
   })
 
   test('expanded folders and current page persist after reload', async ({ page }) => {
-    await test.step('Setup: Expand folders and navigate to nested page', async () => {
-      // Wait for tree to load
-      await page.waitForTimeout(3000)
+    await test.step('Setup: Clear localStorage to ensure clean state', async () => {
+      await page.evaluate(() => {
+        localStorage.removeItem('sviter:expandedFolders')
+        localStorage.removeItem('sviter:currentPagePath')
+      })
+      // Reload to apply clean state
+      await page.reload()
+      await expect(page.locator('[data-panel]').first()).toBeVisible({ timeout: 15000 })
+    })
+
+    await test.step('Expand folders and navigate to nested page', async () => {
+      // Wait for Docs folder to be visible
+      const docsFolder = page.getByTestId('folder-Docs')
+      await expect(docsFolder).toBeVisible({ timeout: 10000 })
 
       // Expand Docs folder
-      await page.getByText('Docs').first().click({ force: true })
-      await page.waitForTimeout(1500)
+      await docsFolder.click()
 
-      // Wait for Getting-Started.md to appear (confirms folder is expanded) - with .md extension
-      await expect(page.getByText('Getting-Started.md').first()).toBeVisible({ timeout: 10000 })
+      // Wait for Getting-Started page to appear (confirms folder is expanded)
+      const gettingStartedPage = page.getByTestId('page-Docs-Getting-Started')
+      await expect(gettingStartedPage).toBeVisible({ timeout: 10000 })
 
       // Expand Tutorials folder (nested inside Docs)
-      // Use .first() because "Tutorials" appears in page content too
-      await page.getByText('Tutorials').first().click({ force: true })
-      await page.waitForTimeout(1500)
+      const tutorialsFolder = page.getByTestId('folder-Docs-Tutorials')
+      await expect(tutorialsFolder).toBeVisible({ timeout: 10000 })
+      await tutorialsFolder.click()
 
-      // Wait for Basic.md to appear (confirms folder is expanded) - with .md extension
-      await expect(page.getByText('Basic.md').first()).toBeVisible({ timeout: 10000 })
+      // Wait for Basic page to appear (confirms folder is expanded)
+      const basicPage = page.getByTestId('page-Docs-Tutorials-Basic')
+      await expect(basicPage).toBeVisible({ timeout: 10000 })
 
-      // Navigate to Advanced.md tutorial page (deeply nested page) - with .md extension
-      await page.getByText('Advanced.md').first().click({ force: true })
-      await page.waitForTimeout(1000)
+      // Navigate to Advanced tutorial page (deeply nested page)
+      const advancedPage = page.getByTestId('page-Docs-Tutorials-Advanced')
+      await advancedPage.click()
       await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 10000 })
     })
 
@@ -225,19 +232,17 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
 
       // Wait for app to load again
       await expect(page.locator('[data-panel]').first()).toBeVisible({ timeout: 15000 })
-      await page.waitForSelector('text=Home', { timeout: 10000 })
-      // Give extra time for localStorage to be read and folders to expand
-      await page.waitForTimeout(3000)
+      // Wait for page tree to render with persisted state
+      await expect(page.getByTestId('folder-Docs')).toBeVisible({ timeout: 10000 })
     })
 
     await test.step('Verify folders remain expanded', async () => {
-      // Docs folder should still be expanded - Getting-Started.md should be visible (with .md extension)
-      await expect(page.getByText('Getting-Started.md').first()).toBeVisible({ timeout: 10000 })
+      // Docs folder should still be expanded - Getting-Started should be visible
+      await expect(page.getByTestId('page-Docs-Getting-Started')).toBeVisible({ timeout: 10000 })
 
-      // Tutorials folder should still be expanded - Basic.md and Advanced.md should be visible (with .md extension)
-      // Use .first() for each because they might appear in breadcrumbs or other places
-      await expect(page.getByText('Basic.md').first()).toBeVisible({ timeout: 10000 })
-      await expect(page.getByText('Advanced.md').first()).toBeVisible({ timeout: 10000 })
+      // Tutorials folder should still be expanded - Basic and Advanced should be visible
+      await expect(page.getByTestId('page-Docs-Tutorials-Basic')).toBeVisible({ timeout: 10000 })
+      await expect(page.getByTestId('page-Docs-Tutorials-Advanced')).toBeVisible({ timeout: 10000 })
     })
 
     await test.step('Verify current page is restored', async () => {
@@ -245,7 +250,6 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
       await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 10000 })
 
       // Verify the page title is shown correctly - Advanced tutorial should be the active page
-      // We can verify this by checking that the content is visible, which confirms the page loaded
       await expect(page.getByRole('heading', { name: 'Advanced Tutorial' })).toBeVisible({ timeout: 10000 })
     })
   })
