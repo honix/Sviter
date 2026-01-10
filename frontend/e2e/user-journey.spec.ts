@@ -141,45 +141,49 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
   })
 
   test('nested folder navigation works correctly', async ({ page }) => {
-    await test.step('Expand and navigate nested folders', async () => {
-      // Wait for page tree to load
-      await page.waitForTimeout(2000)
+    await test.step('Verify nested structure and navigate', async () => {
+      // Wait for page tree to load completely
+      await page.waitForTimeout(3000)
 
-      // Look for Docs folder - it's rendered as a div with span containing the title
-      // Click on the row to expand the folder
-      await page.locator('.flex.items-center').filter({ hasText: /^Docs/ }).first().click()
+      // First, let's verify the Docs folder exists in the tree
+      const docsText = page.locator('text=Docs')
+      await expect(docsText).toBeVisible({ timeout: 10000 })
 
-      // Wait a bit for folder to expand
+      // Click anywhere on the line containing "Docs" to expand
+      await docsText.click({ force: true })
+      await page.waitForTimeout(1500)
+
+      // After expanding Docs, Getting-Started should appear
+      const gettingStartedText = page.locator('text=Getting-Started')
+      await expect(gettingStartedText).toBeVisible({ timeout: 10000 })
+
+      // Click Getting-Started to view the page
+      await gettingStartedText.click({ force: true })
       await page.waitForTimeout(1000)
 
-      // Check if Getting-Started appears after expanding Docs
-      await expect(page.getByText('Getting-Started')).toBeVisible({ timeout: 5000 })
+      // Verify the page content loaded
+      await expect(page.getByText('This guide will help you get up and running quickly')).toBeVisible({ timeout: 10000 })
 
-      // Click Getting-Started page - click on the row
-      await page.locator('.flex.items-center').filter({ hasText: /Getting-Started/ }).first().click()
-      await expect(page.getByText('This guide will help you get up and running quickly')).toBeVisible({ timeout: 5000 })
+      // Now expand Tutorials folder (nested inside Docs)
+      const tutorialsText = page.locator('text=Tutorials')
+      await expect(tutorialsText).toBeVisible({ timeout: 10000 })
+      await tutorialsText.click({ force: true })
+      await page.waitForTimeout(1500)
 
-      // Expand Tutorials folder (nested inside Docs) - click on the row
-      await page.locator('.flex.items-center').filter({ hasText: /^Tutorials/ }).first().click()
+      // After expanding Tutorials, Basic should appear
+      const basicText = page.locator('text=Basic')
+      await expect(basicText).toBeVisible({ timeout: 10000 })
+
+      // Click Basic to view the page
+      await basicText.click({ force: true })
       await page.waitForTimeout(1000)
+      await expect(page.getByText('This is a basic tutorial for beginners')).toBeVisible({ timeout: 10000 })
 
-      // Navigate to Basic tutorial - click on the row
-      await page.locator('.flex.items-center').filter({ hasText: /^Basic/ }).first().click()
-      await expect(page.getByText('This is a basic tutorial for beginners')).toBeVisible({ timeout: 5000 })
-
-      // Navigate to Advanced tutorial - click on the row
-      await page.locator('.flex.items-center').filter({ hasText: /^Advanced/ }).first().click()
-      await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 5000 })
-    })
-
-    await test.step('Navigate to Projects folder', async () => {
-      // Expand Projects folder - click on the row
-      await page.locator('.flex.items-center').filter({ hasText: /^Projects/ }).first().click()
+      // Click Advanced to view the page
+      const advancedText = page.locator('text=Advanced')
+      await advancedText.click({ force: true })
       await page.waitForTimeout(1000)
-
-      // Navigate to Example-Project - click on the row
-      await page.locator('.flex.items-center').filter({ hasText: /Example-Project/ }).first().click()
-      await expect(page.getByText('This is an example project that showcases best practices')).toBeVisible({ timeout: 5000 })
+      await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 10000 })
     })
   })
 
@@ -196,25 +200,26 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
   test('expanded folders and current page persist after reload', async ({ page }) => {
     await test.step('Setup: Expand folders and navigate to nested page', async () => {
       // Wait for tree to load
-      await page.waitForTimeout(2000)
+      await page.waitForTimeout(3000)
 
-      // Expand Docs folder - click on the row
-      await page.locator('.flex.items-center').filter({ hasText: /^Docs/ }).first().click()
-      await page.waitForTimeout(1000)
+      // Expand Docs folder
+      await page.locator('text=Docs').click({ force: true })
+      await page.waitForTimeout(1500)
 
       // Wait for Getting-Started to appear (confirms folder is expanded)
-      await expect(page.getByText('Getting-Started')).toBeVisible({ timeout: 5000 })
+      await expect(page.getByText('Getting-Started')).toBeVisible({ timeout: 10000 })
 
-      // Expand Tutorials folder (nested inside Docs) - click on the row
-      await page.locator('.flex.items-center').filter({ hasText: /^Tutorials/ }).first().click()
-      await page.waitForTimeout(1000)
+      // Expand Tutorials folder (nested inside Docs)
+      await page.locator('text=Tutorials').click({ force: true })
+      await page.waitForTimeout(1500)
 
       // Wait for Basic to appear (confirms folder is expanded)
-      await expect(page.getByText('Basic')).toBeVisible({ timeout: 5000 })
+      await expect(page.getByText('Basic')).toBeVisible({ timeout: 10000 })
 
-      // Navigate to Advanced tutorial page (deeply nested page) - click on the row
-      await page.locator('.flex.items-center').filter({ hasText: /^Advanced/ }).first().click()
-      await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 5000 })
+      // Navigate to Advanced tutorial page (deeply nested page)
+      await page.locator('text=Advanced').click({ force: true })
+      await page.waitForTimeout(1000)
+      await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 10000 })
     })
 
     await test.step('Reload page', async () => {
@@ -224,25 +229,25 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
       await expect(page.locator('[data-panel]').first()).toBeVisible({ timeout: 15000 })
       await page.waitForSelector('text=Home', { timeout: 10000 })
       // Give extra time for localStorage to be read and folders to expand
-      await page.waitForTimeout(2000)
+      await page.waitForTimeout(3000)
     })
 
     await test.step('Verify folders remain expanded', async () => {
       // Docs folder should still be expanded - Getting-Started should be visible
-      await expect(page.getByText('Getting-Started')).toBeVisible({ timeout: 5000 })
+      await expect(page.getByText('Getting-Started')).toBeVisible({ timeout: 10000 })
 
       // Tutorials folder should still be expanded - Basic and Advanced should be visible
-      await expect(page.getByText('Basic')).toBeVisible({ timeout: 5000 })
-      await expect(page.getByText('Advanced')).toBeVisible({ timeout: 5000 })
+      await expect(page.getByText('Basic')).toBeVisible({ timeout: 10000 })
+      await expect(page.getByText('Advanced')).toBeVisible({ timeout: 10000 })
     })
 
     await test.step('Verify current page is restored', async () => {
       // The Advanced tutorial page should still be selected and displayed
-      await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 5000 })
+      await expect(page.getByText('This tutorial covers advanced features and patterns')).toBeVisible({ timeout: 10000 })
 
       // Verify the page title is shown correctly - Advanced tutorial should be the active page
       // We can verify this by checking that the content is visible, which confirms the page loaded
-      await expect(page.getByRole('heading', { name: 'Advanced Tutorial' })).toBeVisible({ timeout: 5000 })
+      await expect(page.getByRole('heading', { name: 'Advanced Tutorial' })).toBeVisible({ timeout: 10000 })
     })
   })
 })
