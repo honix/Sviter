@@ -73,25 +73,25 @@
 }
 
 .sepia {
-  --background: 45 20% 93%;
-  --foreground: 30 15% 20%;
-  --muted: 40 12% 86%;
-  --muted-foreground: 30 10% 45%;
-  --popover: 45 18% 94%;
-  --popover-foreground: 30 15% 20%;
-  --card: 45 18% 94%;
-  --card-foreground: 30 15% 20%;
-  --border: 40 12% 78%;
-  --input: 40 12% 78%;
-  --ring: 30 15% 35%;
+  --background: 45 8% 94%;
+  --foreground: 30 15% 30%;
+  --muted: 45 6% 87%;
+  --muted-foreground: 35 10% 50%;
+  --popover: 45 7% 95%;
+  --popover-foreground: 30 15% 30%;
+  --card: 45 7% 95%;
+  --card-foreground: 30 15% 30%;
+  --border: 40 8% 80%;
+  --input: 40 8% 80%;
+  --ring: 30 15% 40%;
   --primary: 142 50% 55%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 40 12% 86%;
-  --secondary-foreground: 30 15% 20%;
-  --accent: 40 12% 86%;
-  --accent-foreground: 30 15% 20%;
+  --secondary: 45 6% 87%;
+  --secondary-foreground: 30 15% 30%;
+  --accent: 45 6% 87%;
+  --accent-foreground: 30 15% 30%;
   --destructive: 0 65% 55%;
-  --destructive-foreground: 45 20% 98%;
+  --destructive-foreground: 45 8% 98%;
 }
 
 body {
@@ -162,18 +162,10 @@ body {
   background: #9d7a4e !important;
 }
 
-/* Inline code readability in dark mode */
-.dark code {
-  background-color: hsl(217.2, 32.6%, 24%) !important;
-  color: hsl(0, 0%, 10%) !important;
-  padding: 2px 4px;
-  border-radius: 3px;
-}
-
-/* Inline code readability in sepia mode */
-.sepia code {
-  background-color: hsl(40, 15%, 88%) !important;
-  color: hsl(25, 25%, 30%) !important;
+/* Inline code readability in dark mode - only for inline code in markdown */
+.dark span.bg-primary-foreground {
+  background-color: hsl(210, 40%, 88%) !important;
+  color: hsl(222.2, 47%, 11%) !important;
 }
 
 /* Hide inactive Radix UI tab content panels only (not tab buttons) */
