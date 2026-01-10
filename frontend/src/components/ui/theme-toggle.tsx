@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bird, Sun, Moon, Palette } from 'lucide-react';
+import { Settings, Sun, Moon, Palette } from 'lucide-react';
 import { useTheme, Theme } from '../../contexts/ThemeContext';
 import {
   DropdownMenu,
@@ -33,7 +33,7 @@ export const ThemeToggle: React.FC = () => {
           className="h-8 w-8"
           data-testid="theme-toggle-button"
         >
-          <Bird className="h-4 w-4" />
+          <Settings className="h-4 w-4" />
           <span className="sr-only">Toggle theme</span>
         </Button>
       </DropdownMenuTrigger>

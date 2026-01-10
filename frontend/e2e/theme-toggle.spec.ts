@@ -7,7 +7,7 @@ test.describe('Theme Toggle', () => {
     // Wait for app to load
     await page.waitForLoadState('networkidle');
 
-    // Check for theme toggle button with Bird icon
+    // Check for theme toggle button with Settings icon
     const themeToggle = page.getByTestId('theme-toggle-button');
     await expect(themeToggle).toBeVisible();
   });
