@@ -19,7 +19,7 @@ import re
 
 from threads.base import Thread, ThreadType, ThreadStatus, ThreadMessage
 from threads.mixins import ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin
-from ai.prompts import THREAD_PROMPT
+from ai.prompts import THREAD_PROMPT, COLLABORATIVE_THREAD_PROMPT
 from ai.tools import WikiTool
 from db import (
     create_thread as db_create_thread,
@@ -33,8 +33,13 @@ if TYPE_CHECKING:
 @dataclass
 class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thread):
     """
-    Autonomous worker thread with full wiki access.
+    Worker thread with full wiki access.
 
+    Modes:
+    - Autonomous (collaborative=False): AI-driven, starts with goal, runs autonomously
+    - Collaborative (collaborative=True): Human-driven, AI participates when addressed
+
+    Features:
     - Has its own git branch and worktree
     - Can read and edit wiki pages
     - Goes through review workflow before changes are merged
@@ -48,8 +53,12 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
     # ReviewMixin fields
     review_summary: Optional[str] = None
 
+    # Collaborative mode flag
+    collaborative: bool = False
+
     @classmethod
-    def create(cls, owner_id: str, name: str, goal: str) -> 'WorkerThread':
+    def create(cls, owner_id: str, name: str, goal: str,
+               collaborative: bool = False) -> 'WorkerThread':
         """
         Create a new worker thread.
 
@@ -57,6 +66,7 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
             owner_id: User who created this thread
             name: Short name for the thread (e.g., "fix-typos")
             goal: Task description
+            collaborative: If True, AI participates instead of driving
 
         Returns:
             WorkerThread instance (branch/worktree not yet created)
@@ -93,6 +103,7 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
             branch=branch,
             worktree_path=None,
             review_summary=None,
+            collaborative=collaborative,
             error=None,
             is_generating=False
         )
@@ -151,6 +162,11 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
 
     def get_prompt(self) -> str:
         """Get system prompt for worker."""
+        if self.collaborative:
+            return COLLABORATIVE_THREAD_PROMPT.format(
+                goal=self.goal or "",
+                branch=self.branch or ""
+            )
         return THREAD_PROMPT.format(goal=self.goal or "", branch=self.branch or "")
 
     def get_tools(self, wiki: 'GitWiki' = None, help_callback: Callable = None,
@@ -189,6 +205,7 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
             'branch': self.branch,
             'worktree_path': self.worktree_path,
             'review_summary': self.review_summary,
+            'collaborative': self.collaborative,
         })
         return base
 
@@ -232,4 +249,7 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
 
     def get_initial_message(self) -> Optional[str]:
         """Initial message to start worker execution with goal."""
+        if self.collaborative:
+            # Collaborative threads wait for human messages
+            return None
         return f"Your goal: {self.goal}\n\nBegin working on this task."

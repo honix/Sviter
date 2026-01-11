@@ -24,7 +24,7 @@ export interface Thread {
   owner_id: string;
   status: ThreadStatus;
   goal?: string;           // Required for worker, optional for assistant
-  branch?: string;         // Only workers have branches
+  branch?: string;         // Only workers have branches (hidden in UI for collaborative)
   worktree_path?: string;  // Only workers have worktrees
   is_generating?: boolean;
   created_at: string;
@@ -35,6 +35,10 @@ export interface Thread {
   thread_type?: string;    // Legacy compatibility field from backend
   merge_blocked?: boolean; // True if merge is blocked by active editors
   blocked_pages?: Record<string, string[]>; // Page path -> list of client IDs editing
+  participants?: string[]; // All participants (owner + shared users)
+  attention_reasons?: string[]; // Why this thread needs user's attention
+  needs_attention?: boolean; // Quick check for inbox filtering
+  collaborative?: boolean; // True for user-initiated collaborative threads
 }
 
 export interface ThreadMessage {

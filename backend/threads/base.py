@@ -18,6 +18,9 @@ from db import (
     delete_thread as db_delete_thread,
     add_thread_message,
     get_thread_messages,
+    share_thread,
+    unshare_thread,
+    get_thread_shares,
 )
 
 
@@ -210,7 +213,8 @@ class Thread:
             "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
             "error": self.error,
             "is_generating": self.is_generating,
-            "message_count": len(self.messages) if self._messages is not None else 0
+            "message_count": len(self.messages) if self._messages is not None else 0,
+            "participants": self.get_participants(),
         }
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -289,6 +293,57 @@ class Thread:
     def is_finished(self) -> bool:
         """Check if thread is in a terminal state (no more interaction possible)."""
         return self.status in (ThreadStatus.ACCEPTED, ThreadStatus.REJECTED, ThreadStatus.ARCHIVED)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Participant Management
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def get_participants(self) -> List[str]:
+        """
+        Get all participants in this thread.
+
+        Returns list of user IDs: owner + all shared users.
+        """
+        participants = [self.owner_id]
+        shared = get_thread_shares(self.id)
+        participants.extend(shared)
+        return participants
+
+    def add_participant(self, user_id: str) -> bool:
+        """
+        Add a participant to this thread.
+
+        Args:
+            user_id: User ID to add
+
+        Returns:
+            True if added (or already participant)
+        """
+        if user_id == self.owner_id:
+            return True  # Owner is always a participant
+        return share_thread(self.id, user_id)
+
+    def remove_participant(self, user_id: str) -> bool:
+        """
+        Remove a participant from this thread.
+
+        Args:
+            user_id: User ID to remove
+
+        Returns:
+            True if removed (or wasn't participant)
+
+        Note: Cannot remove the owner.
+        """
+        if user_id == self.owner_id:
+            return False  # Can't remove owner
+        return unshare_thread(self.id, user_id)
+
+    def is_participant(self, user_id: str) -> bool:
+        """Check if user is a participant in this thread."""
+        if user_id == self.owner_id:
+            return True
+        return user_id in get_thread_shares(self.id)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Tool Methods (to be overridden by mixins)

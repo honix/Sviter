@@ -16,6 +16,8 @@ import {
   GitBranch,
   Check,
   XCircle,
+  Users,
+  Bell,
 } from "lucide-react";
 import type { Thread, ThreadStatus } from "../../types/thread";
 
@@ -97,11 +99,22 @@ export function ThreadSelector({
                   <span className="font-medium truncate">
                     {selectedThread.name}
                   </span>
+                  {selectedThread.needs_attention && (
+                    <Bell className="h-3 w-3 text-amber-500" />
+                  )}
                 </div>
-                {selectedThread.branch && (
+                {/* Show branch only for non-collaborative threads */}
+                {selectedThread.branch && !selectedThread.collaborative && (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <GitBranch className="h-3 w-3" />
                     <span className="truncate">{selectedThread.branch}</span>
+                  </div>
+                )}
+                {/* Show participants for collaborative threads */}
+                {selectedThread.collaborative && selectedThread.participants && selectedThread.participants.length > 1 && (
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Users className="h-3 w-3" />
+                    <span>{selectedThread.participants.length} participants</span>
                   </div>
                 )}
               </>
@@ -147,9 +160,19 @@ export function ThreadSelector({
               <div className="flex items-center gap-2">
                 <StatusIcon status={thread.status} />
                 <span className="truncate max-w-[150px]">{thread.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  ({statusLabel[thread.status]})
-                </span>
+                {thread.collaborative ? (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Users className="h-3 w-3" />
+                    {thread.participants?.length || 1}
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    ({statusLabel[thread.status]})
+                  </span>
+                )}
+                {thread.needs_attention && (
+                  <Bell className="h-3 w-3 text-amber-500" />
+                )}
               </div>
             </SelectItem>
           ));

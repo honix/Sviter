@@ -83,6 +83,24 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_shares_user ON thread_shares(user_id);
+
+            -- Thread attention tracking (notifications/inbox)
+            CREATE TABLE IF NOT EXISTS thread_attention (
+                thread_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                reason TEXT NOT NULL,  -- 'mention', 'added', 'question', 'waiting'
+                message_id TEXT,       -- Optional: which message triggered attention
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                cleared_at TIMESTAMP,  -- NULL if still needs attention
+                PRIMARY KEY (thread_id, user_id, reason, created_at),
+                FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_attention_user ON thread_attention(user_id);
+            CREATE INDEX IF NOT EXISTS idx_attention_uncleared
+            ON thread_attention(user_id, cleared_at)
+            WHERE cleared_at IS NULL;
         """)
         conn.commit()
 
@@ -495,5 +513,140 @@ def can_access_thread(thread_id: str, user_id: str) -> bool:
             WHERE t.id = ? AND (t.owner_id = ? OR ts.user_id IS NOT NULL)
             """,
             (user_id, thread_id, user_id)
+        ).fetchone()
+        return row is not None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Thread Attention (Notifications/Inbox)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def add_attention(
+    thread_id: str,
+    user_id: str,
+    reason: str,
+    message_id: str = None
+) -> bool:
+    """
+    Add attention flag for a user on a thread.
+
+    Args:
+        thread_id: Thread requiring attention
+        user_id: User who needs to see this
+        reason: Why attention is needed ('mention', 'added', 'question', 'waiting')
+        message_id: Optional message that triggered the attention
+
+    Returns:
+        True if added successfully
+    """
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO thread_attention (thread_id, user_id, reason, message_id)
+                VALUES (?, ?, ?, ?)
+                """,
+                (thread_id, user_id, reason, message_id)
+            )
+            conn.commit()
+        return True
+    except Exception:
+        return False
+
+
+def clear_attention(thread_id: str, user_id: str, reason: str = None) -> int:
+    """
+    Clear attention flags for a user on a thread.
+
+    Args:
+        thread_id: Thread ID
+        user_id: User ID
+        reason: If provided, only clear this reason; otherwise clear all
+
+    Returns:
+        Number of attention flags cleared
+    """
+    with get_connection() as conn:
+        if reason:
+            cursor = conn.execute(
+                """
+                UPDATE thread_attention
+                SET cleared_at = CURRENT_TIMESTAMP
+                WHERE thread_id = ? AND user_id = ? AND reason = ? AND cleared_at IS NULL
+                """,
+                (thread_id, user_id, reason)
+            )
+        else:
+            cursor = conn.execute(
+                """
+                UPDATE thread_attention
+                SET cleared_at = CURRENT_TIMESTAMP
+                WHERE thread_id = ? AND user_id = ? AND cleared_at IS NULL
+                """,
+                (thread_id, user_id)
+            )
+        conn.commit()
+        return cursor.rowcount
+
+
+def get_user_attention(user_id: str) -> List[dict]:
+    """
+    Get all uncleared attention items for a user.
+
+    Returns list of dicts with thread_id, reason, message_id, created_at.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT thread_id, reason, message_id, created_at
+            FROM thread_attention
+            WHERE user_id = ? AND cleared_at IS NULL
+            ORDER BY created_at DESC
+            """,
+            (user_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_threads_needing_attention(user_id: str) -> List[dict]:
+    """
+    Get threads that need user's attention (for inbox view).
+
+    Returns threads with attention reasons aggregated.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT t.*, GROUP_CONCAT(DISTINCT ta.reason) as attention_reasons
+            FROM threads t
+            JOIN thread_attention ta ON t.id = ta.thread_id
+            WHERE ta.user_id = ? AND ta.cleared_at IS NULL
+            GROUP BY t.id
+            ORDER BY t.updated_at DESC
+            """,
+            (user_id,)
+        ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            # Parse attention_reasons into list
+            if d.get('attention_reasons'):
+                d['attention_reasons'] = d['attention_reasons'].split(',')
+            else:
+                d['attention_reasons'] = []
+            result.append(d)
+        return result
+
+
+def has_unread_attention(thread_id: str, user_id: str) -> bool:
+    """Check if thread has uncleared attention for user."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT 1 FROM thread_attention
+            WHERE thread_id = ? AND user_id = ? AND cleared_at IS NULL
+            LIMIT 1
+            """,
+            (thread_id, user_id)
         ).fetchone()
         return row is not None

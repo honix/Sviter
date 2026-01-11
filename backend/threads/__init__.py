@@ -29,6 +29,12 @@ from .mixins import (
 from .accept_result import AcceptResult
 from .manager import ThreadManager, initialize_thread_manager, websocket_endpoint
 from . import git_operations
+from . import mentions
+from . import approval
+from . import commands
+from .mentions import parse_mentions, is_ai_addressed, ParsedMentions
+from .approval import detect_approval, is_approval, detect_consensus, ApprovalType
+from .commands import parse_command, CommandType, ParsedCommand
 
 __all__ = [
     # Classes
@@ -39,6 +45,9 @@ __all__ = [
     'AssistantThread',
     'WorkerThread',
     'ThreadManager',
+    'ParsedMentions',
+    'ParsedCommand',
+    'ApprovalType',
     # Mixins
     'ReadToolsMixin',
     'SpawnMixin',
@@ -48,7 +57,18 @@ __all__ = [
     # Functions
     'initialize_thread_manager',
     'websocket_endpoint',
-    # Other
+    'parse_mentions',
+    'is_ai_addressed',
+    'parse_command',
+    'detect_approval',
+    'is_approval',
+    'detect_consensus',
+    # Enums
+    'CommandType',
     'AcceptResult',
+    # Modules
     'git_operations',
+    'mentions',
+    'approval',
+    'commands',
 ]

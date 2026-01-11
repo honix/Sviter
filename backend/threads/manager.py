@@ -24,13 +24,18 @@ from threads.base import Thread, ThreadStatus
 from threads.assistant import AssistantThread
 from threads.worker import WorkerThread
 from threads.accept_result import AcceptResult
+from threads.commands import parse_command, CommandType, ParsedCommand
+from threads.mentions import parse_mentions, is_ai_addressed
 from db import (
     get_or_create_guest,
     get_thread as db_get_thread,
     get_user,
+    get_user_by_email,
     list_threads_for_user,
     list_worker_threads,
     can_access_thread,
+    add_attention,
+    clear_attention,
 )
 
 
@@ -447,17 +452,86 @@ class ThreadManager:
     # Thread Creation
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _create_worker_thread(self, name: str, goal: str, client_id: str) -> WorkerThread:
-        """Create a new worker thread with git branch."""
-        thread = WorkerThread.create(owner_id=client_id, name=name, goal=goal)
+    def _create_worker_thread(self, name: str, goal: str, client_id: str,
+                               collaborative: bool = False,
+                               participants: List[str] = None) -> WorkerThread:
+        """
+        Create a new worker thread with git branch.
+
+        Args:
+            name: Thread name
+            goal: Task goal/description
+            client_id: Owner user ID
+            collaborative: If True, use collaborative mode (AI as participant)
+            participants: List of user IDs to add as participants
+        """
+        thread = WorkerThread.create(
+            owner_id=client_id,
+            name=name,
+            goal=goal,
+            collaborative=collaborative
+        )
 
         # Initialize git branch and worktree
         error = thread.initialize_branch(self.wiki)
         if error:
             thread.set_error(error)
 
+        # Add participants
+        if participants:
+            for user_id in participants:
+                thread.add_participant(user_id)
+                # Add attention for being added to thread
+                add_attention(thread.id, user_id, "added")
+
         self._cache_thread(thread)
         return thread
+
+    async def _handle_thread_command(self, client_id: str, cmd: ParsedCommand) -> Dict[str, Any]:
+        """
+        Handle /thread command to create a user-initiated collaborative thread.
+
+        Format: /thread <name> [@participant ...] [goal message]
+        """
+        if not cmd.name:
+            return {"type": "error", "message": "Thread name required: /thread <name> [@participants] [goal]"}
+
+        # Create collaborative thread
+        goal = cmd.message or f"Collaborative work on {cmd.name}"
+        thread = self._create_worker_thread(
+            name=cmd.name,
+            goal=goal,
+            client_id=client_id,
+            collaborative=True,
+            participants=cmd.participants
+        )
+
+        # Broadcast thread creation
+        await self.broadcast({
+            "type": "thread_created",
+            "thread": thread.to_dict()
+        })
+
+        # Switch user to the new thread
+        self.client_view[client_id] = thread.id
+
+        # Start executor for the thread (collaborative threads wait for messages)
+        await self._start_executor(thread, client_id)
+
+        # Send thread selected to the creator
+        await self.send_message(client_id, {
+            "type": "thread_selected",
+            "thread_id": thread.id,
+            "thread_type": "worker",
+            "thread": thread.to_dict(),
+            "history": []
+        })
+
+        # Update thread list for all clients
+        for cid in self.connections:
+            await self._send_thread_list(cid)
+
+        return {"type": "success", "thread_id": thread.id}
 
     async def _start_initial_message_thread(self, thread: Thread, client_id: str) -> bool:
         """
@@ -610,11 +684,33 @@ class ThreadManager:
         """
         Unified chat handler for all thread types.
 
-        Thread behavior is controlled by thread methods, not isinstance checks.
+        Handles:
+        - Slash commands (/thread, /approve, etc.)
+        - Collaborative threads (AI only responds when addressed)
+        - @mentions for attention tracking
         """
         user_message = message_data.get("message", "")
         if not user_message:
             return {"type": "error", "message": "Empty message"}
+
+        # Check for slash commands first
+        cmd = parse_command(user_message)
+        if cmd:
+            if cmd.type == CommandType.THREAD:
+                return await self._handle_thread_command(client_id, cmd)
+            elif cmd.type == CommandType.APPROVE:
+                # Organic approval - approve current thread
+                current_thread_id = self.client_view.get(client_id)
+                if current_thread_id:
+                    return await self._handle_accept_thread(client_id, current_thread_id)
+                return {"type": "error", "message": "No thread selected to approve"}
+            elif cmd.type == CommandType.REJECT:
+                current_thread_id = self.client_view.get(client_id)
+                if current_thread_id:
+                    return await self._handle_reject_thread(client_id, current_thread_id)
+                return {"type": "error", "message": "No thread selected to reject"}
+            elif cmd.type == CommandType.UNKNOWN:
+                return {"type": "error", "message": f"Unknown command: {cmd.raw}"}
 
         current_thread_id = self.client_view.get(client_id)
         if not current_thread_id:
@@ -623,6 +719,16 @@ class ThreadManager:
         thread = self._get_thread(current_thread_id)
         if not thread:
             return {"type": "error", "message": "Thread not found"}
+
+        # Parse @mentions and add attention for mentioned users
+        mentions = parse_mentions(user_message)
+        for mentioned_user in mentions.user_mentions:
+            # Try to find user by name/id
+            if thread.is_participant(mentioned_user):
+                add_attention(thread.id, mentioned_user, "mention")
+
+        # Clear attention for the sender (they're actively participating)
+        clear_attention(thread.id, client_id)
 
         executor = self.executors.get(thread.id)
         if not executor:
