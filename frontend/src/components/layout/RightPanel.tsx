@@ -5,9 +5,7 @@ import { useAppContext } from '../../contexts/AppContext';
 
 const RightPanel: React.FC = () => {
   const { state, actions } = useAppContext();
-  const { threads, selectedThreadId, assistantThreadId, connectionStatus } = state;
-
-  const isConnected = connectionStatus === 'connected';
+  const { threads, selectedThreadId, assistantThreadId } = state;
 
   // Get worker thread metadata if a worker thread is selected
   const selectedThread = selectedThreadId && selectedThreadId !== assistantThreadId
@@ -21,8 +19,8 @@ const RightPanel: React.FC = () => {
         <ThreadSelector
           threads={threads}
           selectedThreadId={selectedThreadId}
+          assistantThreadId={assistantThreadId}
           onSelect={actions.selectThread}
-          isConnected={isConnected}
         />
       </div>
 

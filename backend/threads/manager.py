@@ -20,11 +20,10 @@ from config import LLM_MODEL, LLM_PROVIDER
 from storage import GitWiki
 from agents.executor import AgentExecutor
 from utils import wrap_system_notification
-from threads.base import Thread, ThreadStatus
+from threads.base import Thread, TERMINAL_STATUSES
 from threads.assistant import AssistantThread
 from threads.worker import WorkerThread
 from threads.accept_result import AcceptResult
-from threads.commands import parse_command, CommandType, ParsedCommand
 from threads.mentions import parse_mentions, is_ai_addressed
 from db import (
     get_or_create_guest,
@@ -36,6 +35,7 @@ from db import (
     can_access_thread,
     add_attention,
     clear_attention,
+    get_thread_shares,
 )
 
 
@@ -197,9 +197,17 @@ class ThreadManager:
 
         # Spawn callback (for assistant threads)
         def spawn_callback(name: str, goal: str) -> Dict[str, Any]:
-            worker = self._create_worker_thread(name, goal, client_id)
-            asyncio.create_task(self._start_worker_with_notifications(worker, client_id))
-            return worker.to_dict()
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"spawn_callback called: name={name}, goal={goal[:50]}...")
+            try:
+                worker = self._create_worker_thread(name, goal, client_id)
+                logger.info(f"Worker created: id={worker.id}, branch={worker.branch}")
+                asyncio.create_task(self._start_worker_with_notifications(worker, client_id))
+                return worker.to_dict()
+            except Exception as e:
+                logger.error(f"spawn_callback failed: {e}", exc_info=True)
+                raise
 
         # List callback (for assistant threads)
         def list_callback():
@@ -219,7 +227,9 @@ class ThreadManager:
 
     async def connect(self, websocket: WebSocket, client_id: str):
         """Accept WebSocket connection and initialize user's assistant thread."""
+        print(f"🔌 connect() called for {client_id}")
         await websocket.accept()
+        print(f"🔌 websocket.accept() done for {client_id}")
 
         # Validate user (creates guest if not exists)
         user = get_or_create_guest(client_id)
@@ -340,6 +350,10 @@ class ThreadManager:
         for t in user_threads + worker_threads:
             if t['id'] not in thread_ids:
                 thread_ids.add(t['id'])
+                # Add participants (owner + shared users)
+                owner_id = t.get('owner_id')
+                shared_users = get_thread_shares(t['id'])
+                t['participants'] = [owner_id] + shared_users if owner_id else shared_users
                 # Add merge status for threads in review
                 if t.get('status') == 'review':
                     merge_status = self.get_merge_block_status(t['id'])
@@ -453,23 +467,20 @@ class ThreadManager:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _create_worker_thread(self, name: str, goal: str, client_id: str,
-                               collaborative: bool = False,
                                participants: List[str] = None) -> WorkerThread:
         """
         Create a new worker thread with git branch.
 
         Args:
             name: Thread name
-            goal: Task goal/description
+            goal: Task goal/description (optional, for reference)
             client_id: Owner user ID
-            collaborative: If True, use collaborative mode (AI as participant)
             participants: List of user IDs to add as participants
         """
         thread = WorkerThread.create(
             owner_id=client_id,
             name=name,
-            goal=goal,
-            collaborative=collaborative
+            goal=goal
         )
 
         # Initialize git branch and worktree
@@ -487,51 +498,80 @@ class ThreadManager:
         self._cache_thread(thread)
         return thread
 
-    async def _handle_thread_command(self, client_id: str, cmd: ParsedCommand) -> Dict[str, Any]:
+    async def _handle_spawn_thread(self, client_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle /thread command to create a user-initiated collaborative thread.
+        Handle spawn_thread message to create a user-initiated thread.
 
-        Format: /thread <name> [@participant ...] [goal message]
+        Used when user clicks the pink "Start thread" button with a message.
+        The user's message becomes the first message in the thread.
         """
-        if not cmd.name:
-            return {"type": "error", "message": "Thread name required: /thread <name> [@participants] [goal]"}
+        import logging
+        logger = logging.getLogger(__name__)
 
-        # Create collaborative thread
-        goal = cmd.message or f"Collaborative work on {cmd.name}"
-        thread = self._create_worker_thread(
-            name=cmd.name,
-            goal=goal,
-            client_id=client_id,
-            collaborative=True,
-            participants=cmd.participants
-        )
+        try:
+            name = message_data.get("name", "").strip()
+            initial_message = message_data.get("goal", "").strip()  # User's message
+            participants = message_data.get("participants", [])
 
-        # Broadcast thread creation
-        await self.broadcast({
-            "type": "thread_created",
-            "thread": thread.to_dict()
-        })
+            logger.info(f"Spawning thread: name={name}, initial_message={initial_message[:50]}...")
 
-        # Switch user to the new thread
-        self.client_view[client_id] = thread.id
+            if not name:
+                # Generate name from first words of user message
+                name = initial_message[:30].lower().replace(" ", "-").replace("_", "-")
+                name = "".join(c for c in name if c.isalnum() or c == "-")
+                if not name:
+                    name = "thread"
 
-        # Start executor for the thread (collaborative threads wait for messages)
-        await self._start_executor(thread, client_id)
+            # Create thread - user's message will be sent as the first message
+            thread = self._create_worker_thread(
+                name=name,
+                goal="",  # No goal - user message is the first message
+                client_id=client_id,
+                participants=participants
+            )
+            logger.info(f"Thread created: id={thread.id}, branch={thread.branch}")
 
-        # Send thread selected to the creator
-        await self.send_message(client_id, {
-            "type": "thread_selected",
-            "thread_id": thread.id,
-            "thread_type": "worker",
-            "thread": thread.to_dict(),
-            "history": []
-        })
+            # Broadcast thread creation
+            await self.broadcast({
+                "type": "thread_created",
+                "thread": thread.to_dict()
+            })
 
-        # Update thread list for all clients
-        for cid in self.connections:
-            await self._send_thread_list(cid)
+            # Switch user to the new thread
+            self.client_view[client_id] = thread.id
 
-        return {"type": "success", "thread_id": thread.id}
+            # Start executor for the thread
+            try:
+                await self._start_executor(thread, client_id)
+            except Exception as e:
+                logger.error(f"Failed to start executor: {e}")
+                # Continue anyway - thread is created, just executor failed
+
+            # Send thread selected to the creator
+            await self.send_message(client_id, {
+                "type": "thread_selected",
+                "thread_id": thread.id,
+                "thread_type": "worker",
+                "thread": thread.to_dict(),
+                "history": []
+            })
+
+            # Update thread list for all clients
+            for cid in self.connections:
+                await self._send_thread_list(cid)
+
+            logger.info(f"Thread spawn complete: {thread.id}")
+
+            # Now send the user's message as the first chat message in the thread
+            if initial_message:
+                logger.info(f"Sending initial message to thread: {initial_message[:50]}...")
+                await self._handle_chat(client_id, {"message": initial_message})
+
+            return {"type": "success", "thread_id": thread.id}
+
+        except Exception as e:
+            logger.error(f"Failed to spawn thread: {e}", exc_info=True)
+            return {"type": "error", "message": str(e)}
 
     async def _start_initial_message_thread(self, thread: Thread, client_id: str) -> bool:
         """
@@ -629,12 +669,11 @@ class ThreadManager:
             pass
         except Exception as e:
             thread.set_error(str(e))
-            if hasattr(thread, 'request_help_status'):
-                thread.request_help_status()
+            thread.set_status("need_help")
         finally:
             # Clean up executor when thread finishes (REVIEW, NEED_HELP, or error)
             # This disconnects the Claude SDK client to prevent CPU spinning
-            if thread.is_finished() or thread.status in (ThreadStatus.REVIEW, ThreadStatus.NEED_HELP):
+            if thread.is_finished() or thread.status in ("review", "need_help"):
                 await self._cleanup_executor(thread.id)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -654,8 +693,8 @@ class ThreadManager:
         elif message_type == "accept_thread":
             return await self._handle_accept_thread(client_id, message_data.get("thread_id"))
 
-        elif message_type == "reject_thread":
-            return await self._handle_reject_thread(client_id, message_data.get("thread_id"))
+        elif message_type == "spawn_collaborative_thread":
+            return await self._handle_spawn_thread(client_id, message_data)
 
         elif message_type == "get_thread_list":
             await self._send_thread_list(client_id)
@@ -685,32 +724,12 @@ class ThreadManager:
         Unified chat handler for all thread types.
 
         Handles:
-        - Slash commands (/thread, /approve, etc.)
         - Collaborative threads (AI only responds when addressed)
         - @mentions for attention tracking
         """
         user_message = message_data.get("message", "")
         if not user_message:
             return {"type": "error", "message": "Empty message"}
-
-        # Check for slash commands first
-        cmd = parse_command(user_message)
-        if cmd:
-            if cmd.type == CommandType.THREAD:
-                return await self._handle_thread_command(client_id, cmd)
-            elif cmd.type == CommandType.APPROVE:
-                # Organic approval - approve current thread
-                current_thread_id = self.client_view.get(client_id)
-                if current_thread_id:
-                    return await self._handle_accept_thread(client_id, current_thread_id)
-                return {"type": "error", "message": "No thread selected to approve"}
-            elif cmd.type == CommandType.REJECT:
-                current_thread_id = self.client_view.get(client_id)
-                if current_thread_id:
-                    return await self._handle_reject_thread(client_id, current_thread_id)
-                return {"type": "error", "message": "No thread selected to reject"}
-            elif cmd.type == CommandType.UNKNOWN:
-                return {"type": "error", "message": f"Unknown command: {cmd.raw}"}
 
         current_thread_id = self.client_view.get(client_id)
         if not current_thread_id:
@@ -735,9 +754,9 @@ class ThreadManager:
             print(f"❌ No executor for thread {thread.id}. Available executors: {list(self.executors.keys())}")
             return {"type": "error", "message": "Thread executor not found"}
 
-        # Resume if waiting for input (thread decides if applicable)
-        if hasattr(thread, 'resume_working') and thread.status in (ThreadStatus.NEED_HELP, ThreadStatus.REVIEW):
-            thread.resume_working()
+        # Resume if waiting for input
+        if thread.status in ("need_help", "review"):
+            thread.set_status("working")
             await self.broadcast({
                 "type": "thread_status",
                 "thread_id": thread.id,
@@ -747,7 +766,7 @@ class ThreadManager:
 
         # Check if thread can receive messages
         if thread.is_finished():
-            return {"type": "error", "message": f"Thread is finished (status: {thread.status.value})"}
+            return {"type": "error", "message": f"Thread is finished (status: {thread.status})"}
 
         # Get wiki and callbacks for this thread
         wiki = self._get_wiki_for_thread(thread)
@@ -757,8 +776,9 @@ class ThreadManager:
         # Add user message
         thread.add_message("user", user_message, user_id=client_id)
 
-        # Broadcast for initial-message threads (workers), send for chat threads (assistant)
-        if thread.starts_with_initial_message():
+        # Broadcast for worker threads (shared threads)
+        # Assistant threads: frontend adds user message locally, so don't send back
+        if thread.type == 'worker':
             await self.broadcast({
                 "type": "thread_message",
                 "thread_id": thread.id,
@@ -800,22 +820,27 @@ class ThreadManager:
         # Handle errors
         if result.status == 'error':
             thread.set_error(result.error)
-            if hasattr(thread, 'request_help_status'):
-                thread.request_help_status()
+            thread.set_status("need_help")
             return {"type": "error", "message": result.error}
 
         return {"type": "success"}
 
     async def _start_worker_with_notifications(self, thread: WorkerThread, client_id: str):
         """Start worker thread and broadcast notifications."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"_start_worker_with_notifications: {thread.id}")
+
         await self.broadcast({
             "type": "thread_created",
             "thread": thread.to_dict()
         })
+        logger.info(f"Broadcasted thread_created for {thread.id}")
 
         try:
             success = await self._start_initial_message_thread(thread, client_id)
             if not success:
+                logger.warning(f"_start_initial_message_thread returned False for {thread.id}")
                 await self._cleanup_thread(thread.id)
                 await self.broadcast({
                     "type": "thread_deleted",
@@ -823,6 +848,7 @@ class ThreadManager:
                     "reason": "start_failed"
                 })
         except Exception as e:
+            logger.error(f"_start_initial_message_thread failed for {thread.id}: {e}", exc_info=True)
             await self._cleanup_thread(thread.id)
             await self.broadcast({
                 "type": "thread_deleted",
@@ -832,26 +858,37 @@ class ThreadManager:
 
     async def _handle_select_thread(self, client_id: str, thread_id: Optional[str]) -> Dict[str, Any]:
         """Switch client's view to a different thread."""
+        print(f"🔀 _handle_select_thread: client={client_id}, thread_id={thread_id}")
+
         if thread_id is None:
             # Switch to assistant
             assistant = AssistantThread.get_or_create_for_user(client_id)
             thread_id = assistant.id
+            print(f"🔀 Got assistant thread: {thread_id}")
+            # Cache the assistant if not already cached
+            if thread_id not in self._thread_cache:
+                self._cache_thread(assistant)
 
         thread = self._get_thread(thread_id)
+        print(f"🔀 Got thread from cache/db: {thread is not None}")
         if not thread:
             return {"type": "error", "message": "Thread not found"}
 
         # Check access (initial-message threads like workers are visible to all)
+        print(f"🔀 Checking access for thread {thread_id}")
         if not can_access_thread(thread_id, client_id) and not thread.starts_with_initial_message():
             return {"type": "error", "message": "Access denied"}
 
         self.client_view[client_id] = thread_id
+        print(f"🔀 Set client view to {thread_id}")
 
         # Force reload messages from DB BEFORE starting executor
         thread.reload_messages()
+        print(f"🔀 Reloaded messages: {len(thread.messages)} messages")
 
         # Start executor if needed (for threads loaded from DB)
         if thread.id not in self.executors and not thread.is_finished():
+            print(f"🔀 Starting executor for thread {thread_id}")
             await self._start_executor(thread, client_id)
 
         # Build history with system prompt at the start
@@ -862,14 +899,16 @@ class ThreadManager:
             "timestamp": thread.messages[0].created_at.isoformat() if thread.messages else None
         }
         history = [system_prompt_msg] + [m.to_dict() for m in thread.messages]
+        print(f"🔀 Built history with {len(history)} items")
 
         # Build thread data with current merge status for review threads
         thread_data = thread.to_dict()
-        if thread.status == ThreadStatus.REVIEW:
+        if thread.status == "review":
             merge_status = self.get_merge_block_status(thread_id)
             thread_data['merge_blocked'] = merge_status['blocked']
             thread_data['blocked_pages'] = merge_status.get('blocked_pages', {})
 
+        print(f"🔀 Sending thread_selected for {thread_id}, type={thread.type.value}")
         await self.send_message(client_id, {
             "type": "thread_selected",
             "thread_id": thread_id,
@@ -877,6 +916,7 @@ class ThreadManager:
             "thread": thread_data,
             "history": history
         })
+        print(f"🔀 thread_selected sent successfully")
 
         # Send agent_start if currently generating
         if thread.is_generating:
@@ -899,6 +939,19 @@ class ThreadManager:
         if not thread.can_accept():
             print(f"❌ Thread cannot be accepted: status={thread.status}")
             return {"type": "error", "message": "Thread cannot be accepted"}
+
+        # Send accept message to the thread so agent knows
+        user = get_user(client_id)
+        user_name = user.get("name") or client_id if user else client_id
+        accept_message = f"[{user_name} accepted this thread]"
+        thread.add_message("user", accept_message, user_id=client_id)
+        await self.broadcast({
+            "type": "thread_message",
+            "thread_id": thread_id,
+            "role": "user",
+            "content": accept_message,
+            "user_id": client_id
+        })
 
         # Check if merge is blocked by active editors
         block_status = self.get_merge_block_status(thread_id)
@@ -1065,38 +1118,8 @@ If the conflicts are complex and you need guidance, use request_help to ask the 
             })
         finally:
             # Clean up executor when done to prevent CPU spinning
-            if thread.is_finished() or thread.status in (ThreadStatus.REVIEW, ThreadStatus.NEED_HELP):
+            if thread.is_finished() or thread.status in ("review", "need_help"):
                 await self._cleanup_executor(thread.id)
-
-    async def _handle_reject_thread(self, client_id: str, thread_id: str) -> Dict[str, Any]:
-        """Reject thread changes."""
-        thread = self._get_thread(thread_id)
-        if not thread:
-            return {"type": "error", "message": "Thread not found"}
-
-        if not thread.can_reject():
-            return {"type": "error", "message": "Thread cannot be rejected"}
-
-        success = thread.reject(self.wiki)
-
-        if success:
-            await self.broadcast({
-                "type": "thread_status",
-                "thread_id": thread_id,
-                "status": "rejected",
-                "message": "Changes rejected"
-            })
-
-            # Clean up executor
-            await self._cleanup_executor(thread_id)
-
-            # Refresh thread list
-            for cid in self.connections:
-                await self._send_thread_list(cid)
-
-            return {"type": "success"}
-
-        return {"type": "error", "message": "Failed to reject thread"}
 
     async def _handle_get_thread_diff(self, client_id: str, thread_id: str) -> Dict[str, Any]:
         """Get diff stats for a thread."""
@@ -1173,11 +1196,15 @@ def initialize_thread_manager(wiki: GitWiki, api_key: str = None):
 
 async def websocket_endpoint(websocket: WebSocket, client_id: str = "default"):
     """WebSocket endpoint handler."""
+    print(f"🚀 websocket_endpoint called for {client_id}")
     if thread_manager is None:
+        print(f"❌ thread_manager is None!")
         await websocket.close(code=1011, reason="Server not ready")
         return
 
+    print(f"🚀 Calling thread_manager.connect for {client_id}")
     await thread_manager.connect(websocket, client_id)
+    print(f"🚀 thread_manager.connect finished for {client_id}")
 
     try:
         while True:

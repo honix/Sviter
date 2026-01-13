@@ -7,15 +7,11 @@
 
 export type ThreadType = 'assistant' | 'worker';
 
-export type ThreadStatus =
-  | 'active'      // Currently usable (assistant)
-  | 'archived'    // User archived
-  | 'working'     // Agent processing (worker)
-  | 'need_help'   // Waiting for user input (worker)
-  | 'review'      // Ready for accept/reject (worker)
-  | 'resolving'   // Resolving merge conflicts (worker)
-  | 'accepted'    // Changes merged (worker)
-  | 'rejected';   // Changes rejected (worker)
+// Status is now a free-form string - agent can set any status
+export type ThreadStatus = string;
+
+// Terminal statuses that indicate a thread is finished
+export const TERMINAL_STATUSES = ['accepted', 'archived'] as const;
 
 export interface Thread {
   id: string;
@@ -91,7 +87,7 @@ export interface ThreadMessageMessage {
 export interface ThreadDeletedMessage {
   type: 'thread_deleted';
   thread_id: string;
-  reason: 'accepted' | 'rejected';
+  reason: 'accepted' | 'archived';
 }
 
 export interface ThreadListMessage {

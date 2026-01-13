@@ -40,7 +40,7 @@ def init_db():
                 name TEXT NOT NULL,
                 goal TEXT,
                 owner_id TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(status IN ('active', 'archived', 'working', 'need_help', 'review', 'accepted', 'rejected')),
+                status TEXT NOT NULL,  -- Free-form status string (e.g., 'created', 'researching', 'review')
                 branch TEXT,
                 worktree_path TEXT,
                 review_summary TEXT,
@@ -255,6 +255,15 @@ def update_user_oauth_info(
     return get_user(user_id)
 
 
+def list_users() -> List[dict]:
+    """List all registered users for @mention dropdown."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, name, email FROM users ORDER BY last_seen_at DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Thread Operations
 # ─────────────────────────────────────────────────────────────────────────────
@@ -438,7 +447,7 @@ def get_thread_messages(thread_id: str, limit: int = 1000, offset: int = 0) -> L
             """
             SELECT * FROM thread_messages
             WHERE thread_id = ?
-            ORDER BY created_at ASC
+            ORDER BY created_at ASC, rowid ASC
             LIMIT ? OFFSET ?
             """,
             (thread_id, limit, offset)

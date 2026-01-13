@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is an AI-powered wiki system with a FastAPI backend and React frontend. The system combines traditional wiki functionality with:
 
 - **AI Chat Assistant**: Real-time AI assistance via WebSocket for wiki content
-- **Autonomous Threads**: Background workers that can read/edit pages on their own git branches
-- **Git-Native Workflow**: All changes tracked in git, threads work on branches (`thread/<name>/<timestamp>`)
+- **Collaborative Threads**: Shared workspaces where users and AI collaborate on wiki changes
+- **Git-Native Workflow**: All changes tracked in git, threads work on branches (`thread/<name>-<hash>`)
 
 ## Architecture
 
@@ -18,9 +18,9 @@ This is an AI-powered wiki system with a FastAPI backend and React frontend. The
 - **Storage**: Git-based wiki storage with GitWiki class (no database needed)
 - **AI Integration**: OpenRouter API with wiki-specific tools (read/edit/find/list pages)
 - **Real-time**: WebSocket endpoints for chat and live updates
-- **Session Management**: Unified SessionManager handles main chat + worker threads
-- **Thread System**: Autonomous workers on git branches (`thread/<name>/<timestamp>`)
-- **Tool System**: Composable tools via ToolBuilder (read/edit/spawn/review)
+- **Session Management**: Unified SessionManager handles main chat + thread sessions
+- **Thread System**: Collaborative threads on git branches (`thread/<name>-<hash>`)
+- **Tool System**: Composable tools via ToolBuilder (read/edit/thread-info)
 
 ### Frontend (React TypeScript)
 
@@ -108,12 +108,12 @@ Other commands:
 - **WebSocket**: Real-time communication on `/ws/{client_id}` endpoint via SessionManager
 - **Session Types**:
   - **Main session**: Read-only assistant with spawn_thread/list_threads tools
-  - **Thread session**: Autonomous worker with read/edit/request_help/mark_for_review tools
+  - **Thread session**: Collaborative workspace with read/edit/thread-info tools
 - **Thread Workflow**:
-  - Main chat spawns threads via `spawn_thread(name, goal)`
-  - Threads work on branches: `thread/<name>/<timestamp>`
-  - Status flow: WORKING → NEED_HELP or REVIEW
-  - Accept merges to main, Reject deletes branch
+  - User creates thread via pink "Start thread" button with first message
+  - Threads work on branches: `thread/<name>-<hash>`
+  - Status is free-form string (AI uses set_thread_status to update)
+  - Accept merges to main (no reject button - just keep discussing)
 - **Git APIs**: `/api/git/branches`, `/api/git/checkout`, `/api/git/diff`, etc.
 - **CORS**: Configured for frontend connections
 
@@ -129,10 +129,11 @@ Other commands:
   - Branch selector with branch creation/deletion
   - Checkout branches with page reload
 - **Thread Management**:
-  - View active threads in right panel
-  - Threads show status: WORKING, NEED_HELP, REVIEW
+  - Pink "Start thread" button creates new thread with user's message
+  - Thread selector shows git branch icon for threads
+  - Threads show free-form status text (set by AI)
   - Click thread to view changes in center panel
-  - Accept (merges to main) or Reject (deletes branch)
+  - Accept button merges to main (no reject - just keep discussing)
 - **Markdown Support**: Simple markdown parser for content rendering
 - **Error Handling**: Error boundaries and loading states
 - **Keyboard Shortcuts**: Ctrl+E (toggle edit), Escape (exit edit)
@@ -252,9 +253,9 @@ After pushing, use `gh pr checks --watch` to wait for CI without burning tokens.
 
 ### Branch & Page Lifecycle
 
-- **Branch creation**: Thread branches created when spawned via `spawn_thread`
+- **Branch creation**: Thread branches created when user clicks "Start thread"
 - **Live page updates**: Pages appear in tree as threads edit them (via `page_updated` WebSocket messages)
-- **Branch cleanup**: Rejected branches deleted, accepted branches merged to main
+- **Branch cleanup**: Accepted branches merged to main, worktree removed
 
 ### WebSocket Message Types
 

@@ -8,123 +8,102 @@ import {
   SelectItem,
   SelectTrigger,
 } from "@/components/ui/select";
-import {
-  MessageCircle,
-  AlertCircle,
-  CheckCircle,
-  Loader2,
-  GitBranch,
-  Check,
-  XCircle,
-  Users,
-  Bell,
-} from "lucide-react";
+import { GitBranch, MessageCircle } from "lucide-react";
 import type { Thread, ThreadStatus } from "../../types/thread";
 
 interface ThreadSelectorProps {
   threads: Thread[];
-  selectedThreadId: string | null; // null = assistant mode
+  selectedThreadId: string | null;
+  assistantThreadId: string | null;  // ID of the assistant thread
   onSelect: (threadId: string | null) => void;
-  isConnected: boolean;
   disabled?: boolean;
 }
 
-const StatusIcon: React.FC<{ status: ThreadStatus }> = ({ status }) => {
-  switch (status) {
-    case "active":
-      return <CheckCircle className="h-3 w-3 text-blue-500" />;
-    case "archived":
-      return <XCircle className="h-3 w-3 text-gray-400" />;
-    case "working":
-      return <Loader2 className="h-3 w-3 animate-spin text-blue-500" />;
-    case "need_help":
-      return <AlertCircle className="h-3 w-3 text-yellow-500" />;
-    case "review":
-      return <CheckCircle className="h-3 w-3 text-green-500" />;
-    case "resolving":
-      return <Loader2 className="h-3 w-3 animate-spin text-orange-500" />;
-    case "accepted":
-      return <Check className="h-3 w-3 text-green-600" />;
-    case "rejected":
-      return <XCircle className="h-3 w-3 text-red-500" />;
-  }
-};
+// Thread icon - git branch since threads work on branches
+const ThreadIcon: React.FC = () => (
+  <GitBranch className="h-3 w-3 text-muted-foreground" />
+);
 
-const statusLabel: Record<ThreadStatus, string> = {
-  active: "Active",
-  archived: "Archived",
-  working: "Working",
-  need_help: "Needs help",
-  review: "Ready for review",
-  resolving: "Resolving conflicts",
-  accepted: "Accepted",
-  rejected: "Rejected",
+// Generate a consistent color from a string (for participant badges)
+const stringToColor = (str: string): string => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = hash % 360;
+  return `hsl(${hue}, 70%, 50%)`;
 };
 
 export function ThreadSelector({
   threads,
   selectedThreadId,
+  assistantThreadId,
   onSelect,
-  isConnected,
   disabled,
 }: ThreadSelectorProps) {
-  const selectedThread = selectedThreadId
+  // Check if we're in assistant mode (selectedThreadId matches assistantThreadId)
+  const isAssistantMode = selectedThreadId === assistantThreadId;
+
+  const selectedThread = selectedThreadId && !isAssistantMode
     ? threads.find((t) => t.id === selectedThreadId)
     : null;
 
   const handleValueChange = (value: string) => {
+    // When selecting "assistant", pass null to trigger switching to assistant
     onSelect(value === "assistant" ? null : value);
   };
 
   return (
     <Select
-      value={selectedThreadId || "assistant"}
+      value={isAssistantMode ? "assistant" : (selectedThreadId || "assistant")}
       onValueChange={handleValueChange}
       disabled={disabled}
     >
       <SelectTrigger className="w-full h-auto py-2">
         <div className="flex items-center gap-2 w-full">
-          {/* Connection indicator */}
-          <div
-            className={`w-2 h-2 rounded-full flex-shrink-0 ${
-              isConnected ? "bg-green-500" : "bg-gray-400"
-            }`}
-          />
-
           <div className="flex flex-col items-start text-left flex-1 min-w-0">
             {selectedThread && selectedThread.type !== 'assistant' ? (
               <>
-                <div className="flex items-center gap-1.5">
-                  <StatusIcon status={selectedThread.status} />
-                  <span className="font-medium truncate">
+                <div className="flex items-center gap-1.5 w-full">
+                  <ThreadIcon />
+                  <span className="font-medium truncate flex-1">
                     {selectedThread.name}
                   </span>
                   {selectedThread.needs_attention && (
-                    <Bell className="h-3 w-3 text-amber-500" />
+                    <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
                   )}
                 </div>
-                {/* Show branch only for non-collaborative threads */}
-                {selectedThread.branch && !selectedThread.collaborative && (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <GitBranch className="h-3 w-3" />
-                    <span className="truncate">{selectedThread.branch}</span>
-                  </div>
+                {/* Show status as text if not default */}
+                {selectedThread.status && selectedThread.status !== 'Just created' && (
+                  <span className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                    {selectedThread.status}
+                  </span>
                 )}
-                {/* Show participants for collaborative threads */}
-                {selectedThread.collaborative && selectedThread.participants && selectedThread.participants.length > 1 && (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Users className="h-3 w-3" />
-                    <span>{selectedThread.participants.length} participants</span>
+                {/* Show participant badges */}
+                {selectedThread.participants && selectedThread.participants.length > 0 && (
+                  <div className="flex items-center gap-1 mt-1 flex-wrap">
+                    {selectedThread.participants.slice(0, 3).map((participant) => (
+                      <span
+                        key={participant}
+                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] text-white/90"
+                        style={{ backgroundColor: stringToColor(participant) }}
+                      >
+                        {participant}
+                      </span>
+                    ))}
+                    {selectedThread.participants.length > 3 && (
+                      <span className="text-[10px] text-muted-foreground">
+                        +{selectedThread.participants.length - 3}
+                      </span>
+                    )}
                   </div>
                 )}
               </>
             ) : (
-              <>
-                <div className="flex items-center gap-1.5">
-                  <MessageCircle className="h-4 w-4" />
-                  <span className="font-medium">User Assistant</span>
-                </div>
-              </>
+              <div className="flex items-center gap-1.5">
+                <MessageCircle className="h-4 w-4" />
+                <span className="font-medium">Chat with assistant</span>
+              </div>
             )}
           </div>
         </div>
@@ -135,48 +114,56 @@ export function ThreadSelector({
         <SelectItem value="assistant">
           <div className="flex items-center gap-2">
             <MessageCircle className="h-4 w-4" />
-            <span>User Assistant</span>
+            <span>Chat with assistant</span>
           </div>
         </SelectItem>
 
         {/* Separator if threads exist */}
         {threads.length > 0 && <div className="border-t my-1" />}
 
-        {/* Thread options grouped by status */}
-        {(
-          [
-            "review",
-            "need_help",
-            "working",
-            "accepted",
-            "rejected",
-          ] as ThreadStatus[]
-        ).map((status) => {
-          const statusThreads = threads.filter((t) => t.status === status);
-          if (statusThreads.length === 0) return null;
-
-          return statusThreads.map((thread) => (
+        {/* All threads sorted by name */}
+        {threads
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((thread) => (
             <SelectItem key={thread.id} value={thread.id}>
-              <div className="flex items-center gap-2">
-                <StatusIcon status={thread.status} />
-                <span className="truncate max-w-[150px]">{thread.name}</span>
-                {thread.collaborative ? (
-                  <span className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Users className="h-3 w-3" />
-                    {thread.participants?.length || 1}
-                  </span>
-                ) : (
-                  <span className="text-xs text-muted-foreground">
-                    ({statusLabel[thread.status]})
+              <div className="flex flex-col gap-0.5 w-full py-1">
+                <div className="flex items-center gap-2 w-full">
+                  <ThreadIcon />
+                  <span className="truncate flex-1">{thread.name}</span>
+                  {/* Attention indicator */}
+                  {thread.needs_attention && (
+                    <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+                  )}
+                </div>
+                {/* Status as free-form text */}
+                {thread.status && thread.status !== 'Just created' && (
+                  <span className="text-[10px] text-muted-foreground pl-5 truncate">
+                    {thread.status}
                   </span>
                 )}
-                {thread.needs_attention && (
-                  <Bell className="h-3 w-3 text-amber-500" />
+                {/* Participant badges - always visible */}
+                {thread.participants && thread.participants.length > 0 && (
+                  <div className="flex items-center gap-1 flex-wrap pl-5">
+                    {thread.participants.slice(0, 3).map((participant) => (
+                      <span
+                        key={participant}
+                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] text-white/90"
+                        style={{ backgroundColor: stringToColor(participant) }}
+                      >
+                        {participant}
+                      </span>
+                    ))}
+                    {thread.participants.length > 3 && (
+                      <span className="text-[9px] text-muted-foreground">
+                        +{thread.participants.length - 3}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
             </SelectItem>
-          ));
-        })}
+          ))}
 
         {/* Empty state */}
         {threads.length === 0 && (

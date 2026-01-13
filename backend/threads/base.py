@@ -30,19 +30,28 @@ class ThreadType(Enum):
     WORKER = "worker"        # Autonomous worker with edit capabilities (own branch)
 
 
-class ThreadStatus(Enum):
-    """Status of a thread."""
-    # Shared (all threads)
-    ACTIVE = "active"        # Currently usable
-    ARCHIVED = "archived"    # User archived
+# Terminal statuses (thread cannot be modified further)
+TERMINAL_STATUSES = ("accepted", "archived")
 
-    # Worker-only statuses
-    WORKING = "working"      # Agent actively processing
-    NEED_HELP = "need_help"  # Agent stuck, needs user input
-    REVIEW = "review"        # Agent done, changes ready for review
-    RESOLVING = "resolving"  # Agent resolving merge conflicts
-    ACCEPTED = "accepted"    # Changes merged to main
-    REJECTED = "rejected"    # Changes rejected
+# Legacy ThreadStatus enum for backward compatibility
+class ThreadStatus(Enum):
+    """Status of a thread. Kept for backward compatibility."""
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+    WORKING = "working"
+    NEED_HELP = "need_help"
+    REVIEW = "review"
+    RESOLVING = "resolving"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+    @classmethod
+    def from_string(cls, s: str) -> 'ThreadStatus':
+        """Try to convert string to ThreadStatus, or return as-is."""
+        try:
+            return cls(s)
+        except ValueError:
+            return None
 
 
 @dataclass
@@ -102,7 +111,7 @@ class Thread:
     name: str
     type: ThreadType
     owner_id: str
-    status: ThreadStatus
+    status: str  # Free-form status string (e.g., "created", "working", "review", etc.)
     created_at: datetime
     updated_at: datetime
 
@@ -116,14 +125,14 @@ class Thread:
 
     @classmethod
     def create(cls, thread_type: ThreadType, name: str, owner_id: str,
-               status: ThreadStatus = None, goal: str = None, **kwargs) -> 'Thread':
+               status: str = None, goal: str = None, **kwargs) -> 'Thread':
         """Factory method to create and persist a new thread."""
         thread_id = str(uuid.uuid4())
         now = datetime.now()
 
         # Default status based on type
         if status is None:
-            status = ThreadStatus.ACTIVE if thread_type == ThreadType.ASSISTANT else ThreadStatus.WORKING
+            status = "active" if thread_type == ThreadType.ASSISTANT else "created"
 
         # Create in database
         db_create_thread(
@@ -131,7 +140,7 @@ class Thread:
             thread_type=thread_type.value,
             name=name,
             owner_id=owner_id,
-            status=status.value,
+            status=status,
             goal=goal,
             branch=kwargs.get('branch'),
             worktree_path=kwargs.get('worktree_path')
@@ -177,7 +186,7 @@ class Thread:
             name=data['name'],
             type=ThreadType(data['type']),
             owner_id=data['owner_id'],
-            status=ThreadStatus(data['status']),
+            status=data['status'],  # Status is now a plain string
             created_at=created_at,
             updated_at=updated_at,
             goal=data.get('goal'),
@@ -190,7 +199,7 @@ class Thread:
         db_update_thread(
             self.id,
             name=self.name,
-            status=self.status.value,
+            status=self.status,
             goal=self.goal,
             error=self.error,
             is_generating=self.is_generating
@@ -207,7 +216,7 @@ class Thread:
             "name": self.name,
             "type": self.type.value,
             "owner_id": self.owner_id,
-            "status": self.status.value,
+            "status": self.status,
             "goal": self.goal,
             "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
             "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
@@ -273,11 +282,11 @@ class Thread:
     # Status Management
     # ─────────────────────────────────────────────────────────────────────────
 
-    def set_status(self, status: ThreadStatus) -> None:
-        """Update thread status."""
+    def set_status(self, status: str) -> None:
+        """Update thread status with any string value."""
         self.status = status
         self.updated_at = datetime.now()
-        db_update_thread(self.id, status=status.value)
+        db_update_thread(self.id, status=status)
 
     def set_error(self, error: str) -> None:
         """Set error message."""
@@ -292,7 +301,7 @@ class Thread:
 
     def is_finished(self) -> bool:
         """Check if thread is in a terminal state (no more interaction possible)."""
-        return self.status in (ThreadStatus.ACCEPTED, ThreadStatus.REJECTED, ThreadStatus.ARCHIVED)
+        return self.status in TERMINAL_STATUSES
 
     # ─────────────────────────────────────────────────────────────────────────
     # Participant Management
@@ -407,14 +416,6 @@ class Thread:
         """Accept thread changes. Override in subclasses."""
         from threads.accept_result import AcceptResult
         return AcceptResult.ERROR
-
-    def can_reject(self) -> bool:
-        """Check if thread can be rejected. Override in subclasses."""
-        return False
-
-    def reject(self, wiki) -> bool:
-        """Reject thread changes. Override in subclasses."""
-        return False
 
     def get_diff_stats(self, wiki) -> Optional[Dict[str, Any]]:
         """Get diff statistics for this thread. Override in subclasses."""
