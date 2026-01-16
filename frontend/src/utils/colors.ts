@@ -44,11 +44,28 @@ export const stringToColorDark = (str: string): string => {
 };
 
 /**
- * Get initials from a user ID.
- * For guests (guest-xxxxx), uses first 2 chars of the ID part.
- * For other users, uses first 2 chars.
+ * Get initials from a user name or ID.
+ * Prefers name if available: "Fedor Shchukin" → "FS"
+ * Falls back to user_id: "guest-abc123" → "AB"
  */
-export const getInitials = (userId: string | undefined | null): string => {
+export const getInitials = (
+  userId: string | undefined | null,
+  userName?: string | null
+): string => {
+  // If we have a proper name (different from userId), use it
+  if (userName && userName !== userId) {
+    const parts = userName.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      // "Fedor Shchukin" → "FS"
+      return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+    }
+    // Single word name: "John" → "J"
+    if (parts[0].length > 0) {
+      return parts[0].charAt(0).toUpperCase();
+    }
+  }
+
+  // Fall back to user_id-based logic
   if (!userId) return 'U';
   // For guests (guest-xxxxx), use first 2 chars of the ID part
   if (userId.startsWith('guest-')) {

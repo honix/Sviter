@@ -800,6 +800,13 @@ class ThreadManager:
         callbacks = self._prepare_thread_callbacks(thread, client_id)
         tools = thread.get_tools(wiki, **callbacks)
 
+        # Get user display name for AI attribution and frontend display
+        user = get_user(client_id)
+        user_display_name = user.get("name") if user else None
+        if not user_display_name or user_display_name == client_id:
+            # Fallback to client_id if no name set
+            user_display_name = client_id
+
         # Add user message
         thread.add_message("user", user_message, user_id=client_id)
 
@@ -811,7 +818,8 @@ class ThreadManager:
                 "thread_id": thread.id,
                 "role": "user",
                 "content": user_message,
-                "user_id": client_id
+                "user_id": client_id,
+                "user_name": user_display_name
             })
 
         # Signal agent start
@@ -821,8 +829,11 @@ class ThreadManager:
             "thread_id": thread.id
         })
 
+        # Format message with attribution for AI (so it knows who is talking)
+        attributed_message = f"[{user_display_name}]: {user_message}"
+
         # Process turn
-        result = await executor.process_turn(user_message, custom_tools=tools)
+        result = await executor.process_turn(attributed_message, custom_tools=tools)
 
         # Post-turn action loop (thread decides if follow-up needed)
         action = thread.get_post_turn_action(result.status)
@@ -888,27 +899,38 @@ class ThreadManager:
         tools = thread.get_tools(wiki, **callbacks)
 
         # Run thread with goal as initial message in background
-        task = asyncio.create_task(self._run_spawned_thread(thread, tools, goal))
+        task = asyncio.create_task(self._run_spawned_thread(thread, tools, goal, client_id))
         self.tasks[thread.id] = task
 
-    async def _run_spawned_thread(self, thread: WorkerThread, tools: List, goal: str):
+    async def _run_spawned_thread(self, thread: WorkerThread, tools: List, goal: str, client_id: str):
         """Execute spawned thread with goal as initial user message."""
         executor = self.executors.get(thread.id)
         if not executor:
             return
 
         try:
+            # Get user display name for AI attribution and frontend display
+            user = get_user(client_id)
+            user_display_name = user.get("name") if user else None
+            if not user_display_name or user_display_name == client_id:
+                user_display_name = client_id
+
             # Add goal as user message (from the user who asked assistant)
-            thread.add_message("user", goal)
+            thread.add_message("user", goal, user_id=client_id)
             await self.broadcast({
                 "type": "thread_message",
                 "thread_id": thread.id,
                 "role": "user",
-                "content": goal
+                "content": goal,
+                "user_id": client_id,
+                "user_name": user_display_name
             })
 
+            # Format message with attribution for AI
+            attributed_goal = f"[{user_display_name}]: {goal}"
+
             thread.set_generating(True)
-            result = await executor.process_turn(goal, custom_tools=tools)
+            result = await executor.process_turn(attributed_goal, custom_tools=tools)
             thread.set_generating(False)
 
             # Continue until thread decides to stop (same as _run_initial_message_thread)

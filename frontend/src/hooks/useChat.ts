@@ -42,7 +42,8 @@ export const useChat = (threadId: string): UseChatReturn => {
         tool_args: msg.tool_args as Record<string, unknown>,
         // Detect tool errors by content starting with "Error:"
         tool_error: msg.role === 'tool_call' && msg.content.startsWith('Error:'),
-        user_id: msg.user_id  // Who sent this message (for collaborative threads)
+        user_id: msg.user_id,  // Who sent this message (for collaborative threads)
+        user_name: msg.user_name  // Display name for proper initials
       } as ChatMessage;
     });
   }, [threadId, state.threadMessages]);

@@ -491,7 +491,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           timestamp: new Date().toISOString(),
           tool_name: message.tool_name,
           tool_args: message.tool_args,
-          user_id: message.user_id  // Who sent this message (for collaborative threads)
+          user_id: message.user_id,  // Who sent this message (for collaborative threads)
+          user_name: message.user_name  // Display name for proper initials
         };
         dispatch({
           type: 'ADD_THREAD_MESSAGE',

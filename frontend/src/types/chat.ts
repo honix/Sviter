@@ -10,6 +10,7 @@ export interface ChatMessage {
   tool_args?: Record<string, any>;
   tool_error?: boolean;
   user_id?: string;  // Who sent this message (for collaborative threads)
+  user_name?: string;  // Display name for the user (for proper initials)
 }
 
 export interface ToolCall {
@@ -54,6 +55,7 @@ export interface WebSocketMessage {
   tool_args?: any;
   status?: string;  // Thread status (working, need_help, review, accepted, rejected)
   user_id?: string;  // Who sent the message (for collaborative threads)
+  user_name?: string;  // Display name for the user (for proper initials)
   // Branch fields
   branch?: string;
   branch_created?: string;

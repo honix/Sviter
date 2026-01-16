@@ -47,6 +47,7 @@ export interface ThreadMessage {
   tool_args?: Record<string, unknown>;
   tool_result?: string;
   user_id?: string;  // Who sent this message (for collaborative threads)
+  user_name?: string;  // Display name for the user (for proper initials)
 }
 
 export interface ThreadDiffStats {

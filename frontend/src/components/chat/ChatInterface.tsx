@@ -407,7 +407,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
                 : '';
 
               // Avatar: pastel color + initials for users, AI avatar for assistant
-              const avatarFallback = isAI ? 'AI' : getInitials(effectiveUserId);
+              const avatarFallback = isAI ? 'AI' : getInitials(effectiveUserId, message.user_name);
               const avatarStyle = isUser && effectiveUserId
                 ? { backgroundColor: stringToColor(effectiveUserId) }
                 : undefined;

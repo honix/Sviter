@@ -2,7 +2,7 @@
  * MentionDropdown - Shows list of users when @ is typed in chat input
  */
 import { useEffect, useRef } from 'react';
-import { stringToColor } from '../../utils/colors';
+import { stringToColor, getInitials } from '../../utils/colors';
 import type { User } from '../../hooks/useMentions';
 
 interface MentionDropdownProps {
@@ -56,7 +56,7 @@ export function MentionDropdown({
             className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium text-white flex-shrink-0"
             style={{ backgroundColor: stringToColor(user.id) }}
           >
-            {user.name.charAt(0).toUpperCase()}
+            {getInitials(user.id, user.name)}
           </div>
           {/* Name */}
           <span className="truncate flex-1">{user.name}</span>
