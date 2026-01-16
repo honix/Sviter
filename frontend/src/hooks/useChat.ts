@@ -24,21 +24,27 @@ export const useChat = (threadId: string): UseChatReturn => {
     if (!threadId) return [];
 
     const storedMessages = state.threadMessages[threadId] || [];
-    return storedMessages.map((msg) => ({
-      id: msg.id,
-      type: msg.role === 'user' ? 'user'
-          : msg.role === 'tool_call' ? 'tool_call'
-          : msg.role === 'system_prompt' ? 'system_prompt'
-          : msg.role === 'system' ? 'system_prompt'  // Treat system same as system_prompt for styling
-          : 'assistant',
-      content: msg.content,
-      timestamp: msg.timestamp,
-      tool_name: msg.tool_name,
-      tool_args: msg.tool_args as Record<string, unknown>,
-      // Detect tool errors by content starting with "Error:"
-      tool_error: msg.role === 'tool_call' && msg.content.startsWith('Error:'),
-      user_id: msg.user_id  // Who sent this message (for collaborative threads)
-    } as ChatMessage));
+    return storedMessages.map((msg) => {
+      // Handle both 'timestamp' (from WebSocket thread_message) and 'created_at' (from backend history)
+      const msgAny = msg as ThreadMessage & { created_at?: string };
+      const timestamp = msg.timestamp || msgAny.created_at || new Date().toISOString();
+
+      return {
+        id: msg.id,
+        type: msg.role === 'user' ? 'user'
+            : msg.role === 'tool_call' ? 'tool_call'
+            : msg.role === 'system_prompt' ? 'system_prompt'
+            : msg.role === 'system' ? 'system_prompt'  // Treat system same as system_prompt for styling
+            : 'assistant',
+        content: msg.content,
+        timestamp,
+        tool_name: msg.tool_name,
+        tool_args: msg.tool_args as Record<string, unknown>,
+        // Detect tool errors by content starting with "Error:"
+        tool_error: msg.role === 'tool_call' && msg.content.startsWith('Error:'),
+        user_id: msg.user_id  // Who sent this message (for collaborative threads)
+      } as ChatMessage;
+    });
   }, [threadId, state.threadMessages]);
 
   // Listen for agent_start/agent_complete to sync isGenerating across all users

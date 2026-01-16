@@ -511,6 +511,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
                     onClick={handleSpawn}
                     disabled={!isConnected || !inputValue.trim()}
                     size="icon"
+                    data-testid="start-thread-button"
                     className="rounded-r-full rounded-l-none bg-pink-500 hover:bg-pink-600 border-l border-pink-400"
                   >
                     <Waypoints className="h-4 w-4 text-white" />

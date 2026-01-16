@@ -303,7 +303,30 @@ class MockAdapter(LLMAdapter):
                         "iteration": iteration
                     })
 
-            # Step 3: Set status to done
+            # Step 3: Rename thread
+            name_content = "Updating thread name to reflect the work done."
+            if on_message:
+                await on_message("assistant", name_content)
+
+            name_tool = next((t for t in tools if t.name == "set_thread_name"), None)
+            if name_tool:
+                iteration += 1
+                name_args = {"name": "docs-update"}
+                print(f"🤖 MockAdapter: Calling set_thread_name with {name_args}")
+                name_result = name_tool.function(name_args)
+                print(f"🤖 MockAdapter: set_thread_name result: {name_result[:100] if name_result else 'None'}")
+
+                if on_tool_call:
+                    await on_tool_call({
+                        "tool_name": "set_thread_name",
+                        "arguments": name_args,
+                        "result": name_result,
+                        "iteration": iteration
+                    })
+            else:
+                print(f"🤖 MockAdapter: WARNING - set_thread_name tool not found")
+
+            # Step 4: Set status to done
             review_content = "I've made the changes. Ready for review."
             if on_message:
                 await on_message("assistant", review_content)

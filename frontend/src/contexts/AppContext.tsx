@@ -418,6 +418,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } else if (message.status === 'review') {
           toast.success(`Agent ready for review`, { description: message.message || 'Changes are ready to be reviewed' });
         }
+      } else if (message.type === 'thread_updated' && message.thread_id) {
+        // Handle thread updates (status, name, etc.)
+        const updates: Partial<Thread> = {};
+        if (message.status) updates.status = message.status as ThreadStatus;
+        if (message.name) updates.name = message.name;
+        if (Object.keys(updates).length > 0) {
+          dispatch({
+            type: 'UPDATE_THREAD',
+            payload: { id: message.thread_id, updates }
+          });
+        }
       } else if (message.type === 'thread_deleted' && message.thread_id) {
         dispatch({ type: 'REMOVE_THREAD', payload: message.thread_id });
       } else if (message.type === 'thread_list' && message.threads) {

@@ -778,7 +778,7 @@ class ThreadManager:
 
         # Broadcast for worker threads (shared threads)
         # Assistant threads: frontend adds user message locally, so don't send back
-        if thread.type == 'worker':
+        if thread.type.value == 'worker':
             await self.broadcast({
                 "type": "thread_message",
                 "thread_id": thread.id,
