@@ -501,6 +501,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
                     onClick={handleSend}
                     disabled={!isConnected || !inputValue.trim()}
                     size="icon"
+                    data-testid="send-message-button"
                     className="rounded-l-full rounded-r-none"
                   >
                     <ArrowUp className="h-4 w-4" />

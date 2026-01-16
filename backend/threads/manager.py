@@ -203,7 +203,8 @@ class ThreadManager:
             try:
                 worker = self._create_worker_thread(name, goal, client_id)
                 logger.info(f"Worker created: id={worker.id}, branch={worker.branch}")
-                asyncio.create_task(self._start_worker_with_notifications(worker, client_id))
+                # Broadcast and start thread with goal as initial message
+                asyncio.create_task(self._start_spawned_thread(worker, client_id, goal))
                 return worker.to_dict()
             except Exception as e:
                 logger.error(f"spawn_callback failed: {e}", exc_info=True)
@@ -849,6 +850,106 @@ class ThreadManager:
             return {"type": "error", "message": result.error}
 
         return {"type": "success"}
+
+    async def _start_spawned_thread(self, thread: WorkerThread, client_id: str, goal: str):
+        """Start an assistant-spawned thread with the goal as the initial user message.
+
+        This adds the goal as a user message (attributed to the user who asked)
+        and starts the thread execution.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Broadcast thread creation first
+        await self.broadcast({
+            "type": "thread_created",
+            "thread": thread.to_dict()
+        })
+
+        # Update thread list for all clients
+        for cid in self.connections:
+            await self._send_thread_list(cid)
+
+        # Check worktree exists
+        if not thread.worktree_path:
+            logger.warning(f"Thread {thread.id} has no worktree, cannot start")
+            return
+
+        # Start executor
+        success = await self._start_executor(thread, client_id)
+        if not success:
+            logger.warning(f"Failed to start executor for spawned thread {thread.id}")
+            return
+
+        # Get wiki and tools for this thread
+        wiki = self._get_wiki_for_thread(thread)
+        callbacks = self._prepare_thread_callbacks(thread, client_id)
+        tools = thread.get_tools(wiki, **callbacks)
+
+        # Run thread with goal as initial message in background
+        task = asyncio.create_task(self._run_spawned_thread(thread, tools, goal))
+        self.tasks[thread.id] = task
+
+    async def _run_spawned_thread(self, thread: WorkerThread, tools: List, goal: str):
+        """Execute spawned thread with goal as initial user message."""
+        executor = self.executors.get(thread.id)
+        if not executor:
+            return
+
+        try:
+            # Add goal as user message (from the user who asked assistant)
+            thread.add_message("user", goal)
+            await self.broadcast({
+                "type": "thread_message",
+                "thread_id": thread.id,
+                "role": "user",
+                "content": goal
+            })
+
+            thread.set_generating(True)
+            result = await executor.process_turn(goal, custom_tools=tools)
+            thread.set_generating(False)
+
+            # Continue until thread decides to stop (same as _run_initial_message_thread)
+            while not thread.is_finished():
+                action = thread.get_post_turn_action(result.status)
+
+                if action and action.get("type") == "prompt":
+                    prompt_message = action.get("message", "")
+                    thread.add_message("system", prompt_message)
+                    await self.broadcast({
+                        "type": "thread_message",
+                        "thread_id": thread.id,
+                        "role": "system",
+                        "content": prompt_message
+                    })
+                    thread.set_generating(True)
+                    result = await executor.process_turn(wrap_system_notification(prompt_message), custom_tools=tools)
+                    thread.set_generating(False)
+                    continue
+
+                elif result.status == 'error':
+                    thread.set_error(result.error)
+                    if hasattr(thread, 'request_help_status'):
+                        thread.request_help_status()
+                    await self.broadcast({
+                        "type": "thread_status",
+                        "thread_id": thread.id,
+                        "status": "need_help",
+                        "message": f"Error: {result.error}"
+                    })
+                    break
+
+                break
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            thread.set_error(str(e))
+            thread.set_status("need_help")
+        finally:
+            if thread.is_finished() or thread.status in ("review", "need_help"):
+                await self._cleanup_executor(thread.id)
 
     async def _start_worker_with_notifications(self, thread: WorkerThread, client_id: str):
         """Start worker thread and broadcast notifications."""

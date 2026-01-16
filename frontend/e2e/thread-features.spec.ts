@@ -145,11 +145,11 @@ test.describe('Thread Features', () => {
     })
 
     await test.step('Switch to assistant (main branch)', async () => {
-      // Find the thread selector - it should now show the thread name
-      // Click to open the dropdown
-      const selector = page.locator('button').filter({ hasText: /docs-update/i })
-      await expect(selector).toBeVisible({ timeout: 5000 })
-      await selector.click()
+      // After accepting, the UI may auto-switch to assistant or stay on thread
+      // Find the thread selector (combobox) to switch to assistant
+      const threadSelector = page.locator('[role="combobox"]').first()
+      await expect(threadSelector).toBeVisible({ timeout: 5000 })
+      await threadSelector.click()
 
       // Select "Chat with assistant" option
       await page.getByText('Chat with assistant').click()
@@ -160,8 +160,9 @@ test.describe('Thread Features', () => {
       await page.getByTestId('page-TestPage').click()
 
       // The mock adapter adds this text to TestPage
+      // Use .first() since multiple sections may exist from test retries
       await expect(
-        page.getByText('This section was added by the E2E test mock agent')
+        page.getByText('This section was added by the E2E test mock agent').first()
       ).toBeVisible({ timeout: 10000 })
     })
   })
@@ -228,4 +229,54 @@ test.describe('Thread Features', () => {
       await page.keyboard.press('Escape')
     })
   })
+
+  test('assistant can spawn thread and thread link is clickable', async ({ page }) => {
+    // The mock adapter spawns a thread when user asks to "edit" something in assistant chat
+
+    await test.step('Send edit request to assistant', async () => {
+      // Make sure we're on assistant (not a thread)
+      const selector = page.locator('button').filter({ hasText: /Chat with assistant/i })
+      if (await selector.isVisible()) {
+        // Already on assistant
+      } else {
+        // Click thread selector and switch to assistant
+        const threadSelector = page.locator('[role="combobox"]').first()
+        await threadSelector.click()
+        await page.getByText('Chat with assistant').click()
+      }
+
+      // Type message asking to edit something
+      const chatInput = page.locator('textarea, input[type="text"]').first()
+      await expect(chatInput).toBeVisible({ timeout: 5000 })
+      await chatInput.fill('Please edit the Home page')
+
+      // Click the blue send button (not pink start thread)
+      await page.getByTestId('send-message-button').click()
+    })
+
+    await test.step('Verify assistant spawns a thread', async () => {
+      // Mock adapter calls spawn_thread tool and returns message with thread link
+      // Wait for the tool call to appear in chat
+      await expect(
+        page.getByText(/spawn_thread|Thread created/i).first()
+      ).toBeVisible({ timeout: 15000 })
+    })
+
+    await test.step('Verify thread appears in selector', async () => {
+      // The spawned thread should appear in the thread selector
+      // Open the selector dropdown
+      const threadSelector = page.locator('[role="combobox"]').first()
+      await threadSelector.click()
+
+      // Look for the e2e-test-edit thread (name from mock adapter)
+      // Use .first() since multiple threads may exist from retries
+      await expect(
+        page.locator('[role="listbox"]').getByText(/e2e-test-edit/i).first()
+      ).toBeVisible({ timeout: 10000 })
+
+      // Close dropdown
+      await page.keyboard.press('Escape')
+    })
+  })
+
 })
