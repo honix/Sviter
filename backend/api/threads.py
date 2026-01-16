@@ -16,7 +16,7 @@ from threads import git_operations as git_ops
 from db import (
     get_thread as db_get_thread,
     list_threads_for_user,
-    list_worker_threads,
+    list_worker_threads_for_user,
     get_thread_messages,
     can_access_thread,
     share_thread as db_share_thread,
@@ -61,13 +61,13 @@ async def list_threads(
     """
     List threads visible to user.
 
-    Returns owned threads, shared threads, and all worker threads.
+    Returns owned threads, shared threads, and worker threads where user is a participant.
     """
     # Get user's threads
     user_threads = list_threads_for_user(user_id, include_archived)
 
-    # Get all worker threads (visible to everyone)
-    workers = list_worker_threads()
+    # Get worker threads where user is a participant
+    workers = list_worker_threads_for_user(user_id)
 
     # Merge and dedupe
     thread_ids = set()

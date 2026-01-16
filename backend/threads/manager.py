@@ -32,6 +32,7 @@ from db import (
     get_user_by_email,
     list_threads_for_user,
     list_worker_threads,
+    list_worker_threads_for_user,
     can_access_thread,
     add_attention,
     clear_attention,
@@ -342,8 +343,8 @@ class ThreadManager:
         # Get user's threads (owned + shared)
         user_threads = list_threads_for_user(client_id)
 
-        # Also get all worker threads (visible to everyone)
-        worker_threads = list_worker_threads()
+        # Get worker threads where user is a participant
+        worker_threads = list_worker_threads_for_user(client_id)
 
         # Merge and dedupe
         thread_ids = set()

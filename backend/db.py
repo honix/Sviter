@@ -376,6 +376,22 @@ def list_worker_threads(status: str = None) -> List[dict]:
         return [dict(row) for row in rows]
 
 
+def list_worker_threads_for_user(user_id: str) -> List[dict]:
+    """List worker threads where user is owner or participant."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT t.* FROM threads t
+            LEFT JOIN thread_shares ts ON t.id = ts.thread_id
+            WHERE t.type = 'worker'
+              AND (t.owner_id = ? OR ts.user_id = ?)
+            ORDER BY t.updated_at DESC
+            """,
+            (user_id, user_id)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def get_user_assistant_thread(user_id: str) -> Optional[dict]:
     """Get the user's active assistant thread (creates one if none exists)."""
     with get_connection() as conn:
