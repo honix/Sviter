@@ -24,7 +24,7 @@ from threads.base import Thread, TERMINAL_STATUSES
 from threads.assistant import AssistantThread
 from threads.worker import WorkerThread
 from threads.accept_result import AcceptResult
-from threads.mentions import parse_mentions, is_ai_addressed
+from threads.mentions import parse_mentions, is_ai_addressed, resolve_mentions_to_user_ids
 from db import (
     get_or_create_guest,
     get_thread as db_get_thread,
@@ -511,9 +511,18 @@ class ThreadManager:
         try:
             name = message_data.get("name", "").strip()
             initial_message = message_data.get("goal", "").strip()  # User's message
-            participants = message_data.get("participants", [])
+            participants = list(message_data.get("participants", []))  # Copy to avoid mutation
 
             logger.info(f"Spawning thread: name={name}, initial_message={initial_message[:50]}...")
+
+            # Parse @mentions from initial message and add as participants
+            mentions = parse_mentions(initial_message)
+            if mentions.user_mentions:
+                mentioned_user_ids = resolve_mentions_to_user_ids(mentions.user_mentions)
+                for user_id in mentioned_user_ids:
+                    if user_id not in participants and user_id != client_id:
+                        participants.append(user_id)
+                        logger.info(f"Adding mentioned user as participant: {user_id}")
 
             if not name:
                 # Generate name from first words of user message
@@ -739,12 +748,28 @@ class ThreadManager:
         if not thread:
             return {"type": "error", "message": "Thread not found"}
 
-        # Parse @mentions and add attention for mentioned users
+        # Parse @mentions: add new users as participants and track attention
         mentions = parse_mentions(user_message)
-        for mentioned_user in mentions.user_mentions:
-            # Try to find user by name/id
-            if thread.is_participant(mentioned_user):
-                add_attention(thread.id, mentioned_user, "mention")
+        participants_changed = False
+        if mentions.user_mentions:
+            mentioned_user_ids = resolve_mentions_to_user_ids(mentions.user_mentions)
+            for user_id in mentioned_user_ids:
+                if not thread.is_participant(user_id):
+                    # Add new participant to thread
+                    thread.add_participant(user_id)
+                    add_attention(thread.id, user_id, "added")
+                    participants_changed = True
+                else:
+                    # Existing participant - just add attention
+                    add_attention(thread.id, user_id, "mention")
+
+        # Broadcast thread_updated if participants changed
+        if participants_changed:
+            await self.broadcast({
+                "type": "thread_updated",
+                "thread_id": thread.id,
+                "participants": thread.get_participants()
+            })
 
         # Clear attention for the sender (they're actively participating)
         clear_attention(thread.id, client_id)

@@ -133,3 +133,40 @@ def format_mention(user_id_or_name: str) -> str:
 def strip_mentions(text: str) -> str:
     """Remove all @mentions from text."""
     return MENTION_PATTERN.sub('', text).strip()
+
+
+def resolve_mentions_to_user_ids(mentions: List[str]) -> List[str]:
+    """
+    Resolve @mention names/ids to actual user IDs.
+
+    Looks up each mention in the users database - could be user ID or name.
+
+    Args:
+        mentions: List of @mention strings (without @)
+
+    Returns:
+        List of resolved user IDs (excludes invalid mentions)
+    """
+    from db import list_users, get_user
+
+    resolved = []
+    users = list_users()
+
+    # Build lookup maps for efficient matching
+    id_map = {u['id']: u['id'] for u in users}
+    name_map = {u.get('name', '').lower(): u['id'] for u in users if u.get('name')}
+
+    for mention in mentions:
+        # Try direct ID match first
+        if mention in id_map:
+            resolved.append(mention)
+        # Try name match (case-insensitive)
+        elif mention.lower() in name_map:
+            resolved.append(name_map[mention.lower()])
+        # Try partial name match on the ID (e.g., guest-abc123 -> abc123 mentioned)
+        else:
+            user = get_user(mention)
+            if user:
+                resolved.append(user['id'])
+
+    return resolved

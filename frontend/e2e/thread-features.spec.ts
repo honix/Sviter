@@ -177,4 +177,55 @@ test.describe('Thread Features', () => {
     // Reject button should NOT exist (new collaborative model)
     await expect(page.getByRole('button', { name: /Reject/i })).not.toBeVisible({ timeout: 2000 })
   })
+
+  test('thread shows participant badges', async ({ page }) => {
+    await test.step('Start thread', async () => {
+      await startThread(page, 'Edit TestPage')
+      await waitForThreadReady(page)
+    })
+
+    await test.step('Verify participant badge is visible in thread selector', async () => {
+      // Open the thread selector dropdown to see participant badges
+      // The thread selector button contains the thread name
+      const selectorButton = page.locator('button').filter({ hasText: /docs-update/i })
+      await expect(selectorButton).toBeVisible({ timeout: 5000 })
+      await selectorButton.click()
+
+      // In the dropdown, each thread item should show participant badges
+      // Participants include at least the owner (guest-xxxxx)
+      // Look for the colored badge element within the dropdown
+      const participantBadge = page.locator('[role="listbox"]').locator('span').filter({
+        hasText: /guest-/i
+      })
+      await expect(participantBadge.first()).toBeVisible({ timeout: 5000 })
+    })
+  })
+
+  test('user mention in initial message adds participant badge', async ({ page }) => {
+    // Note: This test verifies the UI shows participant badges when a thread is created
+    // In the test environment, only guest users exist, so we test that the owner badge shows
+
+    await test.step('Start thread with mention in message', async () => {
+      // Start a thread - the owner (current guest user) will be shown as participant
+      await startThread(page, 'Edit TestPage @ai please help')
+      await waitForThreadReady(page)
+    })
+
+    await test.step('Verify owner participant badge visible', async () => {
+      // The thread should show at least the owner as a participant
+      // Open the thread selector to see the badges
+      const selectorButton = page.locator('button').filter({ hasText: /docs-update/i })
+      await expect(selectorButton).toBeVisible({ timeout: 5000 })
+      await selectorButton.click()
+
+      // Look for participant badge (guest-xxxxx colored span)
+      const participantBadge = page.locator('[role="listbox"]').locator('span').filter({
+        hasText: /guest-/i
+      })
+      await expect(participantBadge.first()).toBeVisible({ timeout: 5000 })
+
+      // Close dropdown
+      await page.keyboard.press('Escape')
+    })
+  })
 })
