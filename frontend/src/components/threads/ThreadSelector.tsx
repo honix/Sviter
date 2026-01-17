@@ -10,6 +10,8 @@ import {
 } from "@/components/ui/select";
 import { GitBranch, MessageCircle } from "lucide-react";
 import type { Thread, ThreadStatus } from "../../types/thread";
+import { stringToColor, getInitials } from "../../utils/colors";
+import { useAuth } from "../../contexts/AuthContext";
 
 interface ThreadSelectorProps {
   threads: Thread[];
@@ -24,16 +26,6 @@ const ThreadIcon: React.FC = () => (
   <GitBranch className="h-3 w-3 text-muted-foreground" />
 );
 
-// Generate a consistent color from a string (for participant badges)
-const stringToColor = (str: string): string => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const hue = hash % 360;
-  return `hsl(${hue}, 70%, 50%)`;
-};
-
 export function ThreadSelector({
   threads,
   selectedThreadId,
@@ -41,6 +33,12 @@ export function ThreadSelector({
   onSelect,
   disabled,
 }: ThreadSelectorProps) {
+  const { userId, user } = useAuth();
+
+  // Current user circle info
+  const currentUserColor = userId ? stringToColor(userId) : '#888';
+  const currentUserInitials = userId ? getInitials(userId, user?.name) : '?';
+
   // Check if we're in assistant mode (selectedThreadId matches assistantThreadId)
   const isAssistantMode = selectedThreadId === assistantThreadId;
 
@@ -61,60 +59,75 @@ export function ThreadSelector({
     >
       <SelectTrigger className="w-full h-auto py-2">
         <div className="flex items-center gap-2 w-full">
-          <div className="flex flex-col items-start text-left flex-1 min-w-0">
-            {selectedThread && selectedThread.type !== 'assistant' ? (
-              <>
-                <div className="flex items-center gap-1.5 w-full">
-                  <ThreadIcon />
-                  <span className="font-medium truncate flex-1">
-                    {selectedThread.name}
-                  </span>
-                  {selectedThread.needs_attention && (
-                    <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+          {selectedThread && selectedThread.type !== 'assistant' ? (
+            <>
+              <ThreadIcon />
+              <span className="font-medium truncate flex-1 min-w-0 text-left">
+                {selectedThread.name}
+              </span>
+
+              {/* Attention indicator */}
+              {selectedThread.needs_attention && (
+                <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+              )}
+
+              {/* Status */}
+              {selectedThread.status && selectedThread.status !== 'Just created' && (
+                <span className="text-muted-foreground">
+                  {selectedThread.status}
+                </span>
+              )}
+
+              {/* Participant circles - matches CenterPanel style */}
+              {selectedThread.participants && selectedThread.participants.length > 0 && (
+                <div className="flex -space-x-1.5 flex-shrink-0 mr-1">
+                  {selectedThread.participants.slice(0, 3).map((p) => (
+                    <div
+                      key={p}
+                      className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm"
+                      style={{ backgroundColor: stringToColor(p) }}
+                      title={p}
+                    >
+                      {getInitials(p)}
+                    </div>
+                  ))}
+                  {selectedThread.participants.length > 3 && (
+                    <div className="w-5 h-5 rounded-full border border-background bg-muted flex items-center justify-center text-[9px] font-medium shadow-sm">
+                      +{selectedThread.participants.length - 3}
+                    </div>
                   )}
                 </div>
-                {/* Show status as text if not default */}
-                {selectedThread.status && selectedThread.status !== 'Just created' && (
-                  <span className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                    {selectedThread.status}
-                  </span>
-                )}
-                {/* Show participant badges */}
-                {selectedThread.participants && selectedThread.participants.length > 0 && (
-                  <div className="flex items-center gap-1 mt-1 flex-wrap">
-                    {selectedThread.participants.slice(0, 3).map((participant) => (
-                      <span
-                        key={participant}
-                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] text-white/90"
-                        style={{ backgroundColor: stringToColor(participant) }}
-                      >
-                        {participant}
-                      </span>
-                    ))}
-                    {selectedThread.participants.length > 3 && (
-                      <span className="text-[10px] text-muted-foreground">
-                        +{selectedThread.participants.length - 3}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                <MessageCircle className="h-4 w-4" />
-                <span className="font-medium">Chat with assistant</span>
+              )}
+            </>
+          ) : (
+            <>
+              <MessageCircle className="h-4 w-4" />
+              <span className="font-medium flex-1 text-left">Chat with assistant</span>
+              <div
+                className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm flex-shrink-0 mr-1"
+                style={{ backgroundColor: currentUserColor }}
+                title="You"
+              >
+                {currentUserInitials}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
       </SelectTrigger>
 
       <SelectContent className="bg-background">
         {/* User assistant option (always first) */}
-        <SelectItem value="assistant">
-          <div className="flex items-center gap-2">
+        <SelectItem value="assistant" className="[&>span:last-child]:w-full">
+          <div className="flex items-center gap-2 w-full">
             <MessageCircle className="h-4 w-4" />
-            <span>Chat with assistant</span>
+            <span className="flex-1">Chat with assistant</span>
+            <div
+              className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm flex-shrink-0 mr-1"
+              style={{ backgroundColor: currentUserColor }}
+              title="You"
+            >
+              {currentUserInitials}
+            </div>
           </div>
         </SelectItem>
 
@@ -126,38 +139,40 @@ export function ThreadSelector({
           .slice()
           .sort((a, b) => a.name.localeCompare(b.name))
           .map((thread) => (
-            <SelectItem key={thread.id} value={thread.id}>
-              <div className="flex flex-col gap-0.5 w-full py-1">
-                <div className="flex items-center gap-2 w-full">
-                  <ThreadIcon />
-                  <span className="truncate flex-1">{thread.name}</span>
-                  {/* Attention indicator */}
-                  {thread.needs_attention && (
-                    <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
-                  )}
-                </div>
-                {/* Status as free-form text */}
+            <SelectItem key={thread.id} value={thread.id} className="[&>span:last-child]:w-full">
+              <div className="flex items-center gap-2 w-full">
+                <ThreadIcon />
+                <span className="truncate flex-1 min-w-0">{thread.name}</span>
+
+                {/* Attention indicator */}
+                {thread.needs_attention && (
+                  <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+                )}
+
+                {/* Status */}
                 {thread.status && thread.status !== 'Just created' && (
-                  <span className="text-[10px] text-muted-foreground pl-5 truncate">
+                  <span className="text-muted-foreground">
                     {thread.status}
                   </span>
                 )}
-                {/* Participant badges - always visible */}
+
+                {/* Participant circles - matches CenterPanel style */}
                 {thread.participants && thread.participants.length > 0 && (
-                  <div className="flex items-center gap-1 flex-wrap pl-5">
-                    {thread.participants.slice(0, 3).map((participant) => (
-                      <span
-                        key={participant}
-                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] text-white/90"
-                        style={{ backgroundColor: stringToColor(participant) }}
+                  <div className="flex -space-x-1.5 flex-shrink-0 mr-1">
+                    {thread.participants.slice(0, 3).map((p) => (
+                      <div
+                        key={p}
+                        className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm"
+                        style={{ backgroundColor: stringToColor(p) }}
+                        title={p}
                       >
-                        {participant}
-                      </span>
+                        {getInitials(p)}
+                      </div>
                     ))}
                     {thread.participants.length > 3 && (
-                      <span className="text-[9px] text-muted-foreground">
+                      <div className="w-5 h-5 rounded-full border border-background bg-muted flex items-center justify-center text-[9px] font-medium shadow-sm">
                         +{thread.participants.length - 3}
-                      </span>
+                      </div>
                     )}
                   </div>
                 )}
