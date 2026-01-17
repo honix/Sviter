@@ -64,7 +64,7 @@ const CenterPanel: React.FC = () => {
   const { state, actions } = useAppContext();
   const { currentPage, viewMode, isLoading, error, currentBranch, pageUpdateCounter, threads, pages } = state;
   const { setViewMode, setCurrentPage } = actions;
-  const { userId } = useAuth();
+  const { userId, user } = useAuth();
 
   const [viewingRevision, setViewingRevision] = useState<PageRevision | null>(null);
   const [viewingRevisionContent, setViewingRevisionContent] = useState<string | null>(null);
@@ -176,7 +176,7 @@ const CenterPanel: React.FC = () => {
     const { connectionStatus, remoteUsers, saveStatus } = collabStatus;
     const isConnected = connectionStatus === 'connected';
     const currentUserColor = userId ? stringToColor(userId) : '#888';
-    const currentUserInitials = userId ? getInitials(userId) : '?';
+    const currentUserInitials = userId ? getInitials(userId, user?.name) : '?';
 
     return (
       <div className="flex items-center gap-2">

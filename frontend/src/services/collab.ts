@@ -167,6 +167,7 @@ function scheduleSave(pagePath: string, pageTitle: string): void {
 export function createCollabSession(
   pagePath: string,
   userId: string,
+  userName?: string | null,
   onStatusChange?: StatusHandler,
   onUsersChange?: UsersHandler,
   onSaveStatusChange?: SaveStatusHandler,
@@ -243,9 +244,9 @@ export function createCollabSession(
   // Set local user state
   awareness.setLocalStateField('user', {
     id: userId,
-    name: getDisplayName(userId),
+    name: userName || getDisplayName(userId),
     color: stringToColor(userId),
-    initials: getInitials(userId),
+    initials: getInitials(userId, userName),
   });
 
   // Handle connection status changes - notify all registered handlers

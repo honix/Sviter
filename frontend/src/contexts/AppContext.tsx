@@ -328,7 +328,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { userId, isLoading: isAuthLoading } = useAuth();
+  const { userId, user, isLoading: isAuthLoading } = useAuth();
   const [state, dispatch] = useReducer(appReducer, initialState);
   const wsService = useRef<WebSocketService | null>(null);
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
@@ -1059,7 +1059,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         id: `user_${Date.now()}`,
         role,
         content,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        user_id: role === 'user' ? userId || undefined : undefined,
+        user_name: role === 'user' ? user?.name || undefined : undefined
       };
       dispatch({
         type: 'ADD_THREAD_MESSAGE',

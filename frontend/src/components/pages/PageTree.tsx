@@ -25,6 +25,7 @@ import { getApiUrl } from '../../utils/url';
 import { isImagePath } from '../../utils/files';
 import { useFileUpload } from '../../hooks/useFileUpload';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
+import { getInitials } from '../../utils/colors';
 
 // Extract filename from path
 const getFileName = (path: string): string => {
@@ -195,7 +196,7 @@ const PageTree: React.FC<PageTreeProps> = ({
   const displayName = user?.type === 'oauth' && user?.name
     ? user.name
     : user?.id || 'Guest';
-  const initials = displayName.slice(0, 2).toUpperCase();
+  const initials = getInitials(user?.id, user?.name);
   const isGuest = user?.type === 'guest';
 
   // Fetch diff stats when viewing a non-main branch

@@ -65,7 +65,7 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
   const [dropCursor, setDropCursor] = useState<{ top: number; left: number; height: number } | null>(null);
   const dropPosRef = useRef<number | null>(null);
   const dragCounterRef = useRef(0);
-  const { userId } = useAuth();
+  const { userId, user } = useAuth();
   const sessionRef = useRef<ReturnType<typeof createCollabSession> | null>(null);
   const initializedRef = useRef(false);
   const editableRef = useRef(editable);
@@ -304,6 +304,7 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
     const session = createCollabSession(
       pagePath,
       userId,
+      user?.name,
       handleStatusChange,
       handleUsersChange,
       handleSaveStatusChange,

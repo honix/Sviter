@@ -53,7 +53,7 @@ export const getInitials = (
   userName?: string | null
 ): string => {
   // If we have a proper name (different from userId), use it
-  if (userName && userName !== userId) {
+  if (userName && typeof userName === 'string' && userName !== userId) {
     const parts = userName.trim().split(/\s+/);
     if (parts.length >= 2) {
       // "Fedor Shchukin" → "FS"

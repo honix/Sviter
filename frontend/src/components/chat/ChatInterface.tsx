@@ -48,7 +48,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
   const { messages, sendMessage, clearMessages, isGenerating } = useChat(threadId);
   const [inputValue, setInputValue] = useState('');
   const [expandedSystemPrompts, setExpandedSystemPrompts] = useState<Set<string>>(new Set());
-  const { userId: currentUserId } = useAuth();
+  const { userId: currentUserId, user: currentUser } = useAuth();
   const { state: selectionState, clearAllContexts } = useSelection();
 
   // Handle @mention selection - insert @userId into input
@@ -407,9 +407,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
                 : '';
 
               // Avatar: pastel color + initials for users, AI avatar for assistant
-              const avatarFallback = isAI ? 'AI' : getInitials(effectiveUserId, message.user_name);
+              // Use current user's name for current user, otherwise use message's user_name
+              const userName = isCurrentUser ? currentUser?.name : message.user_name;
+              const avatarFallback = isAI ? 'AI' : getInitials(effectiveUserId, userName);
               const avatarStyle = isUser && effectiveUserId
-                ? { backgroundColor: stringToColor(effectiveUserId) }
+                ? { backgroundColor: stringToColor(effectiveUserId), color: 'white' }
                 : undefined;
 
               return (() => {
