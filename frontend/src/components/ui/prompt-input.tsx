@@ -126,11 +126,14 @@ function PromptInputTextarea({
   }, [value, maxHeight, disableAutosize]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Call custom handler first to allow it to intercept (e.g., mention dropdown)
+    onKeyDown?.(e);
+
+    // Only submit if Enter wasn't already handled (e.g., by mention selection)
+    if (e.key === "Enter" && !e.shiftKey && !e.defaultPrevented) {
       e.preventDefault();
       onSubmit?.();
     }
-    onKeyDown?.(e);
   };
 
   return (

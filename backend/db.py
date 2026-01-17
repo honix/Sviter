@@ -1,6 +1,9 @@
 """SQLite database setup and connection management."""
 
 import sqlite3
+import secrets
+import unicodedata
+import re
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Generator, Optional, List, Dict, Any
@@ -9,6 +12,115 @@ from datetime import datetime
 
 # Database file location
 DB_PATH = Path(__file__).parent / "data" / "sviter.db"
+
+
+def generate_handle_from_name(name: str) -> str:
+    """
+    Generate a user handle from a full name.
+
+    Examples:
+        "Fedor Shchukin" -> "fedor.shchukin"
+        "John Doe" -> "john.doe"
+        "Alice" -> "alice"
+
+    Handles Unicode by transliterating to ASCII where possible.
+    """
+    if not name or not name.strip():
+        return None
+
+    # Normalize Unicode (decompose accents)
+    normalized = unicodedata.normalize('NFKD', name)
+    # Remove non-ASCII characters (accents become separate chars after NFKD)
+    ascii_name = normalized.encode('ascii', 'ignore').decode('ascii')
+
+    # If we lost everything, fall back to original with basic replacements
+    if not ascii_name.strip():
+        ascii_name = name
+
+    # Lowercase and replace spaces with dots
+    handle = ascii_name.lower().strip()
+    # Replace multiple spaces/special chars with single dot
+    handle = re.sub(r'[^a-z0-9]+', '.', handle)
+    # Remove leading/trailing dots
+    handle = handle.strip('.')
+
+    return handle if handle else None
+
+
+def generate_unique_handle(name: str) -> str:
+    """
+    Generate a unique user handle, adding suffix if needed.
+
+    Returns handle like "fedor.shchukin" or "fedor.shchukin.a1b2" if taken.
+    """
+    base_handle = generate_handle_from_name(name)
+    if not base_handle:
+        # Fallback for names that can't be converted
+        return f"user-{secrets.token_hex(4)}"
+
+    # Check if handle is available
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM users WHERE id = ?", (base_handle,)
+        ).fetchone()
+
+        if not existing:
+            return base_handle
+
+        # Handle taken, add random suffix
+        return f"{base_handle}.{secrets.token_hex(2)}"
+
+
+def change_user_id(old_id: str, new_id: str) -> bool:
+    """
+    Change a user's ID across all tables.
+
+    Updates:
+    - users.id (primary key)
+    - threads.owner_id
+    - thread_messages.user_id
+    - thread_shares.user_id
+    - thread_attention.user_id
+
+    Returns True if successful.
+    """
+    with get_connection() as conn:
+        try:
+            # Check new ID doesn't exist
+            existing = conn.execute(
+                "SELECT 1 FROM users WHERE id = ?", (new_id,)
+            ).fetchone()
+            if existing:
+                return False
+
+            # Update all tables in order (foreign keys)
+            conn.execute(
+                "UPDATE thread_messages SET user_id = ? WHERE user_id = ?",
+                (new_id, old_id)
+            )
+            conn.execute(
+                "UPDATE thread_shares SET user_id = ? WHERE user_id = ?",
+                (new_id, old_id)
+            )
+            conn.execute(
+                "UPDATE thread_attention SET user_id = ? WHERE user_id = ?",
+                (new_id, old_id)
+            )
+            conn.execute(
+                "UPDATE threads SET owner_id = ? WHERE owner_id = ?",
+                (new_id, old_id)
+            )
+            # Finally update the user's ID
+            conn.execute(
+                "UPDATE users SET id = ? WHERE id = ?",
+                (new_id, old_id)
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            print(f"Failed to change user ID: {e}")
+            return False
 
 
 def init_db():
@@ -212,10 +324,14 @@ def upgrade_guest_to_oauth(
     name: Optional[str] = None
 ) -> dict:
     """
-    Upgrade a guest user to an OAuth user, preserving their data.
+    Upgrade a guest user to an OAuth user.
 
-    All threads, shares, and other data remain linked to the same user ID.
+    If the user has a name, their ID is changed to a name-based handle
+    (e.g., "guest-abc123" -> "fedor.shchukin").
+
+    All threads, shares, and other data are migrated to the new ID.
     """
+    # First update OAuth info
     with get_connection() as conn:
         conn.execute(
             """
@@ -231,6 +347,14 @@ def upgrade_guest_to_oauth(
             (provider, oauth_id, email, name, guest_id)
         )
         conn.commit()
+
+    # If user has a name, change to name-based handle
+    if name:
+        new_handle = generate_unique_handle(name)
+        if new_handle and new_handle != guest_id:
+            if change_user_id(guest_id, new_handle):
+                return get_user(new_handle)
+
     return get_user(guest_id)
 
 

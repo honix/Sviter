@@ -800,12 +800,9 @@ class ThreadManager:
         callbacks = self._prepare_thread_callbacks(thread, client_id)
         tools = thread.get_tools(wiki, **callbacks)
 
-        # Get user display name for AI attribution and frontend display
+        # Get user info for display and AI attribution
         user = get_user(client_id)
-        user_display_name = user.get("name") if user else None
-        if not user_display_name or user_display_name == client_id:
-            # Fallback to client_id if no name set
-            user_display_name = client_id
+        user_display_name = user.get("name") if user else client_id
 
         # Add user message
         thread.add_message("user", user_message, user_id=client_id)
@@ -829,8 +826,8 @@ class ThreadManager:
             "thread_id": thread.id
         })
 
-        # Format message with attribution for AI (so it knows who is talking)
-        attributed_message = f"[{user_display_name}]: {user_message}"
+        # Format message with handle for AI (so it knows who is talking and can @mention them)
+        attributed_message = f"[@{client_id}]: {user_message}"
 
         # Process turn
         result = await executor.process_turn(attributed_message, custom_tools=tools)
@@ -909,11 +906,9 @@ class ThreadManager:
             return
 
         try:
-            # Get user display name for AI attribution and frontend display
+            # Get user info for display and AI attribution
             user = get_user(client_id)
-            user_display_name = user.get("name") if user else None
-            if not user_display_name or user_display_name == client_id:
-                user_display_name = client_id
+            user_display_name = user.get("name") if user else client_id
 
             # Add goal as user message (from the user who asked assistant)
             thread.add_message("user", goal, user_id=client_id)
@@ -926,8 +921,8 @@ class ThreadManager:
                 "user_name": user_display_name
             })
 
-            # Format message with attribution for AI
-            attributed_goal = f"[{user_display_name}]: {goal}"
+            # Format message with handle for AI (so it knows who is talking and can @mention them)
+            attributed_goal = f"[@{client_id}]: {goal}"
 
             thread.set_generating(True)
             result = await executor.process_turn(attributed_goal, custom_tools=tools)
@@ -1090,9 +1085,8 @@ class ThreadManager:
             return {"type": "error", "message": "Thread cannot be accepted"}
 
         # Send accept message to the thread so agent knows
-        user = get_user(client_id)
-        user_name = user.get("name") or client_id if user else client_id
-        accept_message = f"[{user_name} accepted this thread]"
+        # Use handle for accept message so AI knows who accepted
+        accept_message = f"[@{client_id} accepted this thread]"
         thread.add_message("user", accept_message, user_id=client_id)
         await self.broadcast({
             "type": "thread_message",

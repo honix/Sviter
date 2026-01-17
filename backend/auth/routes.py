@@ -17,6 +17,7 @@ from config import (
 )
 from db import (
     create_oauth_user,
+    generate_unique_handle,
     get_or_create_guest,
     get_user,
     get_user_by_email,
@@ -322,7 +323,11 @@ async def oauth_callback(
 
         # 4. Create new OAuth user
         if not user:
-            user_id = f"oauth-{provider}-{secrets.token_hex(4)}"
+            # Use name-based handle if available, otherwise fallback
+            if user_info.name:
+                user_id = generate_unique_handle(user_info.name)
+            else:
+                user_id = f"oauth-{provider}-{secrets.token_hex(4)}"
             user = create_oauth_user(
                 user_id,
                 provider,
