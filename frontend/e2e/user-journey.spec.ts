@@ -82,7 +82,21 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
       ).not.toBeVisible({ timeout: 10000 })
     })
 
-    // Step 7: Verify changes were merged to main
+    // Step 7: Switch to assistant to view main branch
+    await test.step('Switch to assistant (main branch)', async () => {
+      // After accepting, switch to assistant to view merged content on main
+      const threadSelector = page.locator('[role="combobox"]').first()
+      await expect(threadSelector).toBeVisible({ timeout: 5000 })
+      await threadSelector.click()
+
+      // Select "Chat with assistant" option
+      await page.getByText('Chat with assistant').click()
+
+      // Wait for page tree to stabilize after branch switch
+      await expect(page.getByTestId('page-Home')).toBeVisible({ timeout: 10000 })
+    })
+
+    // Step 8: Verify changes were merged to main
     await test.step('Verify changes merged to main', async () => {
       // Navigate to TestPage and verify the mock edit was applied
       // The mock adapter edits TestPage to add "This section was added by the E2E test mock agent"

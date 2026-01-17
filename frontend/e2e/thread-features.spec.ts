@@ -264,14 +264,15 @@ test.describe('Thread Features', () => {
 
     await test.step('Verify thread appears in selector', async () => {
       // The spawned thread should appear in the thread selector
+      // Note: The mock worker renames threads to "docs-update" when they run
       // Open the selector dropdown
       const threadSelector = page.locator('[role="combobox"]').first()
       await threadSelector.click()
 
-      // Look for the e2e-test-edit thread (name from mock adapter)
+      // Look for the thread (either original name or renamed by worker)
       // Use .first() since multiple threads may exist from retries
       await expect(
-        page.locator('[role="listbox"]').getByText(/e2e-test-edit/i).first()
+        page.locator('[role="listbox"]').getByText(/docs-update|e2e-test-edit/i).first()
       ).toBeVisible({ timeout: 10000 })
 
       // Close dropdown
