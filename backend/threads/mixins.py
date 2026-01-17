@@ -176,7 +176,8 @@ class ReviewMixin:
 
         return parent_tools + ToolBuilder.worker_tools(
             thread=self,
-            broadcast_fn=broadcast_fn
+            broadcast_fn=broadcast_fn,
+            wiki=wiki
         )
 
     def mark_for_review(self, summary: str) -> None:

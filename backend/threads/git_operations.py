@@ -23,7 +23,8 @@ def init_thread_support(wiki: GitWiki) -> None:
     """
     Initialize thread support.
 
-    Creates worktrees directory and cleans up orphaned worktrees.
+    Creates worktrees directory, cleans up orphaned worktrees,
+    and recreates worktrees for active threads.
     Should be called on server startup.
 
     Args:
@@ -31,6 +32,47 @@ def init_thread_support(wiki: GitWiki) -> None:
     """
     get_worktrees_path()  # Ensure directory exists
     cleanup_orphaned_worktrees(wiki)
+    recreate_missing_worktrees(wiki)
+
+
+def recreate_missing_worktrees(wiki: GitWiki) -> None:
+    """
+    Recreate worktrees for active threads that are missing them.
+
+    On server restart, worktrees are cleaned up. This function
+    recreates them for threads that are still active.
+
+    Args:
+        wiki: GitWiki instance
+    """
+    from db import list_worker_threads, update_thread
+
+    try:
+        active_threads = list_worker_threads()
+
+        for thread in active_threads:
+            branch = thread.get('branch')
+            status = thread.get('status', '')
+
+            # Skip threads without branches or in terminal states
+            if not branch or status in ('accepted', 'archived', 'rejected'):
+                continue
+
+            # Check if worktree exists
+            worktree_path = thread.get('worktree_path')
+            if worktree_path and Path(worktree_path).exists():
+                continue  # Worktree exists, skip
+
+            # Recreate worktree
+            try:
+                new_path = create_worktree(wiki, branch)
+                update_thread(thread['id'], worktree_path=str(new_path))
+                print(f"✅ Recreated worktree for thread {thread['id']}: {new_path}")
+            except Exception as e:
+                print(f"⚠️ Failed to recreate worktree for thread {thread['id']}: {e}")
+
+    except Exception as e:
+        print(f"Warning: Error recreating worktrees: {e}")
 
 
 def create_worktree(wiki: GitWiki, branch_name: str) -> Path:
@@ -42,15 +84,16 @@ def create_worktree(wiki: GitWiki, branch_name: str) -> Path:
 
     Args:
         wiki: GitWiki instance (main wiki)
-        branch_name: Branch name (e.g., 'thread/task/20250607-123456')
+        branch_name: Branch name (e.g., 'thread/new-thread-5a721c')
 
     Returns:
         Path to the created worktree directory
     """
     worktrees_path = get_worktrees_path()
 
-    # Sanitize branch name for directory (replace / with -)
-    safe_name = branch_name.replace("/", "-")
+    # Use just the name part without thread/ prefix for cleaner directory names
+    # e.g., 'thread/new-thread-5a721c' -> 'new-thread-5a721c'
+    safe_name = branch_name.replace("thread/", "")
     worktree_path = worktrees_path / safe_name
 
     # Create the worktree with the branch checked out
@@ -74,7 +117,8 @@ def remove_worktree(wiki: GitWiki, branch_name: str) -> bool:
         True if worktree removed successfully, False otherwise
     """
     worktrees_path = get_worktrees_path()
-    safe_name = branch_name.replace("/", "-")
+    # Match create_worktree naming: strip thread/ prefix
+    safe_name = branch_name.replace("thread/", "")
     worktree_path = worktrees_path / safe_name
 
     if not worktree_path.exists():
@@ -441,3 +485,68 @@ def get_diff_stats(wiki: GitWiki, branch: str) -> Optional[Dict[str, Any]]:
         return wiki.get_diff_stat("main", branch)
     except Exception:
         return None
+
+
+def rename_branch(wiki: GitWiki, old_branch: str, new_branch: str,
+                  old_worktree_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Rename a thread branch and update its worktree if it exists.
+
+    Args:
+        wiki: GitWiki instance (main wiki)
+        old_branch: Current branch name
+        new_branch: New branch name
+        old_worktree_path: Path to existing worktree (if any)
+
+    Returns:
+        Dict with:
+            - success: bool
+            - new_worktree_path: str or None (new path if worktree was moved)
+            - error: str or None
+    """
+    import shutil
+
+    try:
+        # Rename the branch
+        wiki.repo.git.branch("-m", old_branch, new_branch)
+
+        # If there's a worktree and it exists, update its directory name
+        new_worktree_path = None
+        if old_worktree_path:
+            old_path = Path(old_worktree_path)
+            if old_path.exists():
+                # Calculate new worktree path (strip thread/ prefix for cleaner names)
+                worktrees_path = get_worktrees_path()
+                # Use just the name part, not the full thread/name format
+                name_part = new_branch.replace("thread/", "")
+                new_path = worktrees_path / name_part
+
+                if old_path != new_path:
+                    try:
+                        # Remove old worktree registration
+                        wiki.repo.git.worktree("remove", "--force", str(old_path))
+                    except Exception:
+                        pass
+
+                    # Move the directory
+                    shutil.move(str(old_path), str(new_path))
+
+                    # Re-add as worktree
+                    wiki.repo.git.worktree("add", "--force", str(new_path), new_branch)
+                    new_worktree_path = str(new_path)
+
+                    wiki.repo.git.worktree("prune")
+            # else: worktree doesn't exist, just rename branch (already done above)
+
+        return {
+            "success": True,
+            "new_worktree_path": new_worktree_path,
+            "error": None
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "new_worktree_path": None,
+            "error": str(e)
+        }

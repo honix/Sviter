@@ -212,6 +212,61 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
         """Check if thread lifecycle is complete."""
         return self.status in TERMINAL_STATUSES
 
+    def rename_with_branch(self, name: str, wiki: 'GitWiki') -> Optional[str]:
+        """
+        Rename thread and its git branch.
+
+        Args:
+            name: New thread name (will be sanitized for branch name)
+            wiki: Main GitWiki instance
+
+        Returns:
+            Error message if failed, None on success
+        """
+        from threads.git_operations import rename_branch
+
+        # Generate new branch name (keeping the same hash for uniqueness)
+        old_branch = self.branch
+        if not old_branch:
+            # No branch, just rename the thread
+            self.rename(name)
+            return None
+
+        # Extract the hash from old branch name (last part after -)
+        # e.g., "thread/old-name-abc123" -> "abc123"
+        old_parts = old_branch.split('-')
+        hash_suffix = old_parts[-1] if old_parts else self.id[:6]
+
+        # Generate new branch name
+        new_branch = self._generate_branch_name(name, hash_suffix)
+
+        if new_branch == old_branch:
+            # Same name, just update thread name
+            self.rename(name)
+            return None
+
+        # Rename the git branch
+        result = rename_branch(wiki, old_branch, new_branch, self.worktree_path)
+
+        if not result["success"]:
+            return f"Failed to rename branch: {result['error']}"
+
+        # Update thread state
+        self.branch = new_branch
+        if result["new_worktree_path"]:
+            self.worktree_path = result["new_worktree_path"]
+
+        # Update name in database (branch is updated too)
+        self.name = name
+        db_update_thread(
+            self.id,
+            name=name,
+            branch=new_branch,
+            worktree_path=self.worktree_path
+        )
+
+        return None
+
     def can_accept(self) -> bool:
         """Check if thread can be accepted (any non-terminal state)."""
         return self.status not in TERMINAL_STATUSES

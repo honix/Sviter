@@ -634,20 +634,35 @@ def _get_thread_name(thread) -> str:
     return f"Current name: {thread.name}"
 
 
-def _set_thread_name(thread, broadcast_fn, args: Dict[str, Any]) -> str:
-    """Set thread name"""
+def _set_thread_name(thread, broadcast_fn, wiki, args: Dict[str, Any]) -> str:
+    """Set thread name and rename git branch if applicable"""
     name = args.get("name", "").strip()
     if not name:
         return "Error: 'name' is required"
 
-    thread.rename(name)
+    # Use rename_with_branch if available (WorkerThread) to also rename git branch
+    if hasattr(thread, 'rename_with_branch') and wiki:
+        error = thread.rename_with_branch(name, wiki)
+        if error:
+            return f"Error: {error}"
+        new_branch = getattr(thread, 'branch', None)
+    else:
+        thread.rename(name)
+        new_branch = None
+
     if broadcast_fn:
         import asyncio
-        asyncio.create_task(broadcast_fn({
+        update_data = {
             "type": "thread_updated",
             "thread_id": thread.id,
             "name": name
-        }))
+        }
+        if new_branch:
+            update_data["branch"] = new_branch
+        asyncio.create_task(broadcast_fn(update_data))
+
+    if new_branch:
+        return f"Thread renamed to: {name} (branch: {new_branch})"
     return f"Thread renamed to: {name}"
 
 
@@ -969,7 +984,7 @@ After moving/renaming, consider updating agents/index.md navigation entries.""",
         ]
 
     @staticmethod
-    def worker_tools(thread, broadcast_fn: Callable = None) -> List[WikiTool]:
+    def worker_tools(thread, broadcast_fn: Callable = None, wiki=None) -> List[WikiTool]:
         """Thread info tools: get/set status and name"""
         return [
             WikiTool(
@@ -998,7 +1013,7 @@ After moving/renaming, consider updating agents/index.md navigation entries.""",
             ),
             WikiTool(
                 name="set_thread_name",
-                description="Rename this thread. Use descriptive names.",
+                description="Rename this thread and its git branch. Use descriptive kebab-case names.",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -1006,7 +1021,7 @@ After moving/renaming, consider updating agents/index.md navigation entries.""",
                     },
                     "required": ["name"]
                 },
-                function=lambda args, t=thread, b=broadcast_fn: _set_thread_name(t, b, args)
+                function=lambda args, t=thread, b=broadcast_fn, w=wiki: _set_thread_name(t, b, w, args)
             )
         ]
 
