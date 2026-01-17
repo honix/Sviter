@@ -522,20 +522,18 @@ def rename_branch(wiki: GitWiki, old_branch: str, new_branch: str,
                 new_path = worktrees_path / name_part
 
                 if old_path != new_path:
-                    try:
-                        # Remove old worktree registration
-                        wiki.repo.git.worktree("remove", "--force", str(old_path))
-                    except Exception:
-                        pass
+                    # Prune stale worktree entries first
+                    wiki.repo.git.worktree("prune")
 
-                    # Move the directory
+                    # Move the directory (before removing worktree registration)
                     shutil.move(str(old_path), str(new_path))
 
-                    # Re-add as worktree
+                    # Prune again to remove old path registration
+                    wiki.repo.git.worktree("prune")
+
+                    # Re-add as worktree with new branch
                     wiki.repo.git.worktree("add", "--force", str(new_path), new_branch)
                     new_worktree_path = str(new_path)
-
-                    wiki.repo.git.worktree("prune")
             # else: worktree doesn't exist, just rename branch (already done above)
 
         return {
