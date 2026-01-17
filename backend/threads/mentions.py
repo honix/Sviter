@@ -14,6 +14,9 @@ MENTION_AI = "ai"
 MENTION_ALL = "all"
 MENTION_HERE = "here"
 
+# Maximum participants per thread to prevent spam
+MAX_PARTICIPANTS_PER_THREAD = 50
+
 # Pattern matches @username (alphanumeric, hyphen, underscore, dot)
 MENTION_PATTERN = re.compile(r'@([a-zA-Z0-9_.-]+)')
 
@@ -135,38 +138,50 @@ def strip_mentions(text: str) -> str:
     return MENTION_PATTERN.sub('', text).strip()
 
 
-def resolve_mentions_to_user_ids(mentions: List[str]) -> List[str]:
+def resolve_mentions_to_user_ids(
+    mentions: List[str],
+    max_resolve: int = MAX_PARTICIPANTS_PER_THREAD
+) -> List[str]:
     """
     Resolve @mention names/ids to actual user IDs.
 
     Looks up each mention in the users database - could be user ID or name.
+    Uses targeted lookups instead of loading all users for better performance.
 
     Args:
         mentions: List of @mention strings (without @)
+        max_resolve: Maximum number of mentions to resolve (prevents spam)
 
     Returns:
-        List of resolved user IDs (excludes invalid mentions)
+        List of resolved user IDs (excludes invalid mentions, limited to max_resolve)
     """
-    from db import list_users, get_user
+    from db import get_user, get_user_by_name
 
     resolved = []
-    users = list_users()
+    seen = set()
 
-    # Build lookup maps for efficient matching
-    id_map = {u['id']: u['id'] for u in users}
-    name_map = {u.get('name', '').lower(): u['id'] for u in users if u.get('name')}
+    # Limit input to prevent spam - only process first N mentions
+    limited_mentions = mentions[:max_resolve] if len(mentions) > max_resolve else mentions
 
-    for mention in mentions:
-        # Try direct ID match first
-        if mention in id_map:
-            resolved.append(mention)
+    for mention in limited_mentions:
+        if len(resolved) >= max_resolve:
+            break
+
+        # Skip if already resolved
+        if mention in seen:
+            continue
+
+        # Try direct ID match first (most common case)
+        user = get_user(mention)
+        if user and user['id'] not in seen:
+            resolved.append(user['id'])
+            seen.add(user['id'])
+            continue
+
         # Try name match (case-insensitive)
-        elif mention.lower() in name_map:
-            resolved.append(name_map[mention.lower()])
-        # Try partial name match on the ID (e.g., guest-abc123 -> abc123 mentioned)
-        else:
-            user = get_user(mention)
-            if user:
-                resolved.append(user['id'])
+        user = get_user_by_name(mention)
+        if user and user['id'] not in seen:
+            resolved.append(user['id'])
+            seen.add(user['id'])
 
     return resolved

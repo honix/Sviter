@@ -250,6 +250,16 @@ def get_user(user_id: str) -> dict | None:
         return dict(row) if row else None
 
 
+def get_user_by_name(name: str) -> dict | None:
+    """Get user by name (case-insensitive)."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE LOWER(name) = LOWER(?)",
+            (name,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def create_user(user_id: str, user_type: str = "guest", **kwargs) -> dict:
     """Create a new user."""
     with get_connection() as conn:
@@ -442,21 +452,37 @@ def update_thread(thread_id: str, **kwargs) -> Optional[dict]:
     if not kwargs:
         return get_thread(thread_id)
 
-    # Build SET clause dynamically
-    allowed_fields = {
-        'name', 'status', 'branch', 'worktree_path', 'review_summary',
-        'error', 'is_generating', 'goal'
+    # Explicit field mapping to prevent SQL injection
+    # Each key maps to an identical column name (validated at compile time)
+    field_map = {
+        'name': 'name',
+        'status': 'status',
+        'branch': 'branch',
+        'worktree_path': 'worktree_path',
+        'review_summary': 'review_summary',
+        'error': 'error',
+        'is_generating': 'is_generating',
+        'goal': 'goal'
     }
-    fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
 
-    if not fields:
+    update_parts = []
+    values = []
+    for field, column in field_map.items():
+        if field in kwargs:
+            update_parts.append(f"{column} = ?")
+            values.append(kwargs[field])
+
+    if not update_parts:
         return get_thread(thread_id)
 
     # Always update updated_at
-    fields['updated_at'] = datetime.now().isoformat()
+    update_parts.append("updated_at = ?")
+    values.append(datetime.now().isoformat())
 
-    set_clause = ", ".join(f"{k} = ?" for k in fields.keys())
-    values = list(fields.values()) + [thread_id]
+    # Add thread_id for WHERE clause
+    values.append(thread_id)
+
+    set_clause = ", ".join(update_parts)
 
     with get_connection() as conn:
         conn.execute(

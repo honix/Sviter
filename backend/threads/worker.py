@@ -99,6 +99,12 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
             is_generating=False
         )
 
+    # Git reserved names that cannot be used as branch names
+    GIT_RESERVED_NAMES = frozenset([
+        'HEAD', 'head', 'refs', 'objects', 'hooks', 'index', 'config',
+        'logs', 'info', 'description', 'packed-refs', 'shallow'
+    ])
+
     @staticmethod
     def _generate_branch_name(name: str, thread_id: str) -> str:
         """Generate a safe git branch name."""
@@ -107,16 +113,24 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
         safe_name = re.sub(r'-+', '-', safe_name)  # Collapse multiple dashes
         safe_name = re.sub(r'^-+|-+$', '', safe_name)  # Remove leading/trailing
 
+        # Short UUID for uniqueness (needed for fallback)
+        short_uuid = thread_id[:6]
+
+        # Path traversal protection
+        if '..' in safe_name or safe_name == '.':
+            safe_name = f"task-{short_uuid}"
+
         # Git safety validations
-        if not safe_name or safe_name.startswith('/') or safe_name.endswith('.lock'):
-            safe_name = "task"
+        if (not safe_name or
+            safe_name.startswith('/') or
+            safe_name.startswith('.') or
+            safe_name.endswith('.lock') or
+            safe_name in WorkerThread.GIT_RESERVED_NAMES):
+            safe_name = f"task-{short_uuid}"
 
         # Reasonable length
         if len(safe_name) > 50:
             safe_name = safe_name[:50].rstrip('-')
-
-        # Short UUID for uniqueness
-        short_uuid = thread_id[:6]
 
         return f"thread/{safe_name}-{short_uuid}"
 
