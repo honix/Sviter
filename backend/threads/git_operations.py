@@ -493,7 +493,7 @@ def rename_branch(wiki: GitWiki, old_branch: str, new_branch: str,
     Rename a thread branch and update its worktree if it exists.
 
     Args:
-        wiki: GitWiki instance (main wiki)
+        wiki: GitWiki instance (can be main wiki or worktree wiki - will use main repo)
         old_branch: Current branch name
         new_branch: New branch name
         old_worktree_path: Path to existing worktree (if any)
@@ -507,8 +507,26 @@ def rename_branch(wiki: GitWiki, old_branch: str, new_branch: str,
     import shutil
 
     try:
+        # Get the main repo (not worktree) - worktree operations must use main repo
+        repo = wiki.repo
+        # If this is a worktree, get the parent/main repo
+        if repo.common_dir != repo.git_dir:
+            # This is a worktree - need to find the main working directory
+            # common_dir points to .git/modules/Sviter-wiki
+            # We need the actual repo path (Sviter-wiki directory)
+            from git import Repo
+            import os
+            # Read gitdir file from worktree to get proper config, or use worktree config
+            # For submodules, common_dir/../../../Sviter-wiki is the main repo
+            main_repo_path = os.path.normpath(os.path.join(repo.common_dir, '..', '..', '..', 'Sviter-wiki'))
+            if os.path.exists(main_repo_path):
+                repo = Repo(main_repo_path)
+            else:
+                # Fallback: just use repo from common_dir but might have path issues
+                repo = Repo(repo.common_dir)
+
         # Rename the branch
-        wiki.repo.git.branch("-m", old_branch, new_branch)
+        repo.git.branch("-m", old_branch, new_branch)
 
         # If there's a worktree and it exists, update its directory name
         new_worktree_path = None
@@ -522,17 +540,17 @@ def rename_branch(wiki: GitWiki, old_branch: str, new_branch: str,
                 new_path = worktrees_path / name_part
 
                 if old_path != new_path:
-                    # Prune stale worktree entries first
-                    wiki.repo.git.worktree("prune")
+                    # Remove old worktree completely (moving doesn't work - git metadata breaks)
+                    try:
+                        repo.git.worktree("remove", "--force", str(old_path))
+                    except Exception:
+                        # Manual cleanup if git worktree remove fails
+                        if old_path.exists():
+                            shutil.rmtree(old_path)
+                        repo.git.worktree("prune")
 
-                    # Move the directory (before removing worktree registration)
-                    shutil.move(str(old_path), str(new_path))
-
-                    # Prune again to remove old path registration
-                    wiki.repo.git.worktree("prune")
-
-                    # Re-add as worktree with new branch
-                    wiki.repo.git.worktree("add", "--force", str(new_path), new_branch)
+                    # Create fresh worktree with new name
+                    repo.git.worktree("add", str(new_path), new_branch)
                     new_worktree_path = str(new_path)
             # else: worktree doesn't exist, just rename branch (already done above)
 
