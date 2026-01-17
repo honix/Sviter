@@ -37,6 +37,8 @@ from db import (
     add_attention,
     clear_attention,
     get_thread_shares,
+    is_thread_pinned,
+    pin_thread as db_pin_thread,
 )
 
 
@@ -361,6 +363,8 @@ class ThreadManager:
                     merge_status = self.get_merge_block_status(t['id'])
                     t['merge_blocked'] = merge_status['blocked']
                     t['blocked_pages'] = merge_status.get('blocked_pages', {})
+                # Add pin status for current user
+                t['is_pinned'] = is_thread_pinned(t['id'], client_id)
                 threads.append(t)
 
         await self.send_message(client_id, {
@@ -750,9 +754,10 @@ class ThreadManager:
         if not thread:
             return {"type": "error", "message": "Thread not found"}
 
-        # Parse @mentions: add new users as participants and track attention
+        # Parse @mentions: add new users as participants, track attention, and auto-pin
         mentions = parse_mentions(user_message)
         participants_changed = False
+        mentioned_users_to_notify = []
         if mentions.user_mentions:
             mentioned_user_ids = resolve_mentions_to_user_ids(mentions.user_mentions)
             for user_id in mentioned_user_ids:
@@ -764,6 +769,23 @@ class ThreadManager:
                 else:
                     # Existing participant - just add attention
                     add_attention(thread.id, user_id, "mention")
+                # Auto-pin thread for mentioned user
+                db_pin_thread(thread.id, user_id)
+                # Track user for notification
+                if user_id != client_id:  # Don't notify the sender
+                    mentioned_users_to_notify.append(user_id)
+
+        # Send notifications and refresh thread list for mentioned users
+        for user_id in mentioned_users_to_notify:
+            # Send notification
+            await self.send_message(user_id, {
+                "type": "notification",
+                "title": f"You were mentioned in {thread.name}",
+                "message": f"@{client_id} mentioned you",
+                "thread_id": thread.id
+            })
+            # Refresh their thread list to show the pin
+            await self._send_thread_list(user_id)
 
         # Broadcast thread_updated if participants changed
         if participants_changed:

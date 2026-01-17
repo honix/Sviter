@@ -445,6 +445,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dispatch({ type: 'REMOVE_THREAD', payload: message.thread_id });
       } else if (message.type === 'thread_list' && message.threads) {
         dispatch({ type: 'SET_THREADS', payload: message.threads as Thread[] });
+      } else if (message.type === 'notification') {
+        // Show toast notification (e.g., when mentioned)
+        const title = (message as { title?: string }).title;
+        const description = (message as { message?: string }).message;
+        toast.info(title || 'Notification', { description });
       } else if (message.type === 'collab_room_change') {
         // When collab room changes, request fresh thread list to update merge_blocked status
         wsService.current?.send({ type: 'get_thread_list' });

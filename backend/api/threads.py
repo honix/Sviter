@@ -22,6 +22,9 @@ from db import (
     share_thread as db_share_thread,
     unshare_thread as db_unshare_thread,
     get_thread_shares,
+    pin_thread as db_pin_thread,
+    unpin_thread as db_unpin_thread,
+    is_thread_pinned,
 )
 from auth import get_current_user
 
@@ -346,6 +349,40 @@ async def reject_thread(
         raise HTTPException(status_code=400, detail=result.get("message"))
 
     return result
+
+
+@router.post("/{thread_id}/pin")
+async def pin_thread(
+    thread_id: str,
+    user_id: str = Depends(get_current_user)
+):
+    """Pin a thread for the current user."""
+    thread_data = db_get_thread(thread_id)
+    if not thread_data:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    success = db_pin_thread(thread_id, user_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to pin thread")
+
+    return {"message": "Thread pinned", "is_pinned": True}
+
+
+@router.post("/{thread_id}/unpin")
+async def unpin_thread(
+    thread_id: str,
+    user_id: str = Depends(get_current_user)
+):
+    """Unpin a thread for the current user."""
+    thread_data = db_get_thread(thread_id)
+    if not thread_data:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    success = db_unpin_thread(thread_id, user_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to unpin thread")
+
+    return {"message": "Thread unpinned", "is_pinned": False}
 
 
 @router.get("/{thread_id}/files")

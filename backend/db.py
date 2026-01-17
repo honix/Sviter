@@ -213,6 +213,18 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_attention_uncleared
             ON thread_attention(user_id, cleared_at)
             WHERE cleared_at IS NULL;
+
+            -- Thread pins table (for @mention auto-pin and manual pin)
+            CREATE TABLE IF NOT EXISTS thread_pins (
+                thread_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (thread_id, user_id),
+                FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_pins_user ON thread_pins(user_id);
         """)
         conn.commit()
 
@@ -799,3 +811,80 @@ def has_unread_attention(thread_id: str, user_id: str) -> bool:
             (thread_id, user_id)
         ).fetchone()
         return row is not None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Thread Pins (for @mention auto-pin and manual pin)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def pin_thread(thread_id: str, user_id: str) -> bool:
+    """
+    Pin a thread for a user.
+
+    Args:
+        thread_id: Thread to pin
+        user_id: User pinning the thread
+
+    Returns:
+        True if pinned (or already pinned)
+    """
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO thread_pins (thread_id, user_id) VALUES (?, ?)",
+                (thread_id, user_id)
+            )
+            conn.commit()
+        return True
+    except Exception:
+        return False
+
+
+def unpin_thread(thread_id: str, user_id: str) -> bool:
+    """
+    Unpin a thread for a user.
+
+    Args:
+        thread_id: Thread to unpin
+        user_id: User unpinning the thread
+
+    Returns:
+        True if unpinned (or wasn't pinned)
+    """
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM thread_pins WHERE thread_id = ? AND user_id = ?",
+            (thread_id, user_id)
+        )
+        conn.commit()
+    return True
+
+
+def is_thread_pinned(thread_id: str, user_id: str) -> bool:
+    """Check if a thread is pinned for a user."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM thread_pins WHERE thread_id = ? AND user_id = ?",
+            (thread_id, user_id)
+        ).fetchone()
+        return row is not None
+
+
+def get_pinned_threads(user_id: str) -> List[str]:
+    """Get list of thread IDs that are pinned for a user."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT thread_id FROM thread_pins WHERE user_id = ?",
+            (user_id,)
+        ).fetchall()
+        return [row['thread_id'] for row in rows]
+
+
+def get_pinned_thread_count(user_id: str) -> int:
+    """Get count of pinned threads for a user."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as count FROM thread_pins WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        return row['count'] if row else 0

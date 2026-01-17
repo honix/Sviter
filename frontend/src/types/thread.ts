@@ -35,6 +35,7 @@ export interface Thread {
   attention_reasons?: string[]; // Why this thread needs user's attention
   needs_attention?: boolean; // Quick check for inbox filtering
   collaborative?: boolean; // True for user-initiated collaborative threads
+  is_pinned?: boolean; // Is thread pinned for current user
 }
 
 export interface ThreadMessage {

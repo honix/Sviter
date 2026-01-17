@@ -14,8 +14,8 @@ MENTION_AI = "ai"
 MENTION_ALL = "all"
 MENTION_HERE = "here"
 
-# Pattern matches @username (alphanumeric, hyphen, underscore)
-MENTION_PATTERN = re.compile(r'@([a-zA-Z0-9_-]+)')
+# Pattern matches @username (alphanumeric, hyphen, underscore, dot)
+MENTION_PATTERN = re.compile(r'@([a-zA-Z0-9_.-]+)')
 
 
 @dataclass

@@ -1,7 +1,7 @@
 /**
  * ThreadSelector - dropdown to select between User Assistant and active threads
  */
-import React from "react";
+import React, { useMemo } from "react";
 import {
   Select,
   SelectContent,
@@ -9,9 +9,12 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { GitBranch, MessageCircle } from "lucide-react";
-import type { Thread, ThreadStatus } from "../../types/thread";
+import type { Thread } from "../../types/thread";
 import { stringToColor, getInitials } from "../../utils/colors";
 import { useAuth } from "../../contexts/AuthContext";
+import { PinBadge, TotalPinBadge } from "./PinBadge";
+import { ThreadsAPI } from "../../services/threads-api";
+import { useAppContext } from "../../contexts/AppContext";
 
 interface ThreadSelectorProps {
   threads: Thread[];
@@ -34,6 +37,7 @@ export function ThreadSelector({
   disabled,
 }: ThreadSelectorProps) {
   const { userId, user } = useAuth();
+  const { websocket } = useAppContext();
 
   // Current user circle info
   const currentUserColor = userId ? stringToColor(userId) : '#888';
@@ -46,74 +50,119 @@ export function ThreadSelector({
     ? threads.find((t) => t.id === selectedThreadId)
     : null;
 
+  // Calculate pinned count
+  const pinnedCount = useMemo(() => {
+    return threads.filter(t => t.is_pinned).length;
+  }, [threads]);
+
   const handleValueChange = (value: string) => {
     // When selecting "assistant", pass null to trigger switching to assistant
     onSelect(value === "assistant" ? null : value);
   };
 
+  // Pin/unpin handlers
+  const handlePin = async (threadId: string) => {
+    try {
+      await ThreadsAPI.pinThread(threadId);
+      // Request fresh thread list to update UI
+      websocket.sendMessage({ type: 'get_thread_list' });
+    } catch (error) {
+      console.error('Failed to pin thread:', error);
+    }
+  };
+
+  const handleUnpin = async (threadId: string) => {
+    try {
+      await ThreadsAPI.unpinThread(threadId);
+      // Request fresh thread list to update UI
+      websocket.sendMessage({ type: 'get_thread_list' });
+    } catch (error) {
+      console.error('Failed to unpin thread:', error);
+    }
+  };
+
+  // Wrapper to stop event propagation for pin badge (no preventDefault to allow click)
+  const stopPropagation = (e: React.MouseEvent | React.PointerEvent | React.TouchEvent) => {
+    e.stopPropagation();
+  };
+
   return (
-    <Select
-      value={isAssistantMode ? "assistant" : (selectedThreadId || "assistant")}
-      onValueChange={handleValueChange}
-      disabled={disabled}
-    >
-      <SelectTrigger className="w-full h-auto py-2">
-        <div className="flex items-center gap-2 w-full">
-          {selectedThread && selectedThread.type !== 'assistant' ? (
-            <>
-              <ThreadIcon />
-              <span className="font-medium truncate flex-1 min-w-0 text-left">
-                {selectedThread.name}
-              </span>
+    <div className="flex items-center gap-2 w-full">
+      {/* Pinned count badge - before dropdown */}
+      {pinnedCount > 0 && <TotalPinBadge count={pinnedCount} />}
 
-              {/* Attention indicator */}
-              {selectedThread.needs_attention && (
-                <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
-              )}
-
-              {/* Status */}
-              {selectedThread.status && selectedThread.status !== 'Just created' && (
-                <span className="text-muted-foreground">
-                  {selectedThread.status}
-                </span>
-              )}
-
-              {/* Participant circles - matches CenterPanel style */}
-              {selectedThread.participants && selectedThread.participants.length > 0 && (
-                <div className="flex -space-x-1.5 flex-shrink-0 mr-1">
-                  {selectedThread.participants.slice(0, 3).map((p) => (
-                    <div
-                      key={p}
-                      className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm"
-                      style={{ backgroundColor: stringToColor(p) }}
-                      title={p}
-                    >
-                      {getInitials(p)}
-                    </div>
-                  ))}
-                  {selectedThread.participants.length > 3 && (
-                    <div className="w-5 h-5 rounded-full border border-background bg-muted flex items-center justify-center text-[9px] font-medium shadow-sm">
-                      +{selectedThread.participants.length - 3}
-                    </div>
-                  )}
+      <Select
+        value={isAssistantMode ? "assistant" : (selectedThreadId || "assistant")}
+        onValueChange={handleValueChange}
+        disabled={disabled}
+      >
+        <SelectTrigger className="flex-1 h-auto py-2 group/item">
+          <div className="flex items-center gap-2 w-full">
+            {selectedThread && selectedThread.type !== 'assistant' ? (
+              <>
+                {/* Pin badge - before other elements */}
+                <div
+                  onClick={stopPropagation}
+                  onPointerDown={stopPropagation}
+                  onPointerUp={stopPropagation}
+                  onMouseDown={stopPropagation}
+                  onMouseUp={stopPropagation}
+                >
+                  <PinBadge
+                    isPinned={selectedThread.is_pinned || false}
+                    onPin={() => handlePin(selectedThread.id)}
+                    onUnpin={() => handleUnpin(selectedThread.id)}
+                    showOnHover={false}
+                  />
                 </div>
-              )}
-            </>
-          ) : (
-            <>
-              <MessageCircle className="h-4 w-4" />
-              <span className="font-medium flex-1 text-left">Chat with assistant</span>
-              <div
-                className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm flex-shrink-0 mr-1"
-                style={{ backgroundColor: currentUserColor }}
-                title="You"
-              >
-                {currentUserInitials}
-              </div>
-            </>
-          )}
-        </div>
-      </SelectTrigger>
+                <ThreadIcon />
+                <span className="font-medium truncate flex-1 min-w-0 text-left">
+                  {selectedThread.name}
+                </span>
+
+                {/* Status */}
+                {selectedThread.status && selectedThread.status !== 'Just created' && (
+                  <span className="text-muted-foreground">
+                    {selectedThread.status}
+                  </span>
+                )}
+
+                {/* Participant circles - matches CenterPanel style */}
+                {selectedThread.participants && selectedThread.participants.length > 0 && (
+                  <div className="flex -space-x-1.5 flex-shrink-0 mr-1">
+                    {selectedThread.participants.slice(0, 3).map((p) => (
+                      <div
+                        key={p}
+                        className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm"
+                        style={{ backgroundColor: stringToColor(p) }}
+                        title={p}
+                      >
+                        {getInitials(p)}
+                      </div>
+                    ))}
+                    {selectedThread.participants.length > 3 && (
+                      <div className="w-5 h-5 rounded-full border border-background bg-muted flex items-center justify-center text-[9px] font-medium shadow-sm">
+                        +{selectedThread.participants.length - 3}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <MessageCircle className="h-4 w-4" />
+                <span className="font-medium flex-1 text-left">Chat with assistant</span>
+                <div
+                  className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm flex-shrink-0 mr-1"
+                  style={{ backgroundColor: currentUserColor }}
+                  title="You"
+                >
+                  {currentUserInitials}
+                </div>
+              </>
+            )}
+          </div>
+        </SelectTrigger>
 
       <SelectContent className="bg-background">
         {/* User assistant option (always first) */}
@@ -139,15 +188,24 @@ export function ThreadSelector({
           .slice()
           .sort((a, b) => a.name.localeCompare(b.name))
           .map((thread) => (
-            <SelectItem key={thread.id} value={thread.id} className="[&>span:last-child]:w-full">
+            <SelectItem key={thread.id} value={thread.id} className="[&>span:last-child]:w-full group/item">
               <div className="flex items-center gap-2 w-full">
+                {/* Pin badge - before other elements */}
+                <div
+                  onClick={stopPropagation}
+                  onPointerDown={stopPropagation}
+                  onPointerUp={stopPropagation}
+                  onMouseDown={stopPropagation}
+                  onMouseUp={stopPropagation}
+                >
+                  <PinBadge
+                    isPinned={thread.is_pinned || false}
+                    onPin={() => handlePin(thread.id)}
+                    onUnpin={() => handleUnpin(thread.id)}
+                  />
+                </div>
                 <ThreadIcon />
                 <span className="truncate flex-1 min-w-0">{thread.name}</span>
-
-                {/* Attention indicator */}
-                {thread.needs_attention && (
-                  <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
-                )}
 
                 {/* Status */}
                 {thread.status && thread.status !== 'Just created' && (
@@ -187,7 +245,8 @@ export function ThreadSelector({
           </div>
         )}
       </SelectContent>
-    </Select>
+      </Select>
+    </div>
   );
 }
 
