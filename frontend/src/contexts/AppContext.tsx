@@ -341,6 +341,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const currentBranchRef = useRef<string>('main');
   const selectedBranchForDiffRef = useRef<string | null>(null);
   const assistantThreadIdRef = useRef<string | null>(null);
+  const selectedThreadIdRef = useRef<string | null>(null);
 
   // Guards to prevent concurrent loads
   const isLoadingPagesRef = useRef(false);
@@ -374,6 +375,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     assistantThreadIdRef.current = state.assistantThreadId;
   }, [state.assistantThreadId]);
+
+  useEffect(() => {
+    selectedThreadIdRef.current = state.selectedThreadId;
+  }, [state.selectedThreadId]);
 
   // Initialize WebSocket service - wait for auth to complete
   useEffect(() => {
@@ -419,16 +424,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           toast.success(`Agent ready for review`, { description: message.message || 'Changes are ready to be reviewed' });
         }
       } else if (message.type === 'thread_updated' && message.thread_id) {
-        // Handle thread updates (status, name, participants, etc.)
+        // Handle thread updates (status, name, branch, participants, etc.)
         const updates: Partial<Thread> = {};
         if (message.status) updates.status = message.status as ThreadStatus;
         if (message.name) updates.name = message.name;
+        if (message.branch) updates.branch = message.branch as string;
         if (message.participants) updates.participants = message.participants as string[];
         if (Object.keys(updates).length > 0) {
           dispatch({
             type: 'UPDATE_THREAD',
             payload: { id: message.thread_id, updates }
           });
+          // If this is the selected thread and branch changed, update the diff view
+          if (message.branch && message.thread_id === selectedThreadIdRef.current) {
+            dispatch({ type: 'SET_CURRENT_BRANCH', payload: message.branch as string });
+            dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: message.branch as string });
+          }
         }
       } else if (message.type === 'thread_deleted' && message.thread_id) {
         dispatch({ type: 'REMOVE_THREAD', payload: message.thread_id });
