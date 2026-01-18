@@ -32,7 +32,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Loader } from '@/components/ui/loader';
-import { ArrowUp, GitBranch, AlertCircle, Check, Waypoints } from 'lucide-react';
+import { ArrowUp, AlertCircle, Check, Waypoints } from 'lucide-react';
 import type { Thread } from '../../types/thread';
 import type { MarkdownLinkHandler } from '@/components/ui/markdown';
 import { ThreadChangesView } from '../threads/ThreadChangesView';
@@ -176,15 +176,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
     setInputValue('');
   };
 
-  // Thread icon - always git branch
-  const StatusIcon = () => {
-    if (!thread) return null;
-    return <GitBranch className="h-4 w-4 text-muted-foreground" />;
-  };
-
-  // Just show the status as-is (agent sets free-form status)
-  const getStatusLabel = (status: string): string => status;
-
   // Link handlers for markdown links
   const handleThreadClick = useCallback((clickedThreadId: string) => {
     actions.selectThread(clickedThreadId);
@@ -219,82 +210,49 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
 
   return (
     <div className="h-full bg-background flex flex-col">
-      {/* Thread Header - only shown when viewing a thread */}
-      {thread && (
-        <div className="px-4 py-3 border-b border-border flex-shrink-0 bg-muted/30">
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <StatusIcon />
-                <span className="font-medium">{thread.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  ({getStatusLabel(thread.status)})
-                </span>
-              </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <GitBranch className="h-3 w-3" />
-                <span className="font-mono">{thread.branch}</span>
-              </div>
-            </div>
-
-            {/* Accept button - shown for any non-terminal thread */}
-            {canAccept && (
-              <div className="flex items-center gap-2">
-                {thread?.merge_blocked ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span>
-                        <Button
-                          size="sm"
-                          disabled
-                          className="bg-muted text-muted-foreground cursor-not-allowed"
-                        >
-                          <AlertCircle className="h-4 w-4 mr-1" />
-                          Accept Blocked
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      <p className="font-medium">Pages being edited:</p>
-                      <ul className="text-xs mt-1">
-                        {Object.entries(thread.blocked_pages || {}).map(([page, editors]) => (
-                          <li key={page}>• {page} ({(editors as string[]).length} editor{(editors as string[]).length > 1 ? 's' : ''})</li>
-                        ))}
-                      </ul>
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Button
-                    size="sm"
-                    onClick={handleAcceptChanges}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    <Check className="h-4 w-4 mr-1" />
-                    Accept Changes
-                  </Button>
-                )}
-              </div>
+      {/* Thread Changes Section - only shown when viewing a thread with changes */}
+      {thread && canAccept && thread?.branch && (
+        <div className="px-4 py-2 border-b border-border flex-shrink-0 bg-muted/30">
+          <ThreadChangesView
+            branch={thread.branch}
+            baseBranch="main"
+            compact
+            renderActions={() => (
+              thread?.merge_blocked ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button
+                        size="sm"
+                        disabled
+                        className="bg-muted text-muted-foreground cursor-not-allowed"
+                      >
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        Blocked
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p className="font-medium">Pages being edited:</p>
+                    <ul className="text-xs mt-1">
+                      {Object.entries(thread.blocked_pages || {}).map(([page, editors]) => (
+                        <li key={page}>• {page} ({(editors as string[]).length} editor{(editors as string[]).length > 1 ? 's' : ''})</li>
+                      ))}
+                    </ul>
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={handleAcceptChanges}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  <Check className="h-4 w-4 mr-1" />
+                  Accept and merge to main
+                </Button>
+              )
             )}
-          </div>
-
-          {/* Review summary if available */}
-          {canAccept && thread.review_summary && (
-            <div className="mt-2 p-2 rounded bg-muted text-sm">
-              <span className="text-muted-foreground">Summary: </span>
-              {thread.review_summary}
-            </div>
-          )}
-
-          {/* Changes view - show in review mode */}
-          {canAccept && thread?.branch && (
-            <div className="mt-3 border-t border-border pt-3">
-              <ThreadChangesView
-                branch={thread.branch}
-                baseBranch="main"
-                compact
-              />
-            </div>
-          )}
+          />
         </div>
       )}
 

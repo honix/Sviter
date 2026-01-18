@@ -69,16 +69,16 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
     await test.step('Accept thread changes', async () => {
       // Now that we've selected the thread, we should see Accept button
       await expect(
-        page.getByRole('button', { name: /Accept Changes/i })
+        page.getByRole('button', { name: /Accept and merge to main/i })
       ).toBeVisible({ timeout: 10000 })
 
-      // Click the Accept Changes button
-      await page.getByRole('button', { name: /Accept Changes/i }).click()
+      // Click the Accept button
+      await page.getByRole('button', { name: /Accept and merge to main/i }).click()
 
       // Wait for the thread status to change to accepted
       // After acceptance, the Accept button should disappear
       await expect(
-        page.getByRole('button', { name: /Accept Changes/i })
+        page.getByRole('button', { name: /Accept and merge to main/i })
       ).not.toBeVisible({ timeout: 10000 })
     })
 

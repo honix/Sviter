@@ -1,7 +1,7 @@
 /**
  * ThreadSelector - dropdown to select between User Assistant and active threads
  */
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
   Select,
   SelectContent,
@@ -15,6 +15,12 @@ import { useAuth } from "../../contexts/AuthContext";
 import { PinBadge, TotalPinBadge } from "./PinBadge";
 import { ThreadsAPI } from "../../services/threads-api";
 import { useAppContext } from "../../contexts/AppContext";
+import { GitAPI } from "../../services/git-api";
+
+interface DiffStats {
+  additions: number;
+  deletions: number;
+}
 
 interface ThreadSelectorProps {
   threads: Thread[];
@@ -24,11 +30,6 @@ interface ThreadSelectorProps {
   disabled?: boolean;
 }
 
-// Thread icon - git branch since threads work on branches
-const ThreadIcon: React.FC = () => (
-  <GitBranch className="h-3 w-3 text-muted-foreground" />
-);
-
 export function ThreadSelector({
   threads,
   selectedThreadId,
@@ -37,7 +38,40 @@ export function ThreadSelector({
   disabled,
 }: ThreadSelectorProps) {
   const { userId, user } = useAuth();
-  const { websocket } = useAppContext();
+  const { websocket, state } = useAppContext();
+  const { pageUpdateCounter } = state;
+
+  // Diff stats per thread (keyed by thread id)
+  const [diffStats, setDiffStats] = useState<Record<string, DiffStats>>({});
+
+  // Fetch diff stats for all threads with branches
+  useEffect(() => {
+    const fetchStats = async () => {
+      const stats: Record<string, DiffStats> = {};
+
+      for (const thread of threads) {
+        if (thread.branch) {
+          try {
+            const pageStats = await GitAPI.getDiffStatsByPage('main', thread.branch);
+            // Sum up all file stats
+            let additions = 0;
+            let deletions = 0;
+            Object.values(pageStats).forEach(s => {
+              additions += s.additions;
+              deletions += s.deletions;
+            });
+            stats[thread.id] = { additions, deletions };
+          } catch {
+            // Ignore errors for individual threads
+          }
+        }
+      }
+
+      setDiffStats(stats);
+    };
+
+    fetchStats();
+  }, [threads, pageUpdateCounter]);
 
   // Current user circle info
   const currentUserColor = userId ? stringToColor(userId) : '#888';
@@ -97,10 +131,10 @@ export function ThreadSelector({
         disabled={disabled}
       >
         <SelectTrigger className="flex-1 h-auto py-2 group/item">
-          <div className="flex items-center gap-2 w-full">
+          <div className="flex items-center gap-2 w-full pr-2">
             {selectedThread && selectedThread.type !== 'assistant' ? (
-              <>
-                {/* Pin badge - before other elements */}
+              <div className="flex items-center gap-2 w-full">
+                {/* Pin badge */}
                 <div
                   onClick={stopPropagation}
                   onPointerDown={stopPropagation}
@@ -115,51 +149,70 @@ export function ThreadSelector({
                     showOnHover={false}
                   />
                 </div>
-                <ThreadIcon />
-                <span className="font-medium truncate flex-1 min-w-0 text-left">
-                  {selectedThread.name}
-                </span>
-
-                {/* Status */}
-                {selectedThread.status && selectedThread.status !== 'Just created' && (
-                  <span className="text-muted-foreground">
-                    {selectedThread.status}
+                {/* Left: Name + Branch (two rows) */}
+                <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+                  <span className="font-medium truncate text-left">
+                    {selectedThread.name}
                   </span>
-                )}
-
-                {/* Participant circles - matches CenterPanel style */}
-                {selectedThread.participants && selectedThread.participants.length > 0 && (
-                  <div className="flex -space-x-1.5 flex-shrink-0 mr-1">
-                    {selectedThread.participants.slice(0, 3).map((p) => (
-                      <div
-                        key={p}
-                        className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm"
-                        style={{ backgroundColor: stringToColor(p) }}
-                        title={p}
-                      >
-                        {getInitials(p)}
-                      </div>
-                    ))}
-                    {selectedThread.participants.length > 3 && (
-                      <div className="w-5 h-5 rounded-full border border-background bg-muted flex items-center justify-center text-[9px] font-medium shadow-sm">
-                        +{selectedThread.participants.length - 3}
-                      </div>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <GitBranch className="h-3 w-3" />
+                    <span className="font-mono">thread/{selectedThread.name}</span>
+                    {diffStats[selectedThread.id] && (
+                      <>
+                        <span className="text-green-600">+{diffStats[selectedThread.id].additions}</span>
+                        <span className="text-red-600">-{diffStats[selectedThread.id].deletions}</span>
+                      </>
                     )}
                   </div>
-                )}
-              </>
+                </div>
+                {/* Right: Status + Users (stacked, centered) */}
+                <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                  {selectedThread.status && selectedThread.status !== 'Just created' && (
+                    <span className="text-xs text-muted-foreground">
+                      {selectedThread.status}
+                    </span>
+                  )}
+                  {selectedThread.participants && selectedThread.participants.length > 0 && (
+                    <div className="flex -space-x-1.5">
+                      {selectedThread.participants.slice(0, 3).map((p) => (
+                        <div
+                          key={p}
+                          className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm"
+                          style={{ backgroundColor: stringToColor(p) }}
+                          title={p}
+                        >
+                          {getInitials(p)}
+                        </div>
+                      ))}
+                      {selectedThread.participants.length > 3 && (
+                        <div className="w-5 h-5 rounded-full border border-background bg-muted flex items-center justify-center text-[9px] font-medium shadow-sm">
+                          +{selectedThread.participants.length - 3}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             ) : (
-              <>
+              <div className="flex items-center gap-2 w-full">
                 <MessageCircle className="h-4 w-4" />
-                <span className="font-medium flex-1 text-left">Chat with assistant</span>
+                {/* Left: Name + Branch (two rows) */}
+                <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+                  <span className="font-medium text-left">Chat with assistant</span>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <GitBranch className="h-3 w-3" />
+                    <span className="font-mono">main</span>
+                  </div>
+                </div>
+                {/* Right: User circle */}
                 <div
-                  className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm flex-shrink-0 mr-1"
+                  className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm flex-shrink-0"
                   style={{ backgroundColor: currentUserColor }}
                   title="You"
                 >
                   {currentUserInitials}
                 </div>
-              </>
+              </div>
             )}
           </div>
         </SelectTrigger>
@@ -169,9 +222,17 @@ export function ThreadSelector({
         <SelectItem value="assistant" className="[&>span:last-child]:w-full">
           <div className="flex items-center gap-2 w-full">
             <MessageCircle className="h-4 w-4" />
-            <span className="flex-1">Chat with assistant</span>
+            {/* Left: Name + Branch (two rows) */}
+            <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+              <span className="font-medium">Chat with assistant</span>
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <GitBranch className="h-3 w-3" />
+                <span className="font-mono">main</span>
+              </div>
+            </div>
+            {/* Right: User circle */}
             <div
-              className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm flex-shrink-0 mr-1"
+              className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm flex-shrink-0"
               style={{ backgroundColor: currentUserColor }}
               title="You"
             >
@@ -190,7 +251,7 @@ export function ThreadSelector({
           .map((thread) => (
             <SelectItem key={thread.id} value={thread.id} className="[&>span:last-child]:w-full group/item">
               <div className="flex items-center gap-2 w-full">
-                {/* Pin badge - before other elements */}
+                {/* Pin badge */}
                 <div
                   onClick={stopPropagation}
                   onPointerDown={stopPropagation}
@@ -204,36 +265,47 @@ export function ThreadSelector({
                     onUnpin={() => handleUnpin(thread.id)}
                   />
                 </div>
-                <ThreadIcon />
-                <span className="truncate flex-1 min-w-0">{thread.name}</span>
-
-                {/* Status */}
-                {thread.status && thread.status !== 'Just created' && (
-                  <span className="text-muted-foreground">
-                    {thread.status}
-                  </span>
-                )}
-
-                {/* Participant circles - matches CenterPanel style */}
-                {thread.participants && thread.participants.length > 0 && (
-                  <div className="flex -space-x-1.5 flex-shrink-0 mr-1">
-                    {thread.participants.slice(0, 3).map((p) => (
-                      <div
-                        key={p}
-                        className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm"
-                        style={{ backgroundColor: stringToColor(p) }}
-                        title={p}
-                      >
-                        {getInitials(p)}
-                      </div>
-                    ))}
-                    {thread.participants.length > 3 && (
-                      <div className="w-5 h-5 rounded-full border border-background bg-muted flex items-center justify-center text-[9px] font-medium shadow-sm">
-                        +{thread.participants.length - 3}
-                      </div>
+                {/* Left: Name + Branch (two rows) */}
+                <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+                  <span className="font-medium truncate">{thread.name}</span>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <GitBranch className="h-3 w-3" />
+                    <span className="font-mono">thread/{thread.name}</span>
+                    {diffStats[thread.id] && (
+                      <>
+                        <span className="text-green-600">+{diffStats[thread.id].additions}</span>
+                        <span className="text-red-600">-{diffStats[thread.id].deletions}</span>
+                      </>
                     )}
                   </div>
-                )}
+                </div>
+                {/* Right: Status + Users (stacked, centered) */}
+                <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                  {thread.status && thread.status !== 'Just created' && (
+                    <span className="text-xs text-muted-foreground">
+                      {thread.status}
+                    </span>
+                  )}
+                  {thread.participants && thread.participants.length > 0 && (
+                    <div className="flex -space-x-1.5">
+                      {thread.participants.slice(0, 3).map((p) => (
+                        <div
+                          key={p}
+                          className="w-5 h-5 rounded-full border border-background flex items-center justify-center text-[9px] font-medium text-white shadow-sm"
+                          style={{ backgroundColor: stringToColor(p) }}
+                          title={p}
+                        >
+                          {getInitials(p)}
+                        </div>
+                      ))}
+                      {thread.participants.length > 3 && (
+                        <div className="w-5 h-5 rounded-full border border-background bg-muted flex items-center justify-center text-[9px] font-medium shadow-sm">
+                          +{thread.participants.length - 3}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </SelectItem>
           ))}
