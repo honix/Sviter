@@ -112,7 +112,7 @@ test.describe('Thread Features', () => {
     await test.step('Before thread: Accept button not visible', async () => {
       // When on assistant (main), no Accept button should be shown
       // Give it a short timeout since we're asserting it's NOT visible
-      await expect(page.getByRole('button', { name: /Accept Changes/i })).not.toBeVisible({ timeout: 2000 })
+      await expect(page.getByRole('button', { name: /Accept and merge to main/i })).not.toBeVisible({ timeout: 2000 })
     })
 
     await test.step('Start thread and wait for changes', async () => {
@@ -121,7 +121,7 @@ test.describe('Thread Features', () => {
     })
 
     await test.step('After changes: Accept button visible and enabled', async () => {
-      const acceptBtn = page.getByRole('button', { name: /Accept Changes/i })
+      const acceptBtn = page.getByRole('button', { name: /Accept and merge to main/i })
       await expect(acceptBtn).toBeVisible({ timeout: 10000 })
       await expect(acceptBtn).toBeEnabled()
     })
@@ -134,14 +134,14 @@ test.describe('Thread Features', () => {
     })
 
     await test.step('Click Accept button', async () => {
-      const acceptBtn = page.getByRole('button', { name: /Accept Changes/i })
+      const acceptBtn = page.getByRole('button', { name: /Accept and merge to main/i })
       await expect(acceptBtn).toBeVisible({ timeout: 10000 })
       await acceptBtn.click()
     })
 
     await test.step('Verify Accept button disappears', async () => {
       // After accepting, the Accept button should no longer be visible
-      await expect(page.getByRole('button', { name: /Accept Changes/i })).not.toBeVisible({ timeout: 10000 })
+      await expect(page.getByRole('button', { name: /Accept and merge to main/i })).not.toBeVisible({ timeout: 10000 })
     })
 
     await test.step('Switch to assistant (main branch)', async () => {
@@ -173,7 +173,7 @@ test.describe('Thread Features', () => {
     await waitForThreadReady(page)
 
     // Accept button should be visible
-    await expect(page.getByRole('button', { name: /Accept Changes/i })).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('button', { name: /Accept and merge to main/i })).toBeVisible({ timeout: 10000 })
 
     // Reject button should NOT exist (new collaborative model)
     await expect(page.getByRole('button', { name: /Reject/i })).not.toBeVisible({ timeout: 2000 })
