@@ -227,26 +227,24 @@ function preprocessMarkdown(markdown: string): { markdown: string; special: Arra
   const special: Array<{ type: 'mermaid' | 'chart'; data: any; placeholder: string }> = [];
   let processed = markdown;
 
-  // Extract mermaid blocks
+  // Extract mermaid blocks using matchAll to avoid regex state issues
   const mermaidRegex = /```mermaid\n([\s\S]*?)```/g;
-  let match;
-  let mermaidIndex = 0;
-  while ((match = mermaidRegex.exec(markdown)) !== null) {
-    const placeholder = `__MERMAID_${mermaidIndex}__`;
+  const mermaidMatches = Array.from(markdown.matchAll(mermaidRegex));
+  mermaidMatches.forEach((match, index) => {
+    const placeholder = `__MERMAID_${index}__`;
     special.push({
       type: 'mermaid',
       data: { content: match[1].trim() },
       placeholder,
     });
     processed = processed.replace(match[0], placeholder);
-    mermaidIndex++;
-  }
+  });
 
-  // Extract chart references: ![alt](path.chart.csv)
+  // Extract chart references using matchAll
   const chartRegex = /!\[([^\]]*)\]\(([^)]*\.chart\.(csv|json))\)/g;
-  let chartIndex = 0;
-  while ((match = chartRegex.exec(markdown)) !== null) {
-    const placeholder = `__CHART_${chartIndex}__`;
+  const chartMatches = Array.from(markdown.matchAll(chartRegex));
+  chartMatches.forEach((match, index) => {
+    const placeholder = `__CHART_${index}__`;
     const chartType = match[1].trim() || null; // Alt text can specify chart type
     special.push({
       type: 'chart',
@@ -254,8 +252,7 @@ function preprocessMarkdown(markdown: string): { markdown: string; special: Arra
       placeholder,
     });
     processed = processed.replace(match[0], placeholder);
-    chartIndex++;
-  }
+  });
 
   return { markdown: processed, special };
 }
@@ -276,24 +273,23 @@ export function markdownToProseMirror(markdown: string): ProseMirrorNode {
       const newContent: ProseMirrorNode[] = [];
 
       doc.forEach((node) => {
-        // Check if this node contains a placeholder
-        if (node.textContent) {
-          let replaced = false;
-          for (const item of special) {
-            if (node.textContent.includes(item.placeholder)) {
-              replaced = true;
-              if (item.type === 'mermaid') {
-                newContent.push(schema.node('mermaid', item.data));
-              } else if (item.type === 'chart') {
-                newContent.push(schema.node('chart', item.data));
-              }
-              break;
+        // Check if this node's textContent exactly matches a placeholder (entire paragraph)
+        const textContent = node.textContent.trim();
+        let replaced = false;
+
+        for (const item of special) {
+          if (textContent === item.placeholder) {
+            replaced = true;
+            if (item.type === 'mermaid') {
+              newContent.push(schema.node('mermaid', item.data));
+            } else if (item.type === 'chart') {
+              newContent.push(schema.node('chart', item.data));
             }
+            break;
           }
-          if (!replaced) {
-            newContent.push(node);
-          }
-        } else {
+        }
+
+        if (!replaced) {
           newContent.push(node);
         }
       });

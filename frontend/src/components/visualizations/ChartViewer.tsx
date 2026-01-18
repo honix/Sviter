@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import Papa from 'papaparse';
 import {
   LineChart,
   BarChart,
@@ -37,26 +38,27 @@ const COLORS = [
 ];
 
 function parseCSV(csv: string): Array<Record<string, any>> {
-  const lines = csv.trim().split('\n');
-  if (lines.length < 2) return [];
+  // Use papaparse for proper CSV parsing (handles quotes, escapes, etc.)
+  const result = Papa.parse(csv.trim(), {
+    header: true,
+    skipEmptyLines: true,
+    dynamicTyping: true, // Auto-converts numbers
+    transform: (value) => {
+      // Handle empty strings - keep as string instead of converting to 0
+      const trimmed = value.trim();
+      if (trimmed === '') return trimmed;
 
-  const headers = lines[0].split(',').map((h) => h.trim());
-  const data: Array<Record<string, any>> = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',').map((v) => v.trim());
-    const row: Record<string, any> = {};
-
-    headers.forEach((header, index) => {
-      const value = values[index];
       // Try to parse as number, otherwise keep as string
-      row[header] = isNaN(Number(value)) ? value : Number(value);
-    });
+      const num = Number(trimmed);
+      return trimmed !== '' && !isNaN(num) ? num : trimmed;
+    },
+  });
 
-    data.push(row);
+  if (result.errors.length > 0) {
+    console.error('CSV parsing errors:', result.errors);
   }
 
-  return data;
+  return result.data as Array<Record<string, any>>;
 }
 
 function detectChartType(data: Array<Record<string, any>>): ChartType {

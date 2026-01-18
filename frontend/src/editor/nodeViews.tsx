@@ -9,21 +9,25 @@ import type { ChartType } from '../components/visualizations/ChartViewer';
 import { getApiUrl, resolvePath } from '../utils/url';
 
 /**
- * Helper to fetch CSV data from the wiki
+ * Helper to fetch CSV data from the wiki with abort support
  */
-async function fetchCSVData(src: string, currentPagePath: string | null): Promise<string> {
+async function fetchCSVData(src: string, currentPagePath: string | null, signal?: AbortSignal): Promise<string> {
   try {
     // Resolve relative path
     const resolvedPath = resolvePath(src, currentPagePath);
     const url = `${getApiUrl()}/api/assets/${encodeURIComponent(resolvedPath).replace(/%2F/g, '/')}`;
 
-    const response = await fetch(url);
+    const response = await fetch(url, { signal });
     if (!response.ok) {
       throw new Error(`Failed to fetch: ${response.statusText}`);
     }
 
     return await response.text();
   } catch (error) {
+    // Don't log AbortError - it's expected when canceling requests
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw error;
+    }
     console.error('Error fetching CSV data:', error);
     throw error;
   }
@@ -71,6 +75,7 @@ export class ChartNodeView implements NodeView {
   dom: HTMLElement;
   private root: Root;
   private currentPagePath: string | null;
+  private abortController: AbortController | null = null;
 
   constructor(node: ProseMirrorNode, _view: EditorView, _getPos: () => number | undefined, currentPagePath: string | null) {
     this.currentPagePath = currentPagePath;
@@ -87,6 +92,15 @@ export class ChartNodeView implements NodeView {
   private async renderChart(node: ProseMirrorNode): Promise<void> {
     const { src, chartType } = node.attrs;
 
+    // Cancel any pending request
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+
+    // Create new abort controller for this request
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
+
     // Render loading state
     this.root.render(
       <div className="flex items-center justify-center h-64 border rounded-md bg-muted/10">
@@ -96,7 +110,10 @@ export class ChartNodeView implements NodeView {
 
     try {
       // Fetch CSV data
-      const csvData = await fetchCSVData(src, this.currentPagePath);
+      const csvData = await fetchCSVData(src, this.currentPagePath, signal);
+
+      // Check if request was aborted
+      if (signal.aborted) return;
 
       // Render chart
       this.root.render(
@@ -107,6 +124,11 @@ export class ChartNodeView implements NodeView {
         />
       );
     } catch (error) {
+      // Don't render error if request was aborted
+      if (error instanceof Error && error.name === 'AbortError') {
+        return;
+      }
+
       // Render error state
       this.root.render(
         <div className="border border-destructive rounded-md p-4 my-4 bg-destructive/10">
@@ -129,6 +151,10 @@ export class ChartNodeView implements NodeView {
   }
 
   destroy(): void {
+    // Cancel any pending request
+    if (this.abortController) {
+      this.abortController.abort();
+    }
     this.root.unmount();
   }
 

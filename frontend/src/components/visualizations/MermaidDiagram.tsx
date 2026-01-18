@@ -9,14 +9,14 @@ interface MermaidDiagramProps {
 mermaid.initialize({
   startOnLoad: false,
   theme: 'default',
-  securityLevel: 'loose',
+  securityLevel: 'strict',
   fontFamily: 'inherit',
 });
 
 export function MermaidDiagram({ chart }: MermaidDiagramProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const [id] = useState(() => `mermaid-${Math.random().toString(36).substr(2, 9)}`);
+  const [id] = useState(() => `mermaid-${Math.random().toString(36).substring(2, 11)}`);
 
   useEffect(() => {
     const renderDiagram = async () => {
