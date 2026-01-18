@@ -8,7 +8,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from "@/components/ui/select";
-import { GitBranch, MessageCircle } from "lucide-react";
+import { GitBranch, MessageCircle, Plus } from "lucide-react";
 import type { Thread } from "../../types/thread";
 import { stringToColor, getInitials } from "../../utils/colors";
 import { useAuth } from "../../contexts/AuthContext";
@@ -38,8 +38,11 @@ export function ThreadSelector({
   disabled,
 }: ThreadSelectorProps) {
   const { userId, user } = useAuth();
-  const { websocket, state } = useAppContext();
-  const { pageUpdateCounter } = state;
+  const { websocket, state, actions } = useAppContext();
+  const { pageUpdateCounter, isCreatingThread } = state;
+
+  // Control dropdown open state
+  const [isOpen, setIsOpen] = useState(false);
 
   // Diff stats per thread (keyed by thread id)
   const [diffStats, setDiffStats] = useState<Record<string, DiffStats>>({});
@@ -120,15 +123,50 @@ export function ThreadSelector({
     e.stopPropagation();
   };
 
+  // Close dropdown when creating thread
+  useEffect(() => {
+    if (isCreatingThread) {
+      setIsOpen(false);
+    }
+  }, [isCreatingThread]);
+
+  // Create new thread handler
+  const handleCreateNewThread = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsOpen(false);  // Close dropdown immediately
+    actions.setCreatingThread(true);
+    websocket.sendMessage({
+      type: 'spawn_collaborative_thread',
+      name: 'new-thread',
+      goal: 'This is a new thread. Please describe what you want to work on. The agent will rename this thread once the goal is clear.'
+    });
+  };
+
+  // Start fresh handler - reset assistant chat
+  const handleStartFresh = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsOpen(false);  // Close dropdown
+    // Select assistant if not already selected
+    if (!isAssistantMode) {
+      onSelect(null);
+    }
+    // Reset the chat (same as /new command)
+    websocket.sendMessage({ type: 'reset' });
+  };
+
   return (
-    <div className="flex items-center gap-2 w-full">
+    <div className={`flex items-center gap-2 w-full ${isCreatingThread ? 'opacity-50 pointer-events-none' : ''}`}>
       {/* Pinned count badge - before dropdown */}
       {pinnedCount > 0 && <TotalPinBadge count={pinnedCount} />}
 
       <Select
         value={isAssistantMode ? "assistant" : (selectedThreadId || "assistant")}
         onValueChange={handleValueChange}
-        disabled={disabled}
+        disabled={disabled || isCreatingThread}
+        open={isOpen}
+        onOpenChange={setIsOpen}
       >
         <SelectTrigger className="flex-1 h-auto py-2 group/item">
           <div className="flex items-center gap-2 w-full pr-2">
@@ -212,6 +250,15 @@ export function ThreadSelector({
                 >
                   {currentUserInitials}
                 </div>
+                {/* Start /new button */}
+                <div
+                  onClick={handleStartFresh}
+                  onPointerDown={stopPropagation}
+                  onMouseDown={stopPropagation}
+                  className="px-2 py-1.5 text-xs bg-muted text-muted-foreground hover:bg-muted/80 rounded cursor-pointer flex-shrink-0 self-stretch flex items-center"
+                >
+                  Start /new
+                </div>
               </div>
             )}
           </div>
@@ -238,8 +285,31 @@ export function ThreadSelector({
             >
               {currentUserInitials}
             </div>
+            {/* Start /new button */}
+            <div
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleStartFresh(e); }}
+              onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onPointerUp={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onMouseUp={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              className="px-2 py-1.5 text-xs bg-muted text-muted-foreground hover:bg-muted/80 rounded cursor-pointer flex-shrink-0 self-stretch flex items-center"
+            >
+              Start /new
+            </div>
           </div>
         </SelectItem>
+
+        {/* Separator before create button */}
+        <div className="border-t my-1" />
+
+        {/* Create new thread button */}
+        <div
+          className="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent cursor-pointer rounded-sm"
+          onClick={handleCreateNewThread}
+        >
+          <Plus className="h-4 w-4" />
+          <span className="font-medium">Create new thread</span>
+        </div>
 
         {/* Separator if threads exist */}
         {threads.length > 0 && <div className="border-t my-1" />}

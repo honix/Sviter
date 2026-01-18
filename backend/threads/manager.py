@@ -351,11 +351,11 @@ class ThreadManager:
         # Get worker threads where user is a participant
         worker_threads = list_worker_threads_for_user(client_id)
 
-        # Merge and dedupe
+        # Merge and dedupe, filtering out assistant threads (they're represented by "Chat with assistant")
         thread_ids = set()
         threads = []
         for t in user_threads + worker_threads:
-            if t['id'] not in thread_ids:
+            if t['id'] not in thread_ids and t.get('type') != 'assistant':
                 thread_ids.add(t['id'])
                 # Add participants (owner + shared users)
                 owner_id = t.get('owner_id')
