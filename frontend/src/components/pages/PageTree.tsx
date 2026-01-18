@@ -553,8 +553,9 @@ const PageTree: React.FC<PageTreeProps> = ({
             <input {...inputProps} />
           </div>
         ) : (
-          <div className="text-sm text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
-            Reviewing thread changes
+          <div className="text-sm bg-pink-500/10 rounded-lg border border-pink-500/20 px-3 py-2">
+            <div className="text-pink-600 dark:text-pink-400">Reviewing thread changes.</div>
+            <div className="text-pink-600 dark:text-pink-400">Ask for changes in thread chat.</div>
           </div>
         )}
       </div>

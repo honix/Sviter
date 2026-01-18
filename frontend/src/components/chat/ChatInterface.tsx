@@ -32,7 +32,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Loader } from '@/components/ui/loader';
-import { ArrowUp, AlertCircle, Check, Waypoints } from 'lucide-react';
+import { ArrowUp, AlertCircle, Check, Plus } from 'lucide-react';
 import type { Thread } from '../../types/thread';
 import type { MarkdownLinkHandler } from '@/components/ui/markdown';
 import { ThreadChangesView } from '../threads/ThreadChangesView';
@@ -44,7 +44,7 @@ interface ChatInterfaceProps {
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
   const { state, websocket, actions } = useAppContext();
-  const { connectionStatus, assistantThreadId } = state;
+  const { connectionStatus, assistantThreadId, isCreatingThread } = state;
   const { messages, sendMessage, clearMessages, isGenerating } = useChat(threadId);
   const [inputValue, setInputValue] = useState('');
   const [expandedSystemPrompts, setExpandedSystemPrompts] = useState<Set<string>>(new Set());
@@ -167,13 +167,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
       clearAllContexts();
     }
 
+    // Show loading state
+    actions.setCreatingThread(true);
+
     // Spawn collaborative thread via WebSocket
     console.log('🚀 Sending spawn_collaborative_thread:', messageToSend.slice(0, 50));
     websocket.sendMessage({
       type: 'spawn_collaborative_thread',
-      goal: messageToSend
+      first_message: messageToSend
     });
     setInputValue('');
+
+    // Timeout fallback - clear loading if thread_selected never arrives
+    setTimeout(() => {
+      // Check current state via a fresh read (closure would capture stale value)
+      // The action will be a no-op if already false
+      actions.setCreatingThread(false);
+    }, 15000);
   };
 
   // Link handlers for markdown links
@@ -209,7 +219,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
   }), [handleThreadClick, handlePageClick]);
 
   return (
-    <div className="h-full bg-background flex flex-col">
+    <div className="h-full bg-background flex flex-col relative">
+      {/* Loading overlay when creating thread */}
+      {isCreatingThread && (
+        <div className="absolute inset-0 bg-background/70 z-50 flex items-center justify-center">
+          <Loader text="Creating thread..." className="text-sm" />
+        </div>
+      )}
+
       {/* Thread Changes Section - only shown when viewing a thread with changes */}
       {thread && canAccept && thread?.branch && (
         <div className="px-4 py-2 border-b border-border flex-shrink-0 bg-muted/30">
@@ -438,7 +455,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
             <PromptInputTextarea
               placeholder={
                 !isConnected
-                  ? "Connecting..."
+                  ? "Connecting to the chat..."
                   : isAssistantMode
                     ? "Type /new to start fresh • Ask about your wiki..."
                     : canAccept
@@ -456,28 +473,32 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
             <PromptInputActions>
               {/* Pill-shaped button: Send (2/3) + Spawn (1/3) */}
               <div className="flex rounded-full overflow-hidden">
-                <PromptInputAction tooltip="Send message">
-                  <Button
-                    onClick={handleSend}
-                    disabled={!isConnected || !inputValue.trim()}
-                    size="icon"
-                    data-testid="send-message-button"
-                    className="rounded-l-full rounded-r-none"
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
-                </PromptInputAction>
-                <PromptInputAction tooltip="Start thread">
-                  <Button
-                    onClick={handleSpawn}
-                    disabled={!isConnected || !inputValue.trim()}
-                    size="icon"
-                    data-testid="start-thread-button"
-                    className="rounded-r-full rounded-l-none bg-pink-500 hover:bg-pink-600 border-l border-pink-400"
-                  >
-                    <Waypoints className="h-4 w-4 text-white" />
-                  </Button>
-                </PromptInputAction>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={handleSend}
+                      disabled={!isConnected || !inputValue.trim()}
+                      data-testid="send-message-button"
+                      className="rounded-l-full rounded-r-none h-9 px-6"
+                    >
+                      <ArrowUp className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Send message</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={handleSpawn}
+                      disabled={!isConnected || !inputValue.trim()}
+                      data-testid="start-thread-button"
+                      className="rounded-r-full rounded-l-none bg-pink-500 hover:bg-pink-600 border-l border-pink-400 h-9 px-3"
+                    >
+                      <Plus className="h-4 w-4 text-white" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Start thread</TooltipContent>
+                </Tooltip>
               </div>
             </PromptInputActions>
           </PromptInput>

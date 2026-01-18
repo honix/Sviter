@@ -14,15 +14,17 @@ const RightPanel: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col bg-background">
-      {/* Header with Thread Selector */}
-      <div className="p-4 border-b border-border flex-shrink-0">
-        <ThreadSelector
-          threads={threads}
-          selectedThreadId={selectedThreadId}
-          assistantThreadId={assistantThreadId}
-          onSelect={actions.selectThread}
-        />
-      </div>
+      {/* Header with Thread Selector - only show when connected */}
+      {selectedThreadId && (
+        <div className="p-4 border-b border-border flex-shrink-0">
+          <ThreadSelector
+            threads={threads}
+            selectedThreadId={selectedThreadId}
+            assistantThreadId={assistantThreadId}
+            onSelect={actions.selectThread}
+          />
+        </div>
+      )}
 
       {/* Chat Interface - only render when we have a valid threadId */}
       <div className="flex-1 min-h-0">
@@ -33,7 +35,7 @@ const RightPanel: React.FC = () => {
           />
         ) : (
           <div className="h-full flex items-center justify-center text-muted-foreground">
-            Connecting...
+            Connecting to the chat...
           </div>
         )}
       </div>

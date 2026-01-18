@@ -351,11 +351,11 @@ class ThreadManager:
         # Get worker threads where user is a participant
         worker_threads = list_worker_threads_for_user(client_id)
 
-        # Merge and dedupe
+        # Merge and dedupe, filtering out assistant threads (they're represented by "Chat with assistant")
         thread_ids = set()
         threads = []
         for t in user_threads + worker_threads:
-            if t['id'] not in thread_ids:
+            if t['id'] not in thread_ids and t.get('type') != 'assistant':
                 thread_ids.add(t['id'])
                 # Add participants (owner + shared users)
                 owner_id = t.get('owner_id')
@@ -519,7 +519,7 @@ class ThreadManager:
 
         try:
             name = message_data.get("name", "").strip()
-            initial_message = message_data.get("goal", "").strip()  # User's message
+            initial_message = message_data.get("first_message", "").strip()  # User's message
             participants = list(message_data.get("participants", []))  # Copy to avoid mutation
 
             logger.info(f"Spawning thread: name={name}, initial_message={initial_message[:50]}...")

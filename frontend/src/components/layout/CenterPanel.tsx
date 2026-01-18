@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAppContext } from '../../contexts/AppContext';
 import { useAuth } from '../../contexts/AuthContext';
-import LoadingSpinner from '../common/LoadingSpinner';
+import { Loader } from '@/components/ui/loader';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
@@ -428,7 +428,7 @@ const CenterPanel: React.FC = () => {
   if (isLoading) {
     return (
       <div className="h-full bg-background flex items-center justify-center">
-        <LoadingSpinner size="lg" message="Loading page..." />
+        <span className="text-muted-foreground">Loading page...</span>
       </div>
     );
   }
@@ -753,6 +753,23 @@ const CenterPanel: React.FC = () => {
           <h1 className="text-2xl font-bold text-foreground">
             <FileName path={currentPage.path} />
           </h1>
+          {/* Branch indicator or resolving indicator */}
+          {isResolving ? (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+              <AlertTriangle className="h-4 w-4 text-yellow-500" />
+              <span className="text-sm text-yellow-600 dark:text-yellow-400 font-medium">
+                Resolving Merge Conflicts
+              </span>
+              {conflictLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-pink-500/10 rounded-lg border border-pink-500/20">
+              <GitBranch className="h-4 w-4 text-pink-500" />
+              <span className="text-sm text-pink-600 dark:text-pink-400">
+                <code className="font-mono">{currentBranch}</code> vs main
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -763,7 +780,7 @@ const CenterPanel: React.FC = () => {
           onValueChange={handleBranchTabChange}
           className="h-full flex flex-col"
         >
-          <div className="flex items-center justify-between mx-4 mt-4">
+          <div className="mx-4 mt-4">
             <TabsList>
               <TabsTrigger value="preview">
                 <Eye className="h-4 w-4 mr-1.5" />
@@ -778,24 +795,6 @@ const CenterPanel: React.FC = () => {
                 History
               </TabsTrigger>
             </TabsList>
-
-            {/* Branch indicator or resolving indicator */}
-            {isResolving ? (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
-                <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                <span className="text-sm text-yellow-600 dark:text-yellow-400 font-medium">
-                  Resolving Merge Conflicts
-                </span>
-                {conflictLoading && <Loader2 className="h-3 w-3 animate-spin" />}
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 rounded-lg border border-blue-500/20">
-                <GitBranch className="h-4 w-4 text-blue-500" />
-                <span className="text-sm text-blue-600 dark:text-blue-400">
-                  <code className="font-mono">{currentBranch}</code> vs main
-                </span>
-              </div>
-            )}
           </div>
 
           {/* Preview tab - read-only view of branch content */}

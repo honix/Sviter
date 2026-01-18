@@ -34,6 +34,8 @@ interface AppState {
   branchViewMode: 'preview' | 'diff' | 'history';
   // Refresh trigger for real-time updates
   pageUpdateCounter: number;
+  // Thread creation loading state
+  isCreatingThread: boolean;
 }
 
 type AppAction =
@@ -66,7 +68,9 @@ type AppAction =
   | { type: 'SET_BRANCH_VIEW_MODE'; payload: 'preview' | 'diff' | 'history' }
   | { type: 'UPDATE_CURRENT_PAGE_CONTENT'; payload: string }
   // Refresh trigger
-  | { type: 'INCREMENT_PAGE_UPDATE_COUNTER' };
+  | { type: 'INCREMENT_PAGE_UPDATE_COUNTER' }
+  // Thread creation loading
+  | { type: 'SET_CREATING_THREAD'; payload: boolean };
 
 // Load persisted state from localStorage
 const loadPersistedExpandedFolders = (): string[] => {
@@ -108,7 +112,9 @@ const initialState: AppState = {
   currentBranch: 'main',
   branchViewMode: 'preview',
   // Refresh trigger for real-time updates
-  pageUpdateCounter: 0
+  pageUpdateCounter: 0,
+  // Thread creation loading state
+  isCreatingThread: false
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -280,6 +286,9 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'INCREMENT_PAGE_UPDATE_COUNTER':
       return { ...state, pageUpdateCounter: state.pageUpdateCounter + 1 };
 
+    case 'SET_CREATING_THREAD':
+      return { ...state, isCreatingThread: action.payload };
+
     default:
       return state;
   }
@@ -306,6 +315,7 @@ interface AppContextType {
     selectThread: (threadId: string | null) => void;
     acceptThread: (threadId: string) => void;
     addThreadMessage: (threadId: string, role: ThreadMessage['role'], content: string) => void;
+    setCreatingThread: (isCreating: boolean) => void;
     // Tree actions
     loadPageTree: () => Promise<void>;
     toggleFolder: (folderId: string) => void;
@@ -455,6 +465,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         wsService.current?.send({ type: 'get_thread_list' });
       } else if (message.type === 'thread_selected') {
         console.log('📢 thread_selected:', message.thread_id, message.thread_type, message.thread);
+        // Clear thread creation loading state
+        dispatch({ type: 'SET_CREATING_THREAD', payload: false });
         // Set assistant thread ID if this is the assistant thread
         if (message.thread_type === 'assistant' && message.thread_id) {
           dispatch({ type: 'SET_ASSISTANT_THREAD_ID', payload: message.thread_id });
@@ -1083,6 +1095,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: 'ADD_THREAD_MESSAGE',
         payload: { threadId, message }
       });
+    },
+    setCreatingThread: (isCreating: boolean) => {
+      dispatch({ type: 'SET_CREATING_THREAD', payload: isCreating });
     },
 
     // Tree actions
