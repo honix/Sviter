@@ -79,6 +79,55 @@ const imageNodeSpec: NodeSpec = {
   },
 };
 
+// Mermaid diagram node specification
+const mermaidNodeSpec: NodeSpec = {
+  attrs: {
+    content: { default: '' },
+  },
+  group: 'block',
+  parseDOM: [{
+    tag: 'div[data-mermaid]',
+    getAttrs(dom) {
+      const element = dom as HTMLElement;
+      return {
+        content: element.getAttribute('data-mermaid') || '',
+      };
+    },
+  }],
+  toDOM(node) {
+    return ['div', {
+      'data-mermaid': node.attrs.content,
+      class: 'mermaid-block',
+    }, ['pre', node.attrs.content]];
+  },
+};
+
+// Chart reference node specification
+const chartNodeSpec: NodeSpec = {
+  attrs: {
+    src: {},
+    chartType: { default: null },
+  },
+  group: 'block',
+  parseDOM: [{
+    tag: 'div[data-chart]',
+    getAttrs(dom) {
+      const element = dom as HTMLElement;
+      return {
+        src: element.getAttribute('data-chart') || '',
+        chartType: element.getAttribute('data-chart-type'),
+      };
+    },
+  }],
+  toDOM(node) {
+    return ['div', {
+      'data-chart': node.attrs.src,
+      'data-chart-type': node.attrs.chartType,
+      class: 'chart-block',
+    }, `Chart: ${node.attrs.src}`];
+  },
+};
+
 // Get table nodes with alignment support for GFM tables
 // Using inline* for cellContent to allow direct inline content from markdown parser
 const tableNodeSpecs = tableNodes({
@@ -97,11 +146,14 @@ const tableNodeSpecs = tableNodes({
   },
 });
 
-// Combine basic nodes + list nodes + table nodes + image node
+// Combine basic nodes + list nodes + table nodes + image node + mermaid + chart
 const nodesWithLists = addListNodes(basicSchema.spec.nodes, 'paragraph block*', 'block');
 const nodesWithImages = nodesWithLists.addBefore('text', 'image', imageNodeSpec);
+const nodesWithVisualization = nodesWithImages.append(tableNodeSpecs)
+  .addToEnd('mermaid', mermaidNodeSpec)
+  .addToEnd('chart', chartNodeSpec);
 const schemaSpec = {
-  nodes: nodesWithImages.append(tableNodeSpecs),
+  nodes: nodesWithVisualization,
   marks: basicSchema.spec.marks,
 };
 
@@ -125,6 +177,8 @@ export const schema = new Schema(schemaSpec);
  * - table_header: Header cell (th) with optional alignment
  * - table_cell: Regular cell (td) with optional alignment
  * - image: Inline image with src, alt, title attributes
+ * - mermaid: Mermaid diagram block with content attribute
+ * - chart: Chart reference block with src and chartType attributes
  * - text: Inline text node
  *
  * Marks:

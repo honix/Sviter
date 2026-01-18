@@ -10,6 +10,7 @@ import { schema, setCurrentPagePath } from '../../editor/schema';
 import { markdownToProseMirror, prosemirrorToMarkdown } from '../../editor/conversion';
 import { buildKeymap } from '../../editor/keymap';
 import { useWikiLinks } from '../../hooks/useWikiLinks';
+import { createNodeViews } from '../../editor/nodeViews';
 import './prosemirror.css';
 
 interface ProseMirrorEditorProps {
@@ -85,6 +86,7 @@ export const ProseMirrorEditor = forwardRef<ProseMirrorEditorHandle, ProseMirror
       const view = new EditorView(editorRef.current, {
         state,
         editable: () => editable,
+        nodeViews: createNodeViews(pagePath || null),
         dispatchTransaction(transaction: Transaction) {
           const newState = view.state.apply(transaction);
           view.updateState(newState);

@@ -26,6 +26,7 @@ import { uploadImage, isImageFile } from '../../services/upload-api';
 import { useAuth } from '../../contexts/AuthContext';
 import { EditorToolbar } from './EditorToolbar';
 import { useWikiLinks } from '../../hooks/useWikiLinks';
+import { createNodeViews } from '../../editor/nodeViews';
 
 import './prosemirror.css';
 
@@ -439,6 +440,7 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
       view = new EditorView(editorRef.current, {
         state,
         editable: () => editableRef.current,
+        nodeViews: createNodeViews(pagePath),
       });
 
       viewRef.current = view;

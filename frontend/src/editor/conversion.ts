@@ -32,15 +32,35 @@ export const markdownParser = new MarkdownParser(
     ...defaultMarkdownParser.tokens,
     // Ensure inline code is handled
     code_inline: { mark: 'code' },
-    // Image token
+    // Image token - check for chart references
     image: {
       node: 'image',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      getAttrs: (tok: any) => ({
-        src: tok.attrGet('src'),
-        alt: tok.children?.[0]?.content || null,
-        title: tok.attrGet('title'),
-      }),
+      getAttrs: (tok: any) => {
+        const src = tok.attrGet('src');
+        // Check if this is a chart reference (ends with .chart.csv or similar)
+        if (src && src.match(/\.chart\.(csv|json)$/)) {
+          return null; // Will be handled by special chart parser below
+        }
+        return {
+          src: tok.attrGet('src'),
+          alt: tok.children?.[0]?.content || null,
+          title: tok.attrGet('title'),
+        };
+      },
+    },
+    // Code fence - check for mermaid
+    fence: {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      node: 'code_block',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      getAttrs: (tok: any) => {
+        const info = tok.info || '';
+        if (info.trim() === 'mermaid') {
+          return null; // Will be handled by mermaid parser below
+        }
+        return { params: info };
+      },
     },
     // Table tokens - cells need special handling to wrap content in paragraphs
     table: { block: 'table' },
@@ -183,16 +203,107 @@ export const markdownSerializer = new MarkdownSerializer(
     table_row() {},
     table_header() {},
     table_cell() {},
+    // Mermaid diagram serialization
+    mermaid(state, node) {
+      state.write('```mermaid\n');
+      state.write(node.attrs.content);
+      state.write('\n```');
+      state.closeBlock(node);
+    },
+    // Chart reference serialization
+    chart(state, node) {
+      const alt = node.attrs.chartType || '';
+      state.write(`![${alt}](${node.attrs.src})`);
+      state.closeBlock(node);
+    },
   },
   defaultMarkdownSerializer.marks
 );
+
+/**
+ * Pre-process markdown to extract mermaid and chart blocks
+ */
+function preprocessMarkdown(markdown: string): { markdown: string; special: Array<{ type: 'mermaid' | 'chart'; data: any; placeholder: string }> } {
+  const special: Array<{ type: 'mermaid' | 'chart'; data: any; placeholder: string }> = [];
+  let processed = markdown;
+
+  // Extract mermaid blocks
+  const mermaidRegex = /```mermaid\n([\s\S]*?)```/g;
+  let match;
+  let mermaidIndex = 0;
+  while ((match = mermaidRegex.exec(markdown)) !== null) {
+    const placeholder = `__MERMAID_${mermaidIndex}__`;
+    special.push({
+      type: 'mermaid',
+      data: { content: match[1].trim() },
+      placeholder,
+    });
+    processed = processed.replace(match[0], placeholder);
+    mermaidIndex++;
+  }
+
+  // Extract chart references: ![alt](path.chart.csv)
+  const chartRegex = /!\[([^\]]*)\]\(([^)]*\.chart\.(csv|json))\)/g;
+  let chartIndex = 0;
+  while ((match = chartRegex.exec(markdown)) !== null) {
+    const placeholder = `__CHART_${chartIndex}__`;
+    const chartType = match[1].trim() || null; // Alt text can specify chart type
+    special.push({
+      type: 'chart',
+      data: { src: match[2], chartType },
+      placeholder,
+    });
+    processed = processed.replace(match[0], placeholder);
+    chartIndex++;
+  }
+
+  return { markdown: processed, special };
+}
 
 /**
  * Convert markdown string to ProseMirror document
  */
 export function markdownToProseMirror(markdown: string): ProseMirrorNode {
   try {
-    return markdownParser.parse(markdown) || schema.node('doc', null, [schema.node('paragraph')]);
+    // Pre-process to extract special blocks
+    const { markdown: processed, special } = preprocessMarkdown(markdown);
+
+    // Parse the processed markdown
+    let doc = markdownParser.parse(processed) || schema.node('doc', null, [schema.node('paragraph')]);
+
+    // Replace placeholders with actual nodes
+    if (special.length > 0) {
+      const newContent: ProseMirrorNode[] = [];
+
+      doc.forEach((node) => {
+        // Check if this node contains a placeholder
+        if (node.textContent) {
+          let replaced = false;
+          for (const item of special) {
+            if (node.textContent.includes(item.placeholder)) {
+              replaced = true;
+              if (item.type === 'mermaid') {
+                newContent.push(schema.node('mermaid', item.data));
+              } else if (item.type === 'chart') {
+                newContent.push(schema.node('chart', item.data));
+              }
+              break;
+            }
+          }
+          if (!replaced) {
+            newContent.push(node);
+          }
+        } else {
+          newContent.push(node);
+        }
+      });
+
+      if (newContent.length > 0) {
+        doc = schema.node('doc', null, newContent);
+      }
+    }
+
+    return doc;
   } catch (error) {
     console.error('Error parsing markdown:', error);
     // Return empty document on error
