@@ -1,6 +1,9 @@
 """SQLite database setup and connection management."""
 
 import sqlite3
+import secrets
+import unicodedata
+import re
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Generator, Optional, List, Dict, Any
@@ -9,6 +12,115 @@ from datetime import datetime
 
 # Database file location
 DB_PATH = Path(__file__).parent / "data" / "sviter.db"
+
+
+def generate_handle_from_name(name: str) -> str:
+    """
+    Generate a user handle from a full name.
+
+    Examples:
+        "Fedor Shchukin" -> "fedor.shchukin"
+        "John Doe" -> "john.doe"
+        "Alice" -> "alice"
+
+    Handles Unicode by transliterating to ASCII where possible.
+    """
+    if not name or not name.strip():
+        return None
+
+    # Normalize Unicode (decompose accents)
+    normalized = unicodedata.normalize('NFKD', name)
+    # Remove non-ASCII characters (accents become separate chars after NFKD)
+    ascii_name = normalized.encode('ascii', 'ignore').decode('ascii')
+
+    # If we lost everything, fall back to original with basic replacements
+    if not ascii_name.strip():
+        ascii_name = name
+
+    # Lowercase and replace spaces with dots
+    handle = ascii_name.lower().strip()
+    # Replace multiple spaces/special chars with single dot
+    handle = re.sub(r'[^a-z0-9]+', '.', handle)
+    # Remove leading/trailing dots
+    handle = handle.strip('.')
+
+    return handle if handle else None
+
+
+def generate_unique_handle(name: str) -> str:
+    """
+    Generate a unique user handle, adding suffix if needed.
+
+    Returns handle like "fedor.shchukin" or "fedor.shchukin.a1b2" if taken.
+    """
+    base_handle = generate_handle_from_name(name)
+    if not base_handle:
+        # Fallback for names that can't be converted
+        return f"user-{secrets.token_hex(4)}"
+
+    # Check if handle is available
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM users WHERE id = ?", (base_handle,)
+        ).fetchone()
+
+        if not existing:
+            return base_handle
+
+        # Handle taken, add random suffix
+        return f"{base_handle}.{secrets.token_hex(2)}"
+
+
+def change_user_id(old_id: str, new_id: str) -> bool:
+    """
+    Change a user's ID across all tables.
+
+    Updates:
+    - users.id (primary key)
+    - threads.owner_id
+    - thread_messages.user_id
+    - thread_shares.user_id
+    - thread_attention.user_id
+
+    Returns True if successful.
+    """
+    with get_connection() as conn:
+        try:
+            # Check new ID doesn't exist
+            existing = conn.execute(
+                "SELECT 1 FROM users WHERE id = ?", (new_id,)
+            ).fetchone()
+            if existing:
+                return False
+
+            # Update all tables in order (foreign keys)
+            conn.execute(
+                "UPDATE thread_messages SET user_id = ? WHERE user_id = ?",
+                (new_id, old_id)
+            )
+            conn.execute(
+                "UPDATE thread_shares SET user_id = ? WHERE user_id = ?",
+                (new_id, old_id)
+            )
+            conn.execute(
+                "UPDATE thread_attention SET user_id = ? WHERE user_id = ?",
+                (new_id, old_id)
+            )
+            conn.execute(
+                "UPDATE threads SET owner_id = ? WHERE owner_id = ?",
+                (new_id, old_id)
+            )
+            # Finally update the user's ID
+            conn.execute(
+                "UPDATE users SET id = ? WHERE id = ?",
+                (new_id, old_id)
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            print(f"Failed to change user ID: {e}")
+            return False
 
 
 def init_db():
@@ -40,7 +152,7 @@ def init_db():
                 name TEXT NOT NULL,
                 goal TEXT,
                 owner_id TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(status IN ('active', 'archived', 'working', 'need_help', 'review', 'accepted', 'rejected')),
+                status TEXT NOT NULL,  -- Free-form status string (e.g., 'created', 'researching', 'review')
                 branch TEXT,
                 worktree_path TEXT,
                 review_summary TEXT,
@@ -83,6 +195,36 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_shares_user ON thread_shares(user_id);
+
+            -- Thread attention tracking (notifications/inbox)
+            CREATE TABLE IF NOT EXISTS thread_attention (
+                thread_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                reason TEXT NOT NULL,  -- 'mention', 'added', 'question', 'waiting'
+                message_id TEXT,       -- Optional: which message triggered attention
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                cleared_at TIMESTAMP,  -- NULL if still needs attention
+                PRIMARY KEY (thread_id, user_id, reason, created_at),
+                FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_attention_user ON thread_attention(user_id);
+            CREATE INDEX IF NOT EXISTS idx_attention_uncleared
+            ON thread_attention(user_id, cleared_at)
+            WHERE cleared_at IS NULL;
+
+            -- Thread pins table (for @mention auto-pin and manual pin)
+            CREATE TABLE IF NOT EXISTS thread_pins (
+                thread_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (thread_id, user_id),
+                FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_pins_user ON thread_pins(user_id);
         """)
         conn.commit()
 
@@ -104,6 +246,16 @@ def get_user(user_id: str) -> dict | None:
         row = conn.execute(
             "SELECT * FROM users WHERE id = ?",
             (user_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_user_by_name(name: str) -> dict | None:
+    """Get user by name (case-insensitive)."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE LOWER(name) = LOWER(?)",
+            (name,)
         ).fetchone()
         return dict(row) if row else None
 
@@ -194,10 +346,14 @@ def upgrade_guest_to_oauth(
     name: Optional[str] = None
 ) -> dict:
     """
-    Upgrade a guest user to an OAuth user, preserving their data.
+    Upgrade a guest user to an OAuth user.
 
-    All threads, shares, and other data remain linked to the same user ID.
+    If the user has a name, their ID is changed to a name-based handle
+    (e.g., "guest-abc123" -> "fedor.shchukin").
+
+    All threads, shares, and other data are migrated to the new ID.
     """
+    # First update OAuth info
     with get_connection() as conn:
         conn.execute(
             """
@@ -213,6 +369,14 @@ def upgrade_guest_to_oauth(
             (provider, oauth_id, email, name, guest_id)
         )
         conn.commit()
+
+    # If user has a name, change to name-based handle
+    if name:
+        new_handle = generate_unique_handle(name)
+        if new_handle and new_handle != guest_id:
+            if change_user_id(guest_id, new_handle):
+                return get_user(new_handle)
+
     return get_user(guest_id)
 
 
@@ -235,6 +399,15 @@ def update_user_oauth_info(
         )
         conn.commit()
     return get_user(user_id)
+
+
+def list_users() -> List[dict]:
+    """List all registered users for @mention dropdown."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, name, email FROM users ORDER BY last_seen_at DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -279,21 +452,37 @@ def update_thread(thread_id: str, **kwargs) -> Optional[dict]:
     if not kwargs:
         return get_thread(thread_id)
 
-    # Build SET clause dynamically
-    allowed_fields = {
-        'name', 'status', 'branch', 'worktree_path', 'review_summary',
-        'error', 'is_generating', 'goal'
+    # Explicit field mapping to prevent SQL injection
+    # Each key maps to an identical column name (validated at compile time)
+    field_map = {
+        'name': 'name',
+        'status': 'status',
+        'branch': 'branch',
+        'worktree_path': 'worktree_path',
+        'review_summary': 'review_summary',
+        'error': 'error',
+        'is_generating': 'is_generating',
+        'goal': 'goal'
     }
-    fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
 
-    if not fields:
+    update_parts = []
+    values = []
+    for field, column in field_map.items():
+        if field in kwargs:
+            update_parts.append(f"{column} = ?")
+            values.append(kwargs[field])
+
+    if not update_parts:
         return get_thread(thread_id)
 
     # Always update updated_at
-    fields['updated_at'] = datetime.now().isoformat()
+    update_parts.append("updated_at = ?")
+    values.append(datetime.now().isoformat())
 
-    set_clause = ", ".join(f"{k} = ?" for k in fields.keys())
-    values = list(fields.values()) + [thread_id]
+    # Add thread_id for WHERE clause
+    values.append(thread_id)
+
+    set_clause = ", ".join(update_parts)
 
     with get_connection() as conn:
         conn.execute(
@@ -346,6 +535,22 @@ def list_worker_threads(status: str = None) -> List[dict]:
             rows = conn.execute(
                 "SELECT * FROM threads WHERE type = 'worker' ORDER BY updated_at DESC"
             ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def list_worker_threads_for_user(user_id: str) -> List[dict]:
+    """List worker threads where user is owner or participant."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT t.* FROM threads t
+            LEFT JOIN thread_shares ts ON t.id = ts.thread_id
+            WHERE t.type = 'worker'
+              AND (t.owner_id = ? OR ts.user_id = ?)
+            ORDER BY t.updated_at DESC
+            """,
+            (user_id, user_id)
+        ).fetchall()
         return [dict(row) for row in rows]
 
 
@@ -420,7 +625,7 @@ def get_thread_messages(thread_id: str, limit: int = 1000, offset: int = 0) -> L
             """
             SELECT * FROM thread_messages
             WHERE thread_id = ?
-            ORDER BY created_at ASC
+            ORDER BY created_at ASC, rowid ASC
             LIMIT ? OFFSET ?
             """,
             (thread_id, limit, offset)
@@ -497,3 +702,215 @@ def can_access_thread(thread_id: str, user_id: str) -> bool:
             (user_id, thread_id, user_id)
         ).fetchone()
         return row is not None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Thread Attention (Notifications/Inbox)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def add_attention(
+    thread_id: str,
+    user_id: str,
+    reason: str,
+    message_id: str = None
+) -> bool:
+    """
+    Add attention flag for a user on a thread.
+
+    Args:
+        thread_id: Thread requiring attention
+        user_id: User who needs to see this
+        reason: Why attention is needed ('mention', 'added', 'question', 'waiting')
+        message_id: Optional message that triggered the attention
+
+    Returns:
+        True if added successfully
+    """
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO thread_attention (thread_id, user_id, reason, message_id)
+                VALUES (?, ?, ?, ?)
+                """,
+                (thread_id, user_id, reason, message_id)
+            )
+            conn.commit()
+        return True
+    except Exception:
+        return False
+
+
+def clear_attention(thread_id: str, user_id: str, reason: str = None) -> int:
+    """
+    Clear attention flags for a user on a thread.
+
+    Args:
+        thread_id: Thread ID
+        user_id: User ID
+        reason: If provided, only clear this reason; otherwise clear all
+
+    Returns:
+        Number of attention flags cleared
+    """
+    with get_connection() as conn:
+        if reason:
+            cursor = conn.execute(
+                """
+                UPDATE thread_attention
+                SET cleared_at = CURRENT_TIMESTAMP
+                WHERE thread_id = ? AND user_id = ? AND reason = ? AND cleared_at IS NULL
+                """,
+                (thread_id, user_id, reason)
+            )
+        else:
+            cursor = conn.execute(
+                """
+                UPDATE thread_attention
+                SET cleared_at = CURRENT_TIMESTAMP
+                WHERE thread_id = ? AND user_id = ? AND cleared_at IS NULL
+                """,
+                (thread_id, user_id)
+            )
+        conn.commit()
+        return cursor.rowcount
+
+
+def get_user_attention(user_id: str) -> List[dict]:
+    """
+    Get all uncleared attention items for a user.
+
+    Returns list of dicts with thread_id, reason, message_id, created_at.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT thread_id, reason, message_id, created_at
+            FROM thread_attention
+            WHERE user_id = ? AND cleared_at IS NULL
+            ORDER BY created_at DESC
+            """,
+            (user_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_threads_needing_attention(user_id: str) -> List[dict]:
+    """
+    Get threads that need user's attention (for inbox view).
+
+    Returns threads with attention reasons aggregated.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT t.*, GROUP_CONCAT(DISTINCT ta.reason) as attention_reasons
+            FROM threads t
+            JOIN thread_attention ta ON t.id = ta.thread_id
+            WHERE ta.user_id = ? AND ta.cleared_at IS NULL
+            GROUP BY t.id
+            ORDER BY t.updated_at DESC
+            """,
+            (user_id,)
+        ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            # Parse attention_reasons into list
+            if d.get('attention_reasons'):
+                d['attention_reasons'] = d['attention_reasons'].split(',')
+            else:
+                d['attention_reasons'] = []
+            result.append(d)
+        return result
+
+
+def has_unread_attention(thread_id: str, user_id: str) -> bool:
+    """Check if thread has uncleared attention for user."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT 1 FROM thread_attention
+            WHERE thread_id = ? AND user_id = ? AND cleared_at IS NULL
+            LIMIT 1
+            """,
+            (thread_id, user_id)
+        ).fetchone()
+        return row is not None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Thread Pins (for @mention auto-pin and manual pin)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def pin_thread(thread_id: str, user_id: str) -> bool:
+    """
+    Pin a thread for a user.
+
+    Args:
+        thread_id: Thread to pin
+        user_id: User pinning the thread
+
+    Returns:
+        True if pinned (or already pinned)
+    """
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO thread_pins (thread_id, user_id) VALUES (?, ?)",
+                (thread_id, user_id)
+            )
+            conn.commit()
+        return True
+    except Exception:
+        return False
+
+
+def unpin_thread(thread_id: str, user_id: str) -> bool:
+    """
+    Unpin a thread for a user.
+
+    Args:
+        thread_id: Thread to unpin
+        user_id: User unpinning the thread
+
+    Returns:
+        True if unpinned (or wasn't pinned)
+    """
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM thread_pins WHERE thread_id = ? AND user_id = ?",
+            (thread_id, user_id)
+        )
+        conn.commit()
+    return True
+
+
+def is_thread_pinned(thread_id: str, user_id: str) -> bool:
+    """Check if a thread is pinned for a user."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM thread_pins WHERE thread_id = ? AND user_id = ?",
+            (thread_id, user_id)
+        ).fetchone()
+        return row is not None
+
+
+def get_pinned_threads(user_id: str) -> List[str]:
+    """Get list of thread IDs that are pinned for a user."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT thread_id FROM thread_pins WHERE user_id = ?",
+            (user_id,)
+        ).fetchall()
+        return [row['thread_id'] for row in rows]
+
+
+def get_pinned_thread_count(user_id: str) -> int:
+    """Get count of pinned threads for a user."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as count FROM thread_pins WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        return row['count'] if row else 0

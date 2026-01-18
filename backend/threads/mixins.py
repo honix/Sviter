@@ -6,11 +6,10 @@ Mixins add specific capabilities to Thread classes:
 - SpawnMixin: Ability to spawn worker threads
 - BranchMixin: Git branch/worktree management
 - EditToolsMixin: Page editing tools
-- ReviewMixin: Review workflow (request_help, mark_for_review, accept/reject)
+- ReviewMixin: Thread info tools (get/set status and name) + accept workflow
 """
 
 from typing import List, Dict, Any, Optional, Callable, TYPE_CHECKING
-import asyncio
 from pathlib import Path
 
 from ai.tools import ToolBuilder, WikiTool
@@ -20,7 +19,6 @@ from db import update_thread as db_update_thread
 
 if TYPE_CHECKING:
     from storage.git_wiki import GitWiki
-    from threads.base import ThreadStatus
 
 
 class ReadToolsMixin:
@@ -160,32 +158,30 @@ class EditToolsMixin:
 
 class ReviewMixin:
     """
-    Adds review workflow capabilities.
+    Adds thread info tools and accept workflow.
 
-    Tools: request_help, mark_for_review
-    Methods: mark_for_review, accept, reject
+    Tools: get/set_thread_status, get/set_thread_name
+    Methods: accept, rename
 
-    Used by worker threads to complete their lifecycle:
-    WORKING -> REVIEW -> ACCEPTED/REJECTED
+    User accepts the thread to merge changes to main.
     """
 
     # These will be set by the class using this mixin
     review_summary: Optional[str] = None
 
-    def get_tools(self, wiki: 'GitWiki', help_callback: Callable = None,
-                  review_callback: Callable = None, **kwargs) -> List[WikiTool]:
-        """Add lifecycle tools to the tool list."""
+    def get_tools(self, wiki: 'GitWiki', broadcast_fn: Callable = None, **kwargs) -> List[WikiTool]:
+        """Add thread info tools to the tool list."""
         parent_tools = super().get_tools(
             wiki, **kwargs) if hasattr(super(), 'get_tools') else []
 
-        if help_callback is None or review_callback is None:
-            return parent_tools
-
-        return parent_tools + ToolBuilder.worker_tools(help_callback, review_callback)
+        return parent_tools + ToolBuilder.worker_tools(
+            thread=self,
+            broadcast_fn=broadcast_fn,
+            wiki=wiki
+        )
 
     def mark_for_review(self, summary: str) -> None:
         """Mark this thread as ready for review."""
-        from threads.base import ThreadStatus
         from pathlib import Path
 
         # Commit any pending merge before marking for review
@@ -206,7 +202,7 @@ class ReviewMixin:
                     logging.getLogger(__name__).warning(f"Failed to commit merge: {e}")
 
         self.review_summary = summary
-        self.status = ThreadStatus.REVIEW
+        self.status = "review"
         db_update_thread(self.id, status='review', review_summary=summary)
 
     def accept(self, wiki: 'GitWiki', author: str = "System",
@@ -222,12 +218,13 @@ class ReviewMixin:
         Returns:
             AcceptResult indicating success, conflict, or error
         """
-        from threads.base import ThreadStatus
+        from threads.base import TERMINAL_STATUSES
 
         if not hasattr(self, 'branch') or not self.branch:
             return AcceptResult.ERROR
 
-        if self.status != ThreadStatus.REVIEW:
+        # Allow accept from any non-terminal state
+        if self.status in TERMINAL_STATUSES:
             return AcceptResult.ERROR
 
         # Try to merge with author info
@@ -240,7 +237,7 @@ class ReviewMixin:
             if hasattr(self, 'cleanup_branch'):
                 self.cleanup_branch(wiki, delete_branch=False)
 
-            self.status = ThreadStatus.ACCEPTED
+            self.status = "accepted"
             db_update_thread(self.id, status='accepted')
             return AcceptResult.SUCCESS
 
@@ -251,89 +248,13 @@ class ReviewMixin:
         db_update_thread(self.id, error=self.error)
         return AcceptResult.ERROR
 
-    def reject(self, wiki: 'GitWiki') -> bool:
-        """
-        Reject thread changes - cleanup worktree but keep branch for history.
+    def rename(self, name: str, status: str = None) -> None:
+        """Rename thread and optionally update status."""
+        self.name = name
+        if status:
+            self.status = status
+        db_update_thread(self.id, name=name, status=status if status else self.status)
 
-        Args:
-            wiki: Main GitWiki instance
-
-        Returns:
-            True if rejection successful
-        """
-        from threads.base import ThreadStatus
-
-        # Clean up worktree, keep branch for history
-        if hasattr(self, 'cleanup_branch'):
-            self.cleanup_branch(wiki, delete_branch=False)
-
-        self.status = ThreadStatus.REJECTED
-        db_update_thread(self.id, status='rejected')
-        return True
-
-    def request_help_status(self) -> None:
-        """Set thread status to need_help."""
-        from threads.base import ThreadStatus
-
-        self.status = ThreadStatus.NEED_HELP
-        db_update_thread(self.id, status='need_help')
-
-    def resume_working(self) -> None:
-        """Resume working after help received."""
-        from threads.base import ThreadStatus
-
-        self.status = ThreadStatus.WORKING
-        db_update_thread(self.id, status='working')
-
-    def get_post_turn_action(self, result_status: str) -> Optional[Dict[str, Any]]:
-        """
-        Worker needs lifecycle tool if still working after turn.
-
-        Returns prompt action if agent finished without calling
-        request_help or mark_for_review.
-        """
-        from threads.base import ThreadStatus
-
-        if self.status == ThreadStatus.WORKING and result_status in ('completed', 'stopped'):
-            return {
-                "type": "prompt",
-                "message": (
-                    "You finished responding but didn't use a lifecycle tool. "
-                    "Please either:\n"
-                    "- Call `mark_for_review` if your task is complete\n"
-                    "- Call `request_help` if you need clarification or are stuck\n\n"
-                    "You must use one of these tools to proceed."
-                )
-            }
-        return None
-
-    def prepare_callbacks(self, broadcast_fn=None, send_thread_list_fn=None, **kwargs) -> Dict[str, Any]:
-        """
-        Prepare callbacks for worker thread lifecycle tools.
-
-        Creates help_callback and review_callback that update thread status
-        and broadcast notifications.
-        """
-        async def on_status_change(status: str, message: str):
-            if broadcast_fn:
-                await broadcast_fn({
-                    "type": "thread_status",
-                    "thread_id": self.id,
-                    "status": status,
-                    "message": message
-                })
-            if send_thread_list_fn:
-                await send_thread_list_fn()
-
-        def on_request_help(question: str):
-            self.request_help_status()
-            asyncio.create_task(on_status_change("need_help", question))
-
-        def on_mark_for_review(summary: str):
-            self.mark_for_review(summary)
-            asyncio.create_task(on_status_change("review", summary))
-
-        return {
-            "help_callback": on_request_help,
-            "review_callback": on_mark_for_review
-        }
+    def prepare_callbacks(self, broadcast_fn=None, **kwargs) -> Dict[str, Any]:
+        """Prepare callbacks for worker thread tools."""
+        return {"broadcast_fn": broadcast_fn}

@@ -20,13 +20,15 @@ interface ThreadChangesViewProps {
   baseBranch?: string;
   className?: string;
   compact?: boolean;  // If true, show minimal view
+  renderActions?: () => React.ReactNode;  // Render actions inline with header
 }
 
 export function ThreadChangesView({
   branch,
   baseBranch = 'main',
   className,
-  compact = false
+  compact = false,
+  renderActions
 }: ThreadChangesViewProps) {
   const { state } = useAppContext();
   const { pageUpdateCounter } = state;
@@ -123,42 +125,35 @@ export function ThreadChangesView({
     );
   }
 
-  // Compact view - just summary
-  if (compact && !expanded) {
-    return (
-      <button
-        onClick={() => setExpanded(true)}
-        className={cn(
-          "flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground",
-          className
-        )}
-      >
-        <ChevronRight className="h-4 w-4" />
-        <span>{stats.files_changed} file{stats.files_changed !== 1 ? 's' : ''}</span>
-        <span className="text-green-600">+{stats.lines_added}</span>
-        <span className="text-red-600">-{stats.lines_removed}</span>
-      </button>
-    );
-  }
-
-  return (
-    <div className={cn("text-sm", className)}>
-      {/* Summary Header */}
+  // Render summary header (same for collapsed and expanded)
+  const renderHeader = () => (
+    <div className="flex items-center gap-2">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left hover:bg-muted/50 p-2 rounded"
+        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
       >
         {expanded ? (
           <ChevronDown className="h-4 w-4" />
         ) : (
           <ChevronRight className="h-4 w-4" />
         )}
-        <span className="font-medium">
-          {stats.files_changed} file{stats.files_changed !== 1 ? 's' : ''} changed
-        </span>
-        <span className="text-green-600 font-mono">+{stats.lines_added}</span>
-        <span className="text-red-600 font-mono">-{stats.lines_removed}</span>
+        <span>{stats.files_changed} file{stats.files_changed !== 1 ? 's' : ''}</span>
+        <span className="text-green-600">+{stats.lines_added}</span>
+        <span className="text-red-600">-{stats.lines_removed}</span>
       </button>
+      {renderActions && <div className="ml-auto">{renderActions()}</div>}
+    </div>
+  );
+
+  // Compact view - just summary (no expanded content)
+  if (compact && !expanded) {
+    return <div className={className}>{renderHeader()}</div>;
+  }
+
+  return (
+    <div className={cn("text-sm", className)}>
+      {/* Summary Header - fixed row with actions */}
+      {renderHeader()}
 
       {/* Expanded View */}
       {expanded && (

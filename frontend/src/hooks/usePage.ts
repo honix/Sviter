@@ -185,7 +185,7 @@ export function usePage(
   pageId: string,
   refreshTrigger?: number
 ): UsePageResult {
-  const { userId } = useAuth();
+  const { userId, user } = useAuth();
   const { viewingBranch, ephemeral } = useBranch();
 
   // If viewing a branch in ephemeral mode, use the ephemeral hook
@@ -231,9 +231,9 @@ export function usePage(
       // Set up awareness
       provider.awareness.setLocalStateField('user', {
         id: userId,
-        name: getDisplayName(userId),
+        name: user?.name || getDisplayName(userId),
         color: stringToColor(userId),
-        initials: getInitials(userId),
+        initials: getInitials(userId, user?.name),
       });
 
       // Get Y.Text for content

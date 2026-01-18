@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is an AI-powered wiki system with a FastAPI backend and React frontend. The system combines traditional wiki functionality with:
 
 - **AI Chat Assistant**: Real-time AI assistance via WebSocket for wiki content
-- **Autonomous Threads**: Background workers that can read/edit pages on their own git branches
-- **Git-Native Workflow**: All changes tracked in git, threads work on branches (`thread/<name>/<timestamp>`)
+- **Collaborative Threads**: Shared workspaces where users and AI collaborate on wiki changes
+- **Git-Native Workflow**: All changes tracked in git, threads work on branches (`thread/<name>-<hash>`)
 
 ## Architecture
 
@@ -18,9 +18,9 @@ This is an AI-powered wiki system with a FastAPI backend and React frontend. The
 - **Storage**: Git-based wiki storage with GitWiki class (no database needed)
 - **AI Integration**: OpenRouter API with wiki-specific tools (read/edit/find/list pages)
 - **Real-time**: WebSocket endpoints for chat and live updates
-- **Session Management**: Unified SessionManager handles main chat + worker threads
-- **Thread System**: Autonomous workers on git branches (`thread/<name>/<timestamp>`)
-- **Tool System**: Composable tools via ToolBuilder (read/edit/spawn/review)
+- **Session Management**: Unified SessionManager handles main chat + thread sessions
+- **Thread System**: Collaborative threads on git branches (`thread/<name>-<hash>`)
+- **Tool System**: Composable tools via ToolBuilder (read/edit/thread-info)
 
 ### Frontend (React TypeScript)
 
@@ -108,12 +108,12 @@ Other commands:
 - **WebSocket**: Real-time communication on `/ws/{client_id}` endpoint via SessionManager
 - **Session Types**:
   - **Main session**: Read-only assistant with spawn_thread/list_threads tools
-  - **Thread session**: Autonomous worker with read/edit/request_help/mark_for_review tools
+  - **Thread session**: Collaborative workspace with read/edit/thread-info tools
 - **Thread Workflow**:
-  - Main chat spawns threads via `spawn_thread(name, goal)`
-  - Threads work on branches: `thread/<name>/<timestamp>`
-  - Status flow: WORKING → NEED_HELP or REVIEW
-  - Accept merges to main, Reject deletes branch
+  - User creates thread via pink "Start thread" button with first message
+  - Threads work on branches: `thread/<name>-<hash>`
+  - Status is free-form string (AI uses set_thread_status to update)
+  - Accept merges to main (no reject button - just keep discussing)
 - **Git APIs**: `/api/git/branches`, `/api/git/checkout`, `/api/git/diff`, etc.
 - **CORS**: Configured for frontend connections
 
@@ -129,10 +129,11 @@ Other commands:
   - Branch selector with branch creation/deletion
   - Checkout branches with page reload
 - **Thread Management**:
-  - View active threads in right panel
-  - Threads show status: WORKING, NEED_HELP, REVIEW
+  - Pink "Start thread" button creates new thread with user's message
+  - Thread selector shows git branch icon for threads
+  - Threads show free-form status text (set by AI)
   - Click thread to view changes in center panel
-  - Accept (merges to main) or Reject (deletes branch)
+  - Accept button merges to main (no reject - just keep discussing)
 - **Markdown Support**: Simple markdown parser for content rendering
 - **Error Handling**: Error boundaries and loading states
 - **Keyboard Shortcuts**: Ctrl+E (toggle edit), Escape (exit edit)
@@ -243,18 +244,13 @@ For manual debugging:
 await page.screenshot({ path: 'debug.png' })
 ```
 
-### CI/CD
-
-GitHub Actions runs E2E tests on every PR (`.github/workflows/e2e-tests.yml`).
-After pushing, use `gh pr checks --watch` to wait for CI without burning tokens.
-
 ## Real-time Thread Updates
 
 ### Branch & Page Lifecycle
 
-- **Branch creation**: Thread branches created when spawned via `spawn_thread`
+- **Branch creation**: Thread branches created when user clicks "Start thread"
 - **Live page updates**: Pages appear in tree as threads edit them (via `page_updated` WebSocket messages)
-- **Branch cleanup**: Rejected branches deleted, accepted branches merged to main
+- **Branch cleanup**: Accepted branches merged to main, worktree removed
 
 ### WebSocket Message Types
 
@@ -266,52 +262,3 @@ After pushing, use `gh pr checks --watch` to wait for CI without burning tokens.
 
 - React 18 batching workaround: Use refs (`reloadFunctionsRef` in AppContext) to call reload functions from WebSocket callbacks with empty deps
 - System prompt bubble: Full width styling in ChatInterface
-
-## Claude Code on the web Workflow
-
-> Only applies when `CLAUDE_CODE_REMOTE` environment variable is set.
-
-When running in **Claude Code on the web** (not CLI):
-
-**MANDATORY: Always create a PR and verify E2E tests pass before considering work complete.**
-
-- **DO NOT push directly to `main`** — use session branch only
-- Push all changes to the assigned session branch (e.g., `claude/feature-name-<session-id>`)
-- **ALWAYS create a PR** for any code changes - this triggers CI/CD pipeline
-- **ALWAYS wait for E2E tests** to pass using `gh pr checks --watch`
-- The wiki submodule (`Sviter-wiki/`) can be pushed to main directly since it's a separate repo
-
-### Required Workflow
-
-1. Push changes to session branch: `git push -u origin claude/feature-SESSION_ID`
-2. Create PR: `gh pr create --title "..." --body "..."`
-3. Wait for E2E tests: `gh pr checks --watch --fail-fast`
-4. If tests fail: fix, commit, push, repeat step 3
-5. When E2E tests pass, check claude-review comments: `gh pr view --comments`
-6. Fix issues marked as High Priority / Fix before merge, then consider work complete
-
-```bash
-# NOTE: Always use --repo flag (remote URL is proxied, gh can't detect repo)
-# Replace "honix/Sviter" with actual repo if different
-
-# 1. Push changes to session branch
-git push -u origin claude/your-feature-SESSION_ID
-
-# 2. Create PR (triggers CI)
-# IMPORTANT: Always be transparent - mention in PR body that this was generated by Claude
-gh pr create --repo honix/Sviter --title "feat: ..." --body "..."
-
-# 3. Wait for "E2E Tests" job only (ignore claude-review while fixing)
-gh pr checks --repo honix/Sviter --watch --fail-fast
-
-# 4. If E2E Tests failed, check logs and fix
-gh run view --repo honix/Sviter --log-failed
-
-# 5. Fix and push again, repeat until E2E Tests green
-git add . && git commit -m "fix: ..." && git push
-
-# 6. When E2E Tests green, wait for claude-review then read its feedback
-gh pr checks --repo honix/Sviter --watch
-gh pr view --repo honix/Sviter --comments
-# Fix issues marked as High Priority / Fix before merge - other suggestions can be ignored
-```

@@ -173,7 +173,7 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [remoteUsers, setRemoteUsers] = useState<CollabUser[]>([]);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
-  const { userId } = useAuth();
+  const { userId, user } = useAuth();
   const sessionRef = useRef<ReturnType<typeof createCollabSession> | null>(null);
   const initializedRef = useRef(false);
   const yTextRef = useRef<ReturnType<typeof getSharedText> | null>(null);
@@ -206,6 +206,7 @@ export const CollaborativeCodeMirrorEditor: React.FC<CollaborativeCodeMirrorEdit
     const session = createCollabSession(
       pagePath,
       userId,
+      user?.name,
       handleStatusChange,
       handleUsersChange,
       handleSaveStatusChange,

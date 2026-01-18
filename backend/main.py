@@ -16,7 +16,7 @@ import shutil
 import mimetypes
 import re
 from config import WIKI_REPO_PATH, OPENROUTER_API_KEY, JWT_SECRET_KEY
-from db import init_db, get_user
+from db import init_db, get_user, list_users
 from auth import router as auth_router, get_optional_user
 
 # Pydantic models for request/response
@@ -328,6 +328,23 @@ async def serve_asset(path: str):
         media_type=content_type or 'application/octet-stream',
         filename=file_path.name
     )
+
+
+# Users endpoint for @mention dropdown
+@app.get("/api/users")
+async def get_users():
+    """Get list of all registered users for @mention dropdown."""
+    users = list_users()
+    return {
+        "users": [
+            {
+                "id": u["id"],
+                "name": u.get("name") or u["id"],
+                "email": u.get("email")
+            }
+            for u in users
+        ]
+    }
 
 
 # API endpoints for pages

@@ -12,7 +12,10 @@ frontend:
 
 run:
 	@echo "Starting backend and frontend..."
-	@$(MAKE) -j2 backend frontend
+	@bash -c 'trap "kill 0" EXIT SIGINT SIGTERM; \
+		(cd backend && uv run python main.py) & \
+		(cd frontend && npm run dev) & \
+		wait'
 
 clean:
 	rm -rf backend/.venv

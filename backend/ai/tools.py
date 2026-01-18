@@ -607,37 +607,63 @@ def _list_threads(
         return f"Error listing threads: {e}"
 
 
-def _request_help(help_callback: Callable[[str], None], args: Dict[str, Any]) -> str:
-    """Ask user for help"""
-    question = args.get("question", "").strip()
-    if not question:
-        return "Error: 'question' is required for request_help"
-
-    help_callback(question)
-
-    return f"""Help requested. Your question has been sent to the user:
-
-"{question}"
-
-The user will respond when they're available. Your execution is paused until they respond."""
+def _get_thread_status(thread) -> str:
+    """Get current thread status"""
+    return f"Current status: {thread.status}"
 
 
-def _mark_for_review(review_callback: Callable[[str], None], args: Dict[str, Any]) -> str:
-    """Mark changes for review"""
-    summary = args.get("summary", "Work complete").strip()
+def _set_thread_status(thread, broadcast_fn, args: Dict[str, Any]) -> str:
+    """Set thread status"""
+    status = args.get("status", "").strip()
+    if not status:
+        return "Error: 'status' is required"
 
-    review_callback(summary)
+    thread.set_status(status)
+    if broadcast_fn:
+        import asyncio
+        asyncio.create_task(broadcast_fn({
+            "type": "thread_updated",
+            "thread_id": thread.id,
+            "status": status
+        }))
+    return f"Status updated to: {status}"
 
-    return f"""Changes marked for review.
 
-Summary: {summary}
+def _get_thread_name(thread) -> str:
+    """Get current thread name"""
+    return f"Current name: {thread.name}"
 
-The user will review your changes and either:
-- Accept them (merges to main)
-- Request modifications (you'll be notified)
-- Reject them (changes discarded)
 
-Your execution is complete for now."""
+def _set_thread_name(thread, broadcast_fn, wiki, args: Dict[str, Any]) -> str:
+    """Set thread name and rename git branch if applicable"""
+    name = args.get("name", "").strip()
+    if not name:
+        return "Error: 'name' is required"
+
+    # Use rename_with_branch if available (WorkerThread) to also rename git branch
+    if hasattr(thread, 'rename_with_branch') and wiki:
+        error = thread.rename_with_branch(name, wiki)
+        if error:
+            return f"Error: {error}"
+        new_branch = getattr(thread, 'branch', None)
+    else:
+        thread.rename(name)
+        new_branch = None
+
+    if broadcast_fn:
+        import asyncio
+        update_data = {
+            "type": "thread_updated",
+            "thread_id": thread.id,
+            "name": name
+        }
+        if new_branch:
+            update_data["branch"] = new_branch
+        asyncio.create_task(broadcast_fn(update_data))
+
+    if new_branch:
+        return f"Thread renamed to: {name} (branch: {new_branch})"
+    return f"Thread renamed to: {name}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -652,7 +678,7 @@ class ToolBuilder:
     - read: read_page, grep_pages, glob_pages, list_pages
     - write: write_page, edit_page, insert_at_line, delete_page, move (mv-style)
     - thread: spawn_thread, list_threads (main only)
-    - lifecycle: request_help, mark_for_review (thread only)
+    - thread info: get/set_thread_status, get/set_thread_name (thread only)
 
     Usage:
         # For main chat (read-only + thread management):
@@ -958,36 +984,44 @@ After moving/renaming, consider updating agents/index.md navigation entries.""",
         ]
 
     @staticmethod
-    def worker_tools(
-        help_callback: Callable[[str], None],
-        review_callback: Callable[[str], None]
-    ) -> List[WikiTool]:
-        """Thread-specific tools: request_help, mark_for_review"""
+    def worker_tools(thread, broadcast_fn: Callable = None, wiki=None) -> List[WikiTool]:
+        """Thread info tools: get/set status and name"""
         return [
             WikiTool(
-                name="request_help",
-                description="Ask the user for help. Use when stuck, need clarification, or unsure how to proceed. Pauses execution until user responds.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "question": {"type": "string", "description": "Specific question - explain what you tried and what you need"}
-                    },
-                    "required": ["question"]
-                },
-                function=lambda args, cb=help_callback: _request_help(cb, args)
+                name="get_thread_status",
+                description="Get this thread's current status",
+                parameters={"type": "object", "properties": {}},
+                function=lambda args, t=thread: _get_thread_status(t)
             ),
             WikiTool(
-                name="mark_for_review",
-                description="Mark task complete for user review. User will accept (merge to main), request changes, or reject. Call this when you've finished your goal.",
+                name="set_thread_status",
+                description="Set this thread's status. Keep users informed. Examples: 'Reading docs', 'Waiting for @bob', 'Done - ready to merge'",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "summary": {"type": "string", "description": "Summary of what you changed - list pages edited and key modifications"}
+                        "status": {"type": "string", "description": "Short status describing current activity"}
                     },
-                    "required": ["summary"]
+                    "required": ["status"]
                 },
-                function=lambda args, cb=review_callback: _mark_for_review(
-                    cb, args)
+                function=lambda args, t=thread, b=broadcast_fn: _set_thread_status(t, b, args)
+            ),
+            WikiTool(
+                name="get_thread_name",
+                description="Get this thread's current name",
+                parameters={"type": "object", "properties": {}},
+                function=lambda args, t=thread: _get_thread_name(t)
+            ),
+            WikiTool(
+                name="set_thread_name",
+                description="Rename this thread and its git branch. Use descriptive kebab-case names.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "New name (kebab-case preferred)"}
+                    },
+                    "required": ["name"]
+                },
+                function=lambda args, t=thread, b=broadcast_fn, w=wiki: _set_thread_name(t, b, w, args)
             )
         ]
 

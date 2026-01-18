@@ -22,6 +22,9 @@ RUN uv sync --no-dev
 # Copy application code
 COPY backend/ .
 
+# Remove any .env file that might have been copied (use Docker env vars only)
+RUN rm -f .env
+
 # Copy test wiki fixtures and initialize as git repo
 COPY tests/fixtures/wiki /wiki
 # Configure git globally for root (needed for initial commit)

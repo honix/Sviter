@@ -43,75 +43,60 @@ test.describe('User Journey - Edit Wiki via Agent Thread', () => {
       await expect(page.getByText('various formatting')).toBeVisible({ timeout: 5000 })
     })
 
-    // Step 3: Send a message to the assistant to trigger an edit
-    await test.step('Ask agent to edit TestPage', async () => {
+    // Step 3: Start a thread via the pink button to trigger an edit
+    await test.step('Start thread to edit TestPage', async () => {
       // Find the chat input
       const chatInput = page.locator('input[placeholder*="Type"], input[placeholder*="Ask"], textarea').first()
       await expect(chatInput).toBeVisible({ timeout: 5000 })
 
       // Type a message asking to edit
       await chatInput.fill('Please edit the TestPage and add a note at the top')
-      await chatInput.press('Enter')
+
+      // Click the pink "Start thread" button (not Enter)
+      await page.getByTestId('start-thread-button').click()
     })
 
-    // Step 4: Verify thread was created (spawn_thread tool call shown)
-    await test.step('Verify thread was spawned', async () => {
-      // Mock adapter spawns thread named "e2e-test-edit"
-      // Look for evidence of spawn_thread call or thread notification
-      await expect(
-        page.locator('text=spawn_thread').or(page.locator('text=e2e-test-edit')).first()
-      ).toBeVisible({ timeout: 30000 })
-    })
-
-    // Step 5: Wait for thread to reach REVIEW status and select it
+    // Step 4: Wait for thread to complete and verify status
     await test.step('Thread reaches REVIEW status', async () => {
-      // Wait for thread to finish working and reach review status
-      // The thread selector dropdown shows threads grouped by status
-      // When a thread is in review, it shows "(Ready for review)" text
-
-      // First, click on the thread selector dropdown to open it
-      // The dropdown trigger contains "User Assistant" text initially
-      const threadSelector = page.locator('button').filter({ hasText: /User Assistant/i }).first()
-      await expect(threadSelector).toBeVisible({ timeout: 10000 })
-
-      // Wait a bit for the thread to complete its work and reach REVIEW status
-      // The mock adapter is fast, but we need to wait for WebSocket updates
-      await page.waitForTimeout(2000)
-
-      // Click to open the dropdown
-      await threadSelector.click()
-
-      // Wait for the dropdown to show a thread with "Ready for review" status
+      // Wait for the mock adapter to complete its work and set status
+      // The mock adapter calls: read_page, edit_page, set_thread_name, set_thread_status
       await expect(
-        page.locator('text=Ready for review').first()
+        page.locator('text=Done - ready to merge').first()
       ).toBeVisible({ timeout: 30000 })
-
-      // Click on the thread to select it
-      await page.locator('text=Ready for review').first().click()
     })
 
-    // Step 6: Verify Accept/Reject buttons are visible and accept the thread
+    // Step 6: Verify Accept button is visible and accept the thread
     await test.step('Accept thread changes', async () => {
-      // Now that we've selected the thread, we should see Accept and Reject buttons
+      // Now that we've selected the thread, we should see Accept button
       await expect(
-        page.getByRole('button', { name: /Accept Changes/i })
+        page.getByRole('button', { name: /Accept and merge to main/i })
       ).toBeVisible({ timeout: 10000 })
 
-      await expect(
-        page.getByRole('button', { name: /Reject/i })
-      ).toBeVisible()
-
-      // Click the Accept Changes button
-      await page.getByRole('button', { name: /Accept Changes/i }).click()
+      // Click the Accept button
+      await page.getByRole('button', { name: /Accept and merge to main/i }).click()
 
       // Wait for the thread status to change to accepted
       // After acceptance, the Accept button should disappear
       await expect(
-        page.getByRole('button', { name: /Accept Changes/i })
+        page.getByRole('button', { name: /Accept and merge to main/i })
       ).not.toBeVisible({ timeout: 10000 })
     })
 
-    // Step 7: Verify changes were merged to main
+    // Step 7: Switch to assistant to view main branch
+    await test.step('Switch to assistant (main branch)', async () => {
+      // After accepting, switch to assistant to view merged content on main
+      const threadSelector = page.locator('[role="combobox"]').first()
+      await expect(threadSelector).toBeVisible({ timeout: 5000 })
+      await threadSelector.click()
+
+      // Select "Chat with assistant" option
+      await page.getByText('Chat with assistant').click()
+
+      // Wait for page tree to stabilize after branch switch
+      await expect(page.getByTestId('page-Home')).toBeVisible({ timeout: 10000 })
+    })
+
+    // Step 8: Verify changes were merged to main
     await test.step('Verify changes merged to main', async () => {
       // Navigate to TestPage and verify the mock edit was applied
       // The mock adapter edits TestPage to add "This section was added by the E2E test mock agent"

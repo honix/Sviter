@@ -8,7 +8,7 @@ Capabilities:
 - Review workflow (ReviewMixin)
 
 Lifecycle:
-WORKING -> NEED_HELP (optional) -> REVIEW -> ACCEPTED/REJECTED
+CREATED -> ... (agent sets status freely) -> REVIEW -> ACCEPTED
 """
 
 from dataclasses import dataclass
@@ -17,7 +17,7 @@ from datetime import datetime
 import uuid
 import re
 
-from threads.base import Thread, ThreadType, ThreadStatus, ThreadMessage
+from threads.base import Thread, ThreadType, TERMINAL_STATUSES
 from threads.mixins import ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin
 from ai.prompts import THREAD_PROMPT
 from ai.tools import WikiTool
@@ -33,12 +33,14 @@ if TYPE_CHECKING:
 @dataclass
 class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thread):
     """
-    Autonomous worker thread with full wiki access.
+    Worker thread with full wiki access.
 
+    Features:
     - Has its own git branch and worktree
     - Can read and edit wiki pages
     - Goes through review workflow before changes are merged
     - Multiple workers can run concurrently
+    - AI adapts to conversation: active when alone, listens when multiple participants
     """
 
     # BranchMixin fields
@@ -49,14 +51,14 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
     review_summary: Optional[str] = None
 
     @classmethod
-    def create(cls, owner_id: str, name: str, goal: str) -> 'WorkerThread':
+    def create(cls, owner_id: str, name: str, goal: str = "") -> 'WorkerThread':
         """
         Create a new worker thread.
 
         Args:
             owner_id: User who created this thread
             name: Short name for the thread (e.g., "fix-typos")
-            goal: Task description
+            goal: Optional task description (stored for reference)
 
         Returns:
             WorkerThread instance (branch/worktree not yet created)
@@ -75,7 +77,7 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
             thread_type='worker',
             name=thread_name,
             owner_id=owner_id,
-            status='working',
+            status='Just created',  # Initial status, agent sets freely
             goal=goal,
             branch=branch,
             worktree_path=None  # Created later by create_branch()
@@ -86,7 +88,7 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
             name=thread_name,
             type=ThreadType.WORKER,
             owner_id=owner_id,
-            status=ThreadStatus.WORKING,
+            status="created",  # String status
             created_at=now,
             updated_at=now,
             goal=goal,
@@ -97,6 +99,12 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
             is_generating=False
         )
 
+    # Git reserved names that cannot be used as branch names
+    GIT_RESERVED_NAMES = frozenset([
+        'HEAD', 'head', 'refs', 'objects', 'hooks', 'index', 'config',
+        'logs', 'info', 'description', 'packed-refs', 'shallow'
+    ])
+
     @staticmethod
     def _generate_branch_name(name: str, thread_id: str) -> str:
         """Generate a safe git branch name."""
@@ -105,16 +113,24 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
         safe_name = re.sub(r'-+', '-', safe_name)  # Collapse multiple dashes
         safe_name = re.sub(r'^-+|-+$', '', safe_name)  # Remove leading/trailing
 
+        # Short UUID for uniqueness (needed for fallback)
+        short_uuid = thread_id[:6]
+
+        # Path traversal protection
+        if '..' in safe_name or safe_name == '.':
+            safe_name = f"task-{short_uuid}"
+
         # Git safety validations
-        if not safe_name or safe_name.startswith('/') or safe_name.endswith('.lock'):
-            safe_name = "task"
+        if (not safe_name or
+            safe_name.startswith('/') or
+            safe_name.startswith('.') or
+            safe_name.endswith('.lock') or
+            safe_name in WorkerThread.GIT_RESERVED_NAMES):
+            safe_name = f"task-{short_uuid}"
 
         # Reasonable length
         if len(safe_name) > 50:
             safe_name = safe_name[:50].rstrip('-')
-
-        # Short UUID for uniqueness
-        short_uuid = thread_id[:6]
 
         return f"thread/{safe_name}-{short_uuid}"
 
@@ -138,7 +154,7 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
             name=data['name'],
             type=ThreadType.WORKER,
             owner_id=data['owner_id'],
-            status=ThreadStatus(data['status']),
+            status=data['status'],  # String status
             created_at=created_at,
             updated_at=updated_at,
             goal=data.get('goal'),
@@ -151,17 +167,15 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
 
     def get_prompt(self) -> str:
         """Get system prompt for worker."""
-        return THREAD_PROMPT.format(goal=self.goal or "", branch=self.branch or "")
+        return THREAD_PROMPT.format(branch=self.branch or "")
 
-    def get_tools(self, wiki: 'GitWiki' = None, help_callback: Callable = None,
-                  review_callback: Callable = None, **kwargs) -> List[WikiTool]:
+    def get_tools(self, wiki: 'GitWiki' = None, broadcast_fn: Callable = None, **kwargs) -> List[WikiTool]:
         """
-        Get tools for worker: read + edit + lifecycle.
+        Get tools for worker: read + edit + thread info.
 
         Args:
             wiki: GitWiki instance (should be this thread's worktree wiki)
-            help_callback: Callback when agent requests help
-            review_callback: Callback when agent marks for review
+            broadcast_fn: Function to broadcast messages
 
         Returns:
             List of WikiTool instances
@@ -172,14 +186,8 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
             if wiki is None:
                 return []
 
-        # Use mixin chain to get tools (ReadToolsMixin + EditToolsMixin + ReviewMixin)
-        # Pass callbacks through kwargs for ReviewMixin
-        return super().get_tools(
-            wiki,
-            help_callback=help_callback,
-            review_callback=review_callback,
-            **kwargs
-        )
+        # Use mixin chain to get tools
+        return super().get_tools(wiki, broadcast_fn=broadcast_fn, **kwargs)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -207,29 +215,80 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
         return self.create_branch(wiki)
 
     def is_working(self) -> bool:
-        """Check if thread is actively working."""
-        return self.status == ThreadStatus.WORKING
+        """Check if thread is actively working (not finished)."""
+        return self.status not in TERMINAL_STATUSES
 
     def is_waiting_for_input(self) -> bool:
         """Check if thread is waiting for user input."""
-        return self.status in (ThreadStatus.NEED_HELP, ThreadStatus.REVIEW)
+        return self.status in ("need_help", "review")
 
     def is_finished(self) -> bool:
         """Check if thread lifecycle is complete."""
-        return self.status in (ThreadStatus.ACCEPTED, ThreadStatus.REJECTED)
+        return self.status in TERMINAL_STATUSES
+
+    def rename_with_branch(self, name: str, wiki: 'GitWiki') -> Optional[str]:
+        """
+        Rename thread and its git branch.
+
+        Args:
+            name: New thread name (will be sanitized for branch name)
+            wiki: Main GitWiki instance
+
+        Returns:
+            Error message if failed, None on success
+        """
+        from threads.git_operations import rename_branch
+
+        # Generate new branch name (keeping the same hash for uniqueness)
+        old_branch = self.branch
+        if not old_branch:
+            # No branch, just rename the thread
+            self.rename(name)
+            return None
+
+        # Extract the hash from old branch name (last part after -)
+        # e.g., "thread/old-name-abc123" -> "abc123"
+        old_parts = old_branch.split('-')
+        hash_suffix = old_parts[-1] if old_parts else self.id[:6]
+
+        # Generate new branch name
+        new_branch = self._generate_branch_name(name, hash_suffix)
+
+        if new_branch == old_branch:
+            # Same name, just update thread name
+            self.rename(name)
+            return None
+
+        # Rename the git branch
+        result = rename_branch(wiki, old_branch, new_branch, self.worktree_path)
+
+        if not result["success"]:
+            return f"Failed to rename branch: {result['error']}"
+
+        # Update thread state
+        self.branch = new_branch
+        if result["new_worktree_path"]:
+            self.worktree_path = result["new_worktree_path"]
+
+        # Update name in database (branch is updated too)
+        self.name = name
+        db_update_thread(
+            self.id,
+            name=name,
+            branch=new_branch,
+            worktree_path=self.worktree_path
+        )
+
+        return None
 
     def can_accept(self) -> bool:
-        """Check if thread can be accepted."""
-        return self.status == ThreadStatus.REVIEW
-
-    def can_reject(self) -> bool:
-        """Check if thread can be rejected."""
-        return self.status in (ThreadStatus.REVIEW, ThreadStatus.WORKING, ThreadStatus.NEED_HELP)
+        """Check if thread can be accepted (any non-terminal state)."""
+        return self.status not in TERMINAL_STATUSES
 
     # ─────────────────────────────────────────────────────────────────────────
     # Thread Behavior Interface (for manager uniformity)
     # ─────────────────────────────────────────────────────────────────────────
 
     def get_initial_message(self) -> Optional[str]:
-        """Initial message to start worker execution with goal."""
-        return f"Your goal: {self.goal}\n\nBegin working on this task."
+        """Threads always wait for user's first message."""
+        return None

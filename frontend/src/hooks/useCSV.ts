@@ -255,7 +255,7 @@ export function useCSV<T extends DataRow = DataRow>(
   /** Optional: force a specific refresh counter (for ephemeral mode sync) */
   refreshTrigger?: number
 ): UseCSVResult<T> {
-  const { userId } = useAuth();
+  const { userId, user } = useAuth();
   const { viewingBranch, ephemeral } = useBranch();
 
   // If viewing a branch in ephemeral mode, use the ephemeral hook
@@ -303,9 +303,9 @@ export function useCSV<T extends DataRow = DataRow>(
       // Set up awareness
       provider.awareness.setLocalStateField('user', {
         id: userId,
-        name: getDisplayName(userId),
+        name: user?.name || getDisplayName(userId),
         color: stringToColor(userId),
-        initials: getInitials(userId),
+        initials: getInitials(userId, user?.name),
       });
 
       // Get Y.Array for data

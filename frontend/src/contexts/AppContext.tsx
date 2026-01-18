@@ -305,7 +305,6 @@ interface AppContextType {
     // Thread actions
     selectThread: (threadId: string | null) => void;
     acceptThread: (threadId: string) => void;
-    rejectThread: (threadId: string) => void;
     addThreadMessage: (threadId: string, role: ThreadMessage['role'], content: string) => void;
     // Tree actions
     loadPageTree: () => Promise<void>;
@@ -329,7 +328,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { userId, isLoading: isAuthLoading } = useAuth();
+  const { userId, user, isLoading: isAuthLoading } = useAuth();
   const [state, dispatch] = useReducer(appReducer, initialState);
   const wsService = useRef<WebSocketService | null>(null);
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
@@ -341,6 +340,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const threadsRef = useRef<Thread[]>([]);
   const currentBranchRef = useRef<string>('main');
   const selectedBranchForDiffRef = useRef<string | null>(null);
+  const assistantThreadIdRef = useRef<string | null>(null);
+  const selectedThreadIdRef = useRef<string | null>(null);
 
   // Guards to prevent concurrent loads
   const isLoadingPagesRef = useRef(false);
@@ -371,6 +372,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     selectedBranchForDiffRef.current = state.selectedBranchForDiff;
   }, [state.selectedBranchForDiff]);
 
+  useEffect(() => {
+    assistantThreadIdRef.current = state.assistantThreadId;
+  }, [state.assistantThreadId]);
+
+  useEffect(() => {
+    selectedThreadIdRef.current = state.selectedThreadId;
+  }, [state.selectedThreadId]);
+
   // Initialize WebSocket service - wait for auth to complete
   useEffect(() => {
     // Don't connect until we have a userId
@@ -381,6 +390,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     wsService.current = createWebSocketService(userId);
 
     const statusUnsubscribe = wsService.current.onStatusChange((status) => {
+      console.log('🔄 Connection status changed:', status);
       dispatch({ type: 'SET_CONNECTION_STATUS', payload: status });
     });
 
@@ -394,9 +404,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Handle thread-specific messages
       if (message.type === 'thread_created') {
+        console.log('📢 thread_created:', message.thread);
         dispatch({ type: 'ADD_THREAD', payload: message.thread });
         if (message.thread?.type === 'worker') {
-          toast.info(`Agent started: ${message.thread.name}`, { description: message.thread.goal });
+          toast.info(`Thread started: ${message.thread.name}`, { description: message.thread.goal });
         }
       } else if (message.type === 'thread_status' && message.thread_id && message.status) {
         dispatch({
@@ -412,19 +423,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } else if (message.status === 'review') {
           toast.success(`Agent ready for review`, { description: message.message || 'Changes are ready to be reviewed' });
         }
+      } else if (message.type === 'thread_updated' && message.thread_id) {
+        // Handle thread updates (status, name, branch, participants, etc.)
+        const updates: Partial<Thread> = {};
+        if (message.status) updates.status = message.status as ThreadStatus;
+        if (message.name) updates.name = message.name;
+        if (message.branch) updates.branch = message.branch as string;
+        if (message.participants) updates.participants = message.participants as string[];
+        if (Object.keys(updates).length > 0) {
+          dispatch({
+            type: 'UPDATE_THREAD',
+            payload: { id: message.thread_id, updates }
+          });
+          // If this is the selected thread and branch changed, update the diff view
+          if (message.branch && message.thread_id === selectedThreadIdRef.current) {
+            dispatch({ type: 'SET_CURRENT_BRANCH', payload: message.branch as string });
+            dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: message.branch as string });
+          }
+        }
       } else if (message.type === 'thread_deleted' && message.thread_id) {
         dispatch({ type: 'REMOVE_THREAD', payload: message.thread_id });
       } else if (message.type === 'thread_list' && message.threads) {
         dispatch({ type: 'SET_THREADS', payload: message.threads as Thread[] });
+      } else if (message.type === 'notification') {
+        // Show toast notification (e.g., when mentioned)
+        const title = (message as { title?: string }).title;
+        const description = (message as { message?: string }).message;
+        toast.info(title || 'Notification', { description });
       } else if (message.type === 'collab_room_change') {
         // When collab room changes, request fresh thread list to update merge_blocked status
         wsService.current?.send({ type: 'get_thread_list' });
       } else if (message.type === 'thread_selected') {
+        console.log('📢 thread_selected:', message.thread_id, message.thread_type, message.thread);
         // Set assistant thread ID if this is the assistant thread
         if (message.thread_type === 'assistant' && message.thread_id) {
           dispatch({ type: 'SET_ASSISTANT_THREAD_ID', payload: message.thread_id });
         }
-        // Always set selected thread to the received thread_id
+        // Use actual thread_id for all cases (including assistant)
         dispatch({ type: 'SELECT_THREAD', payload: message.thread_id ?? null });
         // Update thread data if provided (includes fresh merge_blocked status)
         if (message.thread && message.thread_id) {
@@ -446,6 +481,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           });
         }
+        // Update center panel for worker threads (e.g., after spawning)
+        if (message.thread_type === 'worker' && message.thread) {
+          const thread = message.thread as Thread;
+          if (thread.branch) {
+            dispatch({ type: 'SET_CURRENT_BRANCH', payload: thread.branch });
+            dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: thread.branch });
+            dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'branch-diff' });
+          }
+        } else if (message.thread_type === 'assistant') {
+          // Assistant selected - back to page view
+          dispatch({ type: 'SET_CURRENT_BRANCH', payload: 'main' });
+          dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'page' });
+          dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: null });
+        }
       } else if (message.type === 'thread_message' && message.thread_id && message.role && message.content !== undefined) {
         // Add message to thread's conversation
         const threadId = message.thread_id;
@@ -458,7 +507,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           timestamp: new Date().toISOString(),
           tool_name: message.tool_name,
           tool_args: message.tool_args,
-          user_id: message.user_id  // Who sent this message (for collaborative threads)
+          user_id: message.user_id,  // Who sent this message (for collaborative threads)
+          user_name: message.user_name  // Display name for proper initials
         };
         dispatch({
           type: 'ADD_THREAD_MESSAGE',
@@ -1006,7 +1056,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'branch-diff' });
         }
       } else {
-        // Deselecting thread - back to page view
+        // Switching to assistant - update immediately (don't wait for backend)
+        // Use assistantThreadId (or null if not set yet)
+        dispatch({ type: 'SELECT_THREAD', payload: assistantThreadIdRef.current });
         dispatch({ type: 'SET_CURRENT_BRANCH', payload: 'main' });
         dispatch({ type: 'SET_CENTER_PANEL_MODE', payload: 'page' });
         dispatch({ type: 'SET_SELECTED_BRANCH_FOR_DIFF', payload: null });
@@ -1018,18 +1070,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         thread_id: threadId
       });
     },
-    rejectThread: (threadId: string) => {
-      wsService.current?.send({
-        type: 'reject_thread',
-        thread_id: threadId
-      });
-    },
     addThreadMessage: (threadId: string, role: ThreadMessage['role'], content: string) => {
       const message: ThreadMessage = {
         id: `user_${Date.now()}`,
         role,
         content,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        user_id: role === 'user' ? userId || undefined : undefined,
+        user_name: role === 'user' ? user?.name || undefined : undefined
       };
       dispatch({
         type: 'ADD_THREAD_MESSAGE',

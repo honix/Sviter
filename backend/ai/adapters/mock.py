@@ -70,7 +70,7 @@ class MockAdapter(LLMAdapter):
         self.system_prompt = system_prompt
         self.model = model
         # Determine thread type from system prompt
-        self._is_worker = "Worker Thread" in system_prompt or "working on" in system_prompt.lower()
+        self._is_worker = "wiki editing thread" in system_prompt.lower() or "working on branch" in system_prompt.lower()
         # Reset turn counter for this instance
         self._turn_key = f"mock_{self._id}"
         MockAdapter._turn_counters[self._turn_key] = 0
@@ -303,30 +303,51 @@ class MockAdapter(LLMAdapter):
                         "iteration": iteration
                     })
 
-            # Step 3: Mark for review
-            review_content = "I've made the changes. Marking for review now."
+            # Step 3: Rename thread
+            name_content = "Updating thread name to reflect the work done."
             if on_message:
-                await on_message("assistant", review_content)
+                await on_message("assistant", name_content)
 
-            review_tool = next((t for t in tools if t.name == "mark_for_review"), None)
-            if review_tool:
+            name_tool = next((t for t in tools if t.name == "set_thread_name"), None)
+            if name_tool:
                 iteration += 1
-                review_args = {
-                    "summary": "Added a test section to TestPage.md to verify E2E test flow"
-                }
-                print(f"🤖 MockAdapter: Calling mark_for_review")
-                review_result = review_tool.function(review_args)
-                print(f"🤖 MockAdapter: mark_for_review result: {review_result[:100] if review_result else 'None'}")
+                name_args = {"name": "docs-update"}
+                print(f"🤖 MockAdapter: Calling set_thread_name with {name_args}")
+                name_result = name_tool.function(name_args)
+                print(f"🤖 MockAdapter: set_thread_name result: {name_result[:100] if name_result else 'None'}")
 
                 if on_tool_call:
                     await on_tool_call({
-                        "tool_name": "mark_for_review",
-                        "arguments": review_args,
-                        "result": review_result,
+                        "tool_name": "set_thread_name",
+                        "arguments": name_args,
+                        "result": name_result,
                         "iteration": iteration
                     })
             else:
-                print(f"🤖 MockAdapter: ERROR - mark_for_review tool not found!")
+                print(f"🤖 MockAdapter: WARNING - set_thread_name tool not found")
+
+            # Step 4: Set status to done
+            review_content = "I've made the changes. Ready for review."
+            if on_message:
+                await on_message("assistant", review_content)
+
+            status_tool = next((t for t in tools if t.name == "set_thread_status"), None)
+            if status_tool:
+                iteration += 1
+                status_args = {"status": "Done - ready to merge"}
+                print(f"🤖 MockAdapter: Calling set_thread_status")
+                status_result = status_tool.function(status_args)
+                print(f"🤖 MockAdapter: set_thread_status result: {status_result[:100] if status_result else 'None'}")
+
+                if on_tool_call:
+                    await on_tool_call({
+                        "tool_name": "set_thread_status",
+                        "arguments": status_args,
+                        "result": status_result,
+                        "iteration": iteration
+                    })
+            else:
+                print(f"🤖 MockAdapter: WARNING - set_thread_status tool not found")
 
             final_response = "I've completed the edit and marked it for your review."
             return ConversationResult(

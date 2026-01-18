@@ -9,6 +9,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useSelection } from '../../contexts/SelectionContext';
 import { SelectionBadge } from './SelectionBadge';
 import { MessageContextBadges } from './MessageContextBadges';
+import { MentionDropdown } from './MentionDropdown';
+import { useMentions } from '../../hooks/useMentions';
 import { parseMessageWithContext } from '../../utils/parseSelectionContext';
 import { stringToColor, getInitials } from '../../utils/colors';
 import {
@@ -30,7 +32,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Loader } from '@/components/ui/loader';
-import { ArrowUp, GitBranch, Loader2, AlertCircle, CheckCircle, Check, XCircle } from 'lucide-react';
+import { ArrowUp, AlertCircle, Check, Waypoints } from 'lucide-react';
 import type { Thread } from '../../types/thread';
 import type { MarkdownLinkHandler } from '@/components/ui/markdown';
 import { ThreadChangesView } from '../threads/ThreadChangesView';
@@ -46,8 +48,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
   const { messages, sendMessage, clearMessages, isGenerating } = useChat(threadId);
   const [inputValue, setInputValue] = useState('');
   const [expandedSystemPrompts, setExpandedSystemPrompts] = useState<Set<string>>(new Set());
-  const { userId: currentUserId } = useAuth();
+  const { userId: currentUserId, user: currentUser } = useAuth();
   const { state: selectionState, clearAllContexts } = useSelection();
+
+  // Handle @mention selection - insert @userId into input
+  const handleMentionSelect = useCallback((userId: string) => {
+    // Find the last @ and replace everything from there with @userId
+    const lastAtIndex = inputValue.lastIndexOf('@');
+    if (lastAtIndex !== -1) {
+      const beforeAt = inputValue.slice(0, lastAtIndex);
+      setInputValue(beforeAt + '@' + userId + ' ');
+    }
+  }, [inputValue]);
+
+  const mentions = useMentions({
+    inputValue,
+    onMentionSelect: handleMentionSelect
+  });
 
   // dnd-kit droppable for dragging items into chat
   const { setNodeRef: setDroppableRef, isOver: isDndOver } = useDroppable({
@@ -91,8 +108,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
 
   const isConnected = connectionStatus === 'connected';
   const isAssistantMode = threadId === assistantThreadId;
-  const isReviewMode = thread?.status === 'review';
-  const isWorking = thread?.status === 'working';
+  // Show accept for any worker thread that isn't already accepted/archived
+  const canAccept = thread && thread.type === 'worker' &&
+    thread.status !== 'accepted' && thread.status !== 'archived';
 
   // Messages come directly from useChat hook (already filtered by threadId)
   const displayMessages = messages;
@@ -131,37 +149,31 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
     actions.acceptThread(threadId);
   };
 
-  const handleRejectChanges = () => {
-    if (!threadId) return;
-    actions.rejectThread(threadId);
-  };
+  // Spawn a new collaborative thread with current message
+  const handleSpawn = () => {
+    console.log('🚀 handleSpawn called, inputValue:', inputValue, 'isConnected:', isConnected);
+    if (!inputValue.trim() || !isConnected) return;
 
-  // Status icon for thread header
-  const StatusIcon = () => {
-    if (!thread) return null;
-    switch (thread.status) {
-      case 'working':
-        return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
-      case 'need_help':
-        return <AlertCircle className="h-4 w-4 text-yellow-500" />;
-      case 'review':
-        return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case 'resolving':
-        return <Loader2 className="h-4 w-4 animate-spin text-orange-500" />;
-      case 'accepted':
-        return <Check className="h-4 w-4 text-green-600" />;
-      case 'rejected':
-        return <XCircle className="h-4 w-4 text-red-500" />;
+    let messageToSend = inputValue.trim();
+
+    // Append selection contexts in XML format
+    if (selectionState.addedContexts.length > 0) {
+      const selections = selectionState.addedContexts.map(({ text, filePath }, index) => {
+        const source = filePath ? ` source="${filePath}"` : '';
+        return `<contextItem id="#${index + 1}"${source}>\n${text}\n</contextItem>`;
+      }).join('\n');
+      const contextXml = `\n\n<userProvidedContext>\n${selections}\n</userProvidedContext>`;
+      messageToSend = messageToSend + contextXml;
+      clearAllContexts();
     }
-  };
 
-  const statusLabel: Record<string, string> = {
-    'working': 'Working...',
-    'need_help': 'Needs your help',
-    'review': 'Ready for review',
-    'resolving': 'Resolving conflicts...',
-    'accepted': 'Accepted',
-    'rejected': 'Rejected'
+    // Spawn collaborative thread via WebSocket
+    console.log('🚀 Sending spawn_collaborative_thread:', messageToSend.slice(0, 50));
+    websocket.sendMessage({
+      type: 'spawn_collaborative_thread',
+      goal: messageToSend
+    });
+    setInputValue('');
   };
 
   // Link handlers for markdown links
@@ -198,90 +210,49 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
 
   return (
     <div className="h-full bg-background flex flex-col">
-      {/* Thread Header - only shown when viewing a thread */}
-      {thread && (
-        <div className="px-4 py-3 border-b border-border flex-shrink-0 bg-muted/30">
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <StatusIcon />
-                <span className="font-medium">{thread.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  ({statusLabel[thread.status] || thread.status})
-                </span>
-              </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <GitBranch className="h-3 w-3" />
-                <span className="font-mono">{thread.branch}</span>
-              </div>
-            </div>
-
-            {/* Accept/Reject buttons - only in review mode */}
-            {isReviewMode && (
-              <div className="flex items-center gap-2">
+      {/* Thread Changes Section - only shown when viewing a thread with changes */}
+      {thread && canAccept && thread?.branch && (
+        <div className="px-4 py-2 border-b border-border flex-shrink-0 bg-muted/30">
+          <ThreadChangesView
+            branch={thread.branch}
+            baseBranch="main"
+            compact
+            renderActions={() => (
+              thread?.merge_blocked ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button
+                        size="sm"
+                        disabled
+                        className="bg-muted text-muted-foreground cursor-not-allowed"
+                      >
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        Blocked
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p className="font-medium">Pages being edited:</p>
+                    <ul className="text-xs mt-1">
+                      {Object.entries(thread.blocked_pages || {}).map(([page, editors]) => (
+                        <li key={page}>• {page} ({(editors as string[]).length} editor{(editors as string[]).length > 1 ? 's' : ''})</li>
+                      ))}
+                    </ul>
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
                 <Button
-                  variant="outline"
                   size="sm"
-                  onClick={handleRejectChanges}
-                  className="text-destructive hover:text-destructive"
+                  onClick={handleAcceptChanges}
+                  className="bg-green-600 hover:bg-green-700"
                 >
-                  Reject
+                  <Check className="h-4 w-4 mr-1" />
+                  Accept and merge to main
                 </Button>
-                {thread?.merge_blocked ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span>
-                        <Button
-                          size="sm"
-                          disabled
-                          className="bg-muted text-muted-foreground cursor-not-allowed"
-                        >
-                          <AlertCircle className="h-4 w-4 mr-1" />
-                          Accept Blocked
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      <p className="font-medium">Pages being edited:</p>
-                      <ul className="text-xs mt-1">
-                        {Object.entries(thread.blocked_pages || {}).map(([page, editors]) => (
-                          <li key={page}>• {page} ({(editors as string[]).length} editor{(editors as string[]).length > 1 ? 's' : ''})</li>
-                        ))}
-                      </ul>
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Button
-                    size="sm"
-                    onClick={handleAcceptChanges}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    <Check className="h-4 w-4 mr-1" />
-                    Accept Changes
-                  </Button>
-                )}
-              </div>
+              )
             )}
-          </div>
-
-          {/* Review summary if available */}
-          {isReviewMode && thread.review_summary && (
-            <div className="mt-2 p-2 rounded bg-muted text-sm">
-              <span className="text-muted-foreground">Summary: </span>
-              {thread.review_summary}
-            </div>
-          )}
-
-          {/* Changes view - show in review mode */}
-          {isReviewMode && thread?.branch && (
-            <div className="mt-3 border-t border-border pt-3">
-              <ThreadChangesView
-                branch={thread.branch}
-                baseBranch="main"
-                compact
-              />
-            </div>
-          )}
+          />
         </div>
       )}
 
@@ -291,10 +262,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
           {displayMessages.length === 0 && (
             <div className="text-center text-muted-foreground text-sm py-8">
               {isAssistantMode
-                ? 'Ask a question about your wiki...'
-                : isWorking
-                  ? 'Thread is working on the task...'
-                  : 'Start a conversation with this thread...'}
+                ? 'Chat with your assistant - ask questions about the wiki...'
+                : 'New thread - ask for edits, tag users with @username...'}
             </div>
           )}
           {displayMessages.map((message) => (
@@ -396,9 +365,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
                 : '';
 
               // Avatar: pastel color + initials for users, AI avatar for assistant
-              const avatarFallback = isAI ? 'AI' : getInitials(effectiveUserId);
+              // Use current user's name for current user, otherwise use message's user_name
+              const userName = isCurrentUser ? currentUser?.name : message.user_name;
+              const avatarFallback = isAI ? 'AI' : getInitials(effectiveUserId, userName);
               const avatarStyle = isUser && effectiveUserId
-                ? { backgroundColor: stringToColor(effectiveUserId) }
+                ? { backgroundColor: stringToColor(effectiveUserId), color: 'white' }
                 : undefined;
 
               return (() => {
@@ -450,6 +421,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
       >
         <div className="relative">
           <SelectionBadge />
+          {/* @mention dropdown - positioned above input */}
+          <MentionDropdown
+            users={mentions.filteredUsers}
+            isOpen={mentions.isOpen}
+            selectedIndex={mentions.selectedIndex}
+            onSelect={mentions.selectMention}
+            onHover={mentions.setSelectedIndex}
+          />
           <PromptInput
             value={inputValue}
             onValueChange={setInputValue}
@@ -462,23 +441,44 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
                   ? "Connecting..."
                   : isAssistantMode
                     ? "Type /new to start fresh • Ask about your wiki..."
-                    : isReviewMode
+                    : canAccept
                       ? "Request changes or ask questions..."
                       : "Send a message to this thread..."
               }
               disabled={!isConnected}
+              onKeyDown={(e) => {
+                // Let mention hook handle keyboard navigation first
+                if (mentions.handleKeyDown(e)) {
+                  return;
+                }
+              }}
             />
             <PromptInputActions>
-              <PromptInputAction tooltip="Send message">
-                <Button
-                  onClick={handleSend}
-                  disabled={!isConnected || !inputValue.trim()}
-                  size="icon"
-                  className="rounded-full"
-                >
-                  <ArrowUp className="h-4 w-4" />
-                </Button>
-              </PromptInputAction>
+              {/* Pill-shaped button: Send (2/3) + Spawn (1/3) */}
+              <div className="flex rounded-full overflow-hidden">
+                <PromptInputAction tooltip="Send message">
+                  <Button
+                    onClick={handleSend}
+                    disabled={!isConnected || !inputValue.trim()}
+                    size="icon"
+                    data-testid="send-message-button"
+                    className="rounded-l-full rounded-r-none"
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                  </Button>
+                </PromptInputAction>
+                <PromptInputAction tooltip="Start thread">
+                  <Button
+                    onClick={handleSpawn}
+                    disabled={!isConnected || !inputValue.trim()}
+                    size="icon"
+                    data-testid="start-thread-button"
+                    className="rounded-r-full rounded-l-none bg-pink-500 hover:bg-pink-600 border-l border-pink-400"
+                  >
+                    <Waypoints className="h-4 w-4 text-white" />
+                  </Button>
+                </PromptInputAction>
+              </div>
             </PromptInputActions>
           </PromptInput>
         </div>

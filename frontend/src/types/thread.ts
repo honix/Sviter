@@ -7,15 +7,11 @@
 
 export type ThreadType = 'assistant' | 'worker';
 
-export type ThreadStatus =
-  | 'active'      // Currently usable (assistant)
-  | 'archived'    // User archived
-  | 'working'     // Agent processing (worker)
-  | 'need_help'   // Waiting for user input (worker)
-  | 'review'      // Ready for accept/reject (worker)
-  | 'resolving'   // Resolving merge conflicts (worker)
-  | 'accepted'    // Changes merged (worker)
-  | 'rejected';   // Changes rejected (worker)
+// Status is now a free-form string - agent can set any status
+export type ThreadStatus = string;
+
+// Terminal statuses that indicate a thread is finished
+export const TERMINAL_STATUSES = ['accepted', 'archived'] as const;
 
 export interface Thread {
   id: string;
@@ -24,7 +20,7 @@ export interface Thread {
   owner_id: string;
   status: ThreadStatus;
   goal?: string;           // Required for worker, optional for assistant
-  branch?: string;         // Only workers have branches
+  branch?: string;         // Only workers have branches (hidden in UI for collaborative)
   worktree_path?: string;  // Only workers have worktrees
   is_generating?: boolean;
   created_at: string;
@@ -35,6 +31,11 @@ export interface Thread {
   thread_type?: string;    // Legacy compatibility field from backend
   merge_blocked?: boolean; // True if merge is blocked by active editors
   blocked_pages?: Record<string, string[]>; // Page path -> list of client IDs editing
+  participants?: string[]; // All participants (owner + shared users)
+  attention_reasons?: string[]; // Why this thread needs user's attention
+  needs_attention?: boolean; // Quick check for inbox filtering
+  collaborative?: boolean; // True for user-initiated collaborative threads
+  is_pinned?: boolean; // Is thread pinned for current user
 }
 
 export interface ThreadMessage {
@@ -47,6 +48,7 @@ export interface ThreadMessage {
   tool_args?: Record<string, unknown>;
   tool_result?: string;
   user_id?: string;  // Who sent this message (for collaborative threads)
+  user_name?: string;  // Display name for the user (for proper initials)
 }
 
 export interface ThreadDiffStats {
@@ -87,7 +89,7 @@ export interface ThreadMessageMessage {
 export interface ThreadDeletedMessage {
   type: 'thread_deleted';
   thread_id: string;
-  reason: 'accepted' | 'rejected';
+  reason: 'accepted' | 'archived';
 }
 
 export interface ThreadListMessage {
