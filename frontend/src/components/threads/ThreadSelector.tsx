@@ -141,6 +141,11 @@ export function ThreadSelector({
       name: 'new-thread',
       goal: 'This is a new thread. Please describe what you want to work on. The agent will rename this thread once the goal is clear.'
     });
+
+    // Timeout fallback - clear loading if thread_selected never arrives
+    setTimeout(() => {
+      actions.setCreatingThread(false);
+    }, 15000);
   };
 
   // Start fresh handler - reset assistant chat

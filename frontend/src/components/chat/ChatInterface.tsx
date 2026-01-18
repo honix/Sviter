@@ -177,6 +177,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
       goal: messageToSend
     });
     setInputValue('');
+
+    // Timeout fallback - clear loading if thread_selected never arrives
+    setTimeout(() => {
+      // Check current state via a fresh read (closure would capture stale value)
+      // The action will be a no-op if already false
+      actions.setCreatingThread(false);
+    }, 15000);
   };
 
   // Link handlers for markdown links
