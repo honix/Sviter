@@ -15,7 +15,7 @@ from typing import List, Dict, Any, Optional, Callable, TYPE_CHECKING
 from datetime import datetime
 
 from threads.base import Thread, ThreadType, ThreadStatus, ThreadMessage
-from threads.mixins import ReadToolsMixin, SpawnMixin
+from threads.mixins import ReadToolsMixin, SpawnMixin, ThreadAgentToolsMixin
 from ai.prompts import ASSISTANT_PROMPT
 from ai.tools import WikiTool
 from db import (
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class AssistantThread(ReadToolsMixin, SpawnMixin, Thread):
+class AssistantThread(ReadToolsMixin, SpawnMixin, ThreadAgentToolsMixin, Thread):
     """
     Read-only assistant thread.
 
@@ -120,29 +120,29 @@ class AssistantThread(ReadToolsMixin, SpawnMixin, Thread):
         return ASSISTANT_PROMPT
 
     def get_tools(self, wiki: 'GitWiki', spawn_callback: Callable = None,
-                  list_callback: Callable = None, **kwargs) -> List[WikiTool]:
+                  list_callback: Callable = None, list_threads_callback: Callable = None,
+                  **kwargs) -> List[WikiTool]:
         """
-        Get tools for assistant: read + spawn.
+        Get tools for assistant: read + spawn + thread agent tools.
 
         Args:
             wiki: GitWiki instance (main wiki on main branch)
             spawn_callback: Callback to spawn worker threads
             list_callback: Callback to list threads
+            list_threads_callback: Callback to list threads for thread agent tools
 
         Returns:
             List of WikiTool instances
         """
-        tools = []
-
-        # Add read tools via mixin
-        tools.extend(ReadToolsMixin.get_tools(self, wiki))
-
-        # Add spawn tools via mixin (if callbacks provided)
-        if spawn_callback and list_callback:
-            from ai.tools import ToolBuilder
-            tools.extend(ToolBuilder.main_tools(spawn_callback, list_callback))
-
-        return tools
+        # Use mixin chain to get all tools
+        # Order matters: ThreadAgentToolsMixin -> SpawnMixin -> ReadToolsMixin -> Thread
+        return super().get_tools(
+            wiki,
+            spawn_callback=spawn_callback,
+            list_callback=list_callback,
+            list_threads_callback=list_threads_callback or list_callback,
+            **kwargs
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -176,5 +176,6 @@ class AssistantThread(ReadToolsMixin, SpawnMixin, Thread):
         """
         return {
             "spawn_callback": spawn_callback,
-            "list_callback": list_callback
+            "list_callback": list_callback,
+            "list_threads_callback": list_callback  # Reuse list_callback for thread agent tools
         }

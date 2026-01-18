@@ -9,7 +9,7 @@ Claude Code-style tools:
 - Git: git_history (branch commit history), git_diff (branch comparison)
 - Write: write_page, edit_page (exact match), insert_at_line, delete_page, move (mv-style)
 """
-from typing import Dict, List, Any, Callable, TYPE_CHECKING
+from typing import Dict, List, Any, Callable, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 from storage import GitWiki, PageNotFoundException
 import json
@@ -607,6 +607,296 @@ def _list_threads(
         return f"Error listing threads: {e}"
 
 
+def _list_threads_filtered(
+    list_callback: Callable[[], List[Dict[str, Any]]],
+    args: Dict[str, Any]
+) -> str:
+    """
+    List threads with optional filters.
+
+    Supports filtering by:
+    - user_id: Show only threads where user is owner or participant
+    - only_pinned: Show only pinned threads for the user
+    """
+    from db import is_thread_pinned
+
+    try:
+        user_filter = args.get("user_id")
+        only_pinned = args.get("only_pinned", False)
+
+        # Handle string booleans from LLM
+        if isinstance(only_pinned, str):
+            only_pinned = only_pinned.lower() in ('true', '1', 'yes')
+
+        threads = list_callback()
+
+        if not threads:
+            return "No threads found."
+
+        # Apply filters
+        filtered = []
+        for t in threads:
+            # User filter: check if user is owner or participant
+            if user_filter:
+                participants = t.get('participants', [])
+                owner_id = t.get('owner_id')
+                if user_filter != owner_id and user_filter not in participants:
+                    continue
+
+            # Pinned filter: check if thread is pinned for the user
+            if only_pinned:
+                # For pinned filter, we need a user_id
+                check_user = user_filter if user_filter else None
+                if not check_user or not is_thread_pinned(t['id'], check_user):
+                    continue
+
+            filtered.append(t)
+
+        if not filtered:
+            filters_desc = []
+            if user_filter:
+                filters_desc.append(f"user={user_filter}")
+            if only_pinned:
+                filters_desc.append("pinned only")
+            return f"No threads found matching filters: {', '.join(filters_desc)}"
+
+        # Format output
+        lines = [f"Found {len(filtered)} thread{'s' if len(filtered) != 1 else ''}"]
+        if user_filter:
+            lines[0] += f" for user @{user_filter}"
+        if only_pinned:
+            lines[0] += " (pinned)"
+        lines.append("")
+
+        for t in filtered:
+            # Branch info (if worker thread)
+            branch = t.get('branch', '')
+            branch_suffix = f" (branch: {branch})" if branch else ""
+
+            # Status emoji
+            status_emoji = {
+                "working": "🔄",
+                "need_help": "⚠️",
+                "review": "📋",
+                "accepted": "✅",
+                "rejected": "❌",
+                "active": "💬"
+            }.get(t.get('status', ''), "❓")
+
+            # Thread link with name and status
+            lines.append(f"{status_emoji} [{t['name']}](thread:{t['id']}){branch_suffix}")
+            lines.append(f"   Status: {t.get('status', 'unknown')}")
+
+            # Goal (if present)
+            if t.get('goal'):
+                goal_preview = t['goal'][:60] + "..." if len(t['goal']) > 60 else t['goal']
+                lines.append(f"   Goal: {goal_preview}")
+
+            # Participants
+            participants = t.get('participants', [])
+            if participants:
+                participant_list = ', '.join([f"@{p}" for p in participants[:5]])
+                if len(participants) > 5:
+                    participant_list += f" (+{len(participants) - 5} more)"
+                lines.append(f"   Participants: {participant_list}")
+
+            lines.append("")  # Empty line between threads
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Error listing threads: {e}"
+
+
+def _read_thread(
+    get_thread_callback: Callable[[str], Optional[Dict[str, Any]]],
+    get_messages_callback: Callable[[str, int, int], List[Dict[str, Any]]],
+    args: Dict[str, Any]
+) -> str:
+    """
+    Read thread messages with optional chunking.
+
+    Similar to read_page but for thread conversation history.
+    Messages are numbered starting from 1.
+    """
+    thread_id = args.get("thread_id", "")
+    offset = args.get("offset", 1)  # 1-indexed
+    limit = args.get("limit", 50)
+
+    if isinstance(offset, str):
+        offset = int(offset)
+    if isinstance(limit, str):
+        limit = int(limit)
+
+    if not thread_id:
+        return "Error: thread_id is required"
+
+    try:
+        # Get thread info
+        thread = get_thread_callback(thread_id)
+        if not thread:
+            return f"Error: Thread '{thread_id}' not found"
+
+        # Get total message count first (fetch all to count, then slice)
+        # This is inefficient but matches the read_page pattern
+        all_messages = get_messages_callback(thread_id, 10000, 0)
+        total_messages = len(all_messages)
+
+        if total_messages == 0:
+            return f"Thread '{thread['name']}' has no messages yet."
+
+        # Apply offset/limit (convert to 0-indexed internally)
+        start_idx = max(0, offset - 1)
+        end_idx = min(total_messages, start_idx + limit)
+        messages = all_messages[start_idx:end_idx]
+
+        # Build header
+        branch_info = f" (branch: {thread.get('branch', 'N/A')})" if thread.get('branch') else ""
+        header = [f"Thread: {thread['name']}{branch_info}"]
+        header.append(f"Status: {thread.get('status', 'unknown')}")
+        header.append(f"Total messages: {total_messages}")
+        if offset > 1 or end_idx < total_messages:
+            header.append(f"Showing messages {offset}-{start_idx + len(messages)}")
+        header.append("---")
+
+        # Format messages
+        formatted_messages = []
+        for i, msg in enumerate(messages, start=offset):
+            role = msg['role']
+            content = msg['content']
+            user_id = msg.get('user_id', '')
+
+            # Message header with role and user
+            if role == "user":
+                msg_header = f"[{i}] User"
+                if user_id:
+                    msg_header += f" (@{user_id})"
+            elif role == "assistant":
+                msg_header = f"[{i}] Assistant"
+            elif role == "system":
+                msg_header = f"[{i}] System"
+            elif role == "tool_call":
+                tool_name = msg.get('tool_name', 'unknown')
+                msg_header = f"[{i}] Tool: {tool_name}"
+            else:
+                msg_header = f"[{i}] {role}"
+
+            # Message content (truncate if too long)
+            if len(content) > 1000:
+                content = content[:1000] + "\n... (truncated)"
+
+            formatted_messages.append(f"\n{msg_header}:")
+            formatted_messages.append(content)
+
+        return "\n".join(header + formatted_messages)
+
+    except Exception as e:
+        return f"Error reading thread: {e}"
+
+
+def _search_threads(
+    search_callback: Callable[[str, Optional[str]], List[Dict[str, Any]]],
+    args: Dict[str, Any]
+) -> str:
+    """
+    Search across thread messages.
+
+    Returns threads and messages matching the search pattern.
+    """
+    pattern = args.get("pattern", "")
+    user_filter = args.get("user_id")
+    limit = args.get("limit", 20)
+
+    if isinstance(limit, str):
+        limit = int(limit)
+
+    if not pattern:
+        return "Error: Search pattern is required"
+
+    limit = min(limit, 100)  # Cap at 100 results
+
+    try:
+        results = search_callback(pattern, user_filter)
+
+        if not results:
+            return f"No matches found for pattern '{pattern}'"
+
+        # Group results by thread
+        threads_map = {}
+        for result in results[:limit]:
+            thread_id = result['thread_id']
+            if thread_id not in threads_map:
+                threads_map[thread_id] = {
+                    'thread_name': result['thread_name'],
+                    'thread_branch': result.get('thread_branch'),
+                    'matches': []
+                }
+            threads_map[thread_id]['matches'].append(result)
+
+        # Format output
+        lines = [f"Found {len(results)} match{'es' if len(results) != 1 else ''} in {len(threads_map)} thread{'s' if len(threads_map) != 1 else ''}"]
+        if user_filter:
+            lines[0] += f" for user @{user_filter}"
+        lines.append("")
+
+        for thread_id, thread_data in list(threads_map.items())[:10]:  # Limit to 10 threads
+            branch_info = f" (branch: {thread_data['thread_branch']})" if thread_data['thread_branch'] else ""
+            lines.append(f"Thread: [{thread_data['thread_name']}](thread:{thread_id}){branch_info}")
+
+            for match in thread_data['matches'][:5]:  # Limit to 5 matches per thread
+                role = match['role']
+                content = match['content']
+                msg_num = match.get('message_number', '?')
+                user_id = match.get('user_id', '')
+
+                # Format role
+                role_display = f"{role}"
+                if role == "user" and user_id:
+                    role_display += f" (@{user_id})"
+
+                # Truncate content
+                if len(content) > 150:
+                    content = content[:150] + "..."
+
+                lines.append(f"  [{msg_num}] {role_display}: {content}")
+
+            if len(thread_data['matches']) > 5:
+                lines.append(f"  ... and {len(thread_data['matches']) - 5} more matches")
+            lines.append("")
+
+        if len(threads_map) > 10:
+            lines.append(f"... and {len(threads_map) - 10} more threads with matches")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Error searching threads: {e}"
+
+
+def _thread_diff(wiki: GitWiki, args: Dict[str, Any]) -> str:
+    """
+    Show diff between thread branch and main.
+
+    Convenience tool that wraps git_diff with thread-specific defaults.
+    """
+    thread_branch = args.get("thread_branch", "")
+    stat_only = args.get("stat_only", False)
+
+    # Handle string booleans from LLM
+    if isinstance(stat_only, str):
+        stat_only = stat_only.lower() in ('true', '1', 'yes')
+
+    if not thread_branch:
+        return "Error: thread_branch is required (e.g., 'thread/fix-typos-abc123')"
+
+    # Use git_diff with main as base
+    return _git_diff(wiki, {
+        "base": "main",
+        "target": thread_branch,
+        "stat_only": stat_only
+    })
+
+
 def _get_thread_status(thread) -> str:
     """Get current thread status"""
     return f"Current status: {thread.status}"
@@ -947,6 +1237,104 @@ After moving/renaming, consider updating agents/index.md navigation entries.""",
                     "required": ["path", "new_path"]
                 },
                 function=lambda args, w=wiki: _move(w, args)
+            )
+        ]
+
+    @staticmethod
+    def thread_agent_tools(
+        get_thread_callback: Callable[[str], Optional[Dict[str, Any]]],
+        get_messages_callback: Callable[[str, int, int], List[Dict[str, Any]]],
+        list_threads_callback: Callable[[], List[Dict[str, Any]]],
+        search_callback: Callable[[str, Optional[str]], List[Dict[str, Any]]],
+        wiki: 'GitWiki'
+    ) -> List[WikiTool]:
+        """
+        Thread agent tools: list_threads_filtered, read_thread, search_threads, thread_diff.
+
+        These tools help agents analyze thread history, search conversations, and review changes.
+        """
+        return [
+            WikiTool(
+                name="list_threads",
+                description="""List threads with optional filters. Use this to find relevant threads and see what work has been done.
+
+Use cases:
+- See all threads for a specific user: user_id="john.doe"
+- See pinned threads: only_pinned=true, user_id="alice"
+- Get thread overview with branch names for git operations
+
+Returns thread names, statuses, branches, goals, and participants.""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "user_id": {"type": "string", "description": "Filter threads by user (shows threads where user is owner or participant). Example: 'john.doe'"},
+                        "only_pinned": {"type": "boolean", "description": "If true, only show threads pinned by the user (requires user_id). Default: false"}
+                    },
+                    "required": []
+                },
+                function=lambda args, cb=list_threads_callback: _list_threads_filtered(cb, args)
+            ),
+            WikiTool(
+                name="read_thread",
+                description="""Read thread conversation history with message numbers. Similar to read_page but for thread messages.
+
+Use this to:
+- Review what was discussed in a thread
+- See user questions and AI responses
+- Check tool calls and their results
+- Understand thread progress
+
+Messages are numbered starting from 1. Use offset/limit for large threads.""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "thread_id": {"type": "string", "description": "Thread ID to read (get from list_threads)"},
+                        "offset": {"type": "integer", "description": "Starting message number (1-indexed). Omit to start from beginning."},
+                        "limit": {"type": "integer", "description": "Max messages to return (default: 50)"}
+                    },
+                    "required": ["thread_id"]
+                },
+                function=lambda args, get_t=get_thread_callback, get_m=get_messages_callback: _read_thread(get_t, get_m, args)
+            ),
+            WikiTool(
+                name="search_threads",
+                description="""Search across all thread messages for specific content. Great for finding discussions about topics.
+
+Use cases:
+- Find threads discussing a specific feature: pattern="authentication"
+- See what users asked about: pattern="how do I"
+- Find error mentions: pattern="error"
+- Search specific user's conversations: pattern="bug", user_id="alice"
+
+Returns matching messages with thread context and branch info.""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "pattern": {"type": "string", "description": "Text pattern to search for (case-insensitive)"},
+                        "user_id": {"type": "string", "description": "Optional: filter to threads where user is owner/participant"},
+                        "limit": {"type": "integer", "description": "Max results to return (default: 20, max: 100)"}
+                    },
+                    "required": ["pattern"]
+                },
+                function=lambda args, cb=search_callback: _search_threads(cb, args)
+            ),
+            WikiTool(
+                name="thread_diff",
+                description="""Show differences between a thread branch and main. Quick way to see what changes a thread made.
+
+This is a convenience wrapper around git_diff specifically for threads.
+Use stat_only=true for a quick overview of which pages changed.
+
+The thread branch name is in the list_threads output.""",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "thread_branch": {"type": "string", "description": "Thread branch name (e.g., 'thread/fix-typos-abc123'). Get from list_threads."},
+                        "stat_only": {"type": "boolean", "description": "If true, show only statistics. If false, show full diff (default: false)"}
+                    },
+                    "required": ["thread_branch"]
+                },
+                function=lambda args, w=wiki: _thread_diff(w, args)
             )
         ]
 
