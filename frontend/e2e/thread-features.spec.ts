@@ -194,10 +194,8 @@ test.describe('Thread Features', () => {
 
       // In the dropdown, each thread item should show participant badges
       // Participants include at least the owner (guest-xxxxx)
-      // Look for the colored badge element within the dropdown
-      const participantBadge = page.locator('[role="listbox"]').locator('span').filter({
-        hasText: /guest-/i
-      })
+      // Look for the colored badge element within the dropdown (has title attr with guest-)
+      const participantBadge = page.locator('[role="listbox"]').locator('div[title^="guest-"]')
       await expect(participantBadge.first()).toBeVisible({ timeout: 5000 })
     })
   })
@@ -219,10 +217,8 @@ test.describe('Thread Features', () => {
       await expect(selectorButton).toBeVisible({ timeout: 5000 })
       await selectorButton.click()
 
-      // Look for participant badge (guest-xxxxx colored span)
-      const participantBadge = page.locator('[role="listbox"]').locator('span').filter({
-        hasText: /guest-/i
-      })
+      // Look for participant badge (has title attr with guest-)
+      const participantBadge = page.locator('[role="listbox"]').locator('div[title^="guest-"]')
       await expect(participantBadge.first()).toBeVisible({ timeout: 5000 })
 
       // Close dropdown
