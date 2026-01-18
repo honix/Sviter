@@ -519,7 +519,7 @@ class ThreadManager:
 
         try:
             name = message_data.get("name", "").strip()
-            initial_message = message_data.get("goal", "").strip()  # User's message
+            initial_message = message_data.get("first_message", "").strip()  # User's message
             participants = list(message_data.get("participants", []))  # Copy to avoid mutation
 
             logger.info(f"Spawning thread: name={name}, initial_message={initial_message[:50]}...")

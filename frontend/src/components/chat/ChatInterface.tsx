@@ -174,7 +174,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ threadId, thread }) => {
     console.log('🚀 Sending spawn_collaborative_thread:', messageToSend.slice(0, 50));
     websocket.sendMessage({
       type: 'spawn_collaborative_thread',
-      goal: messageToSend
+      first_message: messageToSend
     });
     setInputValue('');
 

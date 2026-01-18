@@ -139,7 +139,7 @@ export function ThreadSelector({
     websocket.sendMessage({
       type: 'spawn_collaborative_thread',
       name: 'new-thread',
-      goal: 'This is a new thread. Please describe what you want to work on. The agent will rename this thread once the goal is clear.'
+      first_message: 'This is a new thread. Please describe what you want to work on. The agent will rename this thread once the goal is clear.'
     });
 
     // Timeout fallback - clear loading if thread_selected never arrives
