@@ -329,6 +329,11 @@
   display: block;
 }
 
+/* Dark theme - invert diagram colors for readability */
+.dark .mermaid-block.mermaid-view-mode .mermaid-diagram svg {
+  filter: invert(1) hue-rotate(180deg);
+}
+
 /* Edit mode - code block with label */
 .mermaid-block.mermaid-edit-mode pre {
   position: relative;
