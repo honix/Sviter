@@ -7,6 +7,7 @@ Mixins add specific capabilities to Thread classes:
 - BranchMixin: Git branch/worktree management
 - EditToolsMixin: Page editing tools
 - ReviewMixin: Thread info tools (get/set status and name) + accept workflow
+- ThreadAgentToolsMixin: Thread analysis tools (list_threads, read_thread, search_threads, thread_diff)
 """
 
 from typing import List, Dict, Any, Optional, Callable, TYPE_CHECKING
@@ -15,7 +16,12 @@ from pathlib import Path
 from ai.tools import ToolBuilder, WikiTool
 from threads import git_operations as git_ops
 from threads.accept_result import AcceptResult
-from db import update_thread as db_update_thread
+from db import (
+    update_thread as db_update_thread,
+    get_thread as db_get_thread,
+    get_thread_messages as db_get_thread_messages,
+    search_thread_messages as db_search_thread_messages,
+)
 
 if TYPE_CHECKING:
     from storage.git_wiki import GitWiki
@@ -255,6 +261,46 @@ class ReviewMixin:
             self.status = status
         db_update_thread(self.id, name=name, status=status if status else self.status)
 
-    def prepare_callbacks(self, broadcast_fn=None, **kwargs) -> Dict[str, Any]:
+    def prepare_callbacks(self, broadcast_fn=None, list_callback=None, **kwargs) -> Dict[str, Any]:
         """Prepare callbacks for worker thread tools."""
-        return {"broadcast_fn": broadcast_fn}
+        result = {"broadcast_fn": broadcast_fn}
+        # Pass through list_callback for thread agent tools
+        if list_callback:
+            result["list_threads_callback"] = list_callback
+        return result
+
+
+class ThreadAgentToolsMixin:
+    """
+    Adds thread analysis and search tools.
+
+    Tools: list_threads (filtered), read_thread, search_threads, thread_diff
+    Used by both assistant and worker threads to analyze thread history and find information.
+    """
+
+    def get_tools(self, wiki: 'GitWiki', list_threads_callback: Callable = None, **kwargs) -> List[WikiTool]:
+        """Add thread agent tools to the tool list."""
+        parent_tools = super().get_tools(
+            wiki, **kwargs) if hasattr(super(), 'get_tools') else []
+
+        if list_threads_callback is None:
+            # Can't add thread tools without callbacks
+            return parent_tools
+
+        # Create callbacks for thread tools
+        def get_thread_callback(thread_id: str) -> Optional[Dict[str, Any]]:
+            return db_get_thread(thread_id)
+
+        def get_messages_callback(thread_id: str, limit: int, offset: int) -> List[Dict[str, Any]]:
+            return db_get_thread_messages(thread_id, limit, offset)
+
+        def search_callback(pattern: str, user_filter: Optional[str]) -> List[Dict[str, Any]]:
+            return db_search_thread_messages(pattern, user_filter)
+
+        return parent_tools + ToolBuilder.thread_agent_tools(
+            get_thread_callback=get_thread_callback,
+            get_messages_callback=get_messages_callback,
+            list_threads_callback=list_threads_callback,
+            search_callback=search_callback,
+            wiki=wiki
+        )

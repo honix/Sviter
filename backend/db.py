@@ -914,3 +914,64 @@ def get_pinned_thread_count(user_id: str) -> int:
             (user_id,)
         ).fetchone()
         return row['count'] if row else 0
+
+
+def search_thread_messages(pattern: str, user_filter: str = None, limit: int = 100) -> List[dict]:
+    """
+    Search across all thread messages for a pattern.
+
+    Args:
+        pattern: Text pattern to search for (case-insensitive)
+        user_filter: Optional user_id to filter threads by (owner or participant)
+        limit: Maximum number of results (default: 100)
+
+    Returns:
+        List of dicts with thread and message info
+    """
+    with get_connection() as conn:
+        if user_filter:
+            # Filter by threads where user is owner or participant
+            query = """
+                SELECT
+                    tm.id as message_id,
+                    tm.thread_id,
+                    tm.role,
+                    tm.content,
+                    tm.user_id,
+                    tm.created_at,
+                    t.name as thread_name,
+                    t.branch as thread_branch,
+                    t.status as thread_status,
+                    ROW_NUMBER() OVER (PARTITION BY tm.thread_id ORDER BY tm.created_at ASC, tm.rowid ASC) as message_number
+                FROM thread_messages tm
+                JOIN threads t ON tm.thread_id = t.id
+                LEFT JOIN thread_shares ts ON t.id = ts.thread_id
+                WHERE tm.content LIKE ?
+                  AND (t.owner_id = ? OR ts.user_id = ?)
+                ORDER BY tm.created_at DESC
+                LIMIT ?
+            """
+            rows = conn.execute(query, (f"%{pattern}%", user_filter, user_filter, limit)).fetchall()
+        else:
+            # No user filter - search all threads
+            query = """
+                SELECT
+                    tm.id as message_id,
+                    tm.thread_id,
+                    tm.role,
+                    tm.content,
+                    tm.user_id,
+                    tm.created_at,
+                    t.name as thread_name,
+                    t.branch as thread_branch,
+                    t.status as thread_status,
+                    ROW_NUMBER() OVER (PARTITION BY tm.thread_id ORDER BY tm.created_at ASC, tm.rowid ASC) as message_number
+                FROM thread_messages tm
+                JOIN threads t ON tm.thread_id = t.id
+                WHERE tm.content LIKE ?
+                ORDER BY tm.created_at DESC
+                LIMIT ?
+            """
+            rows = conn.execute(query, (f"%{pattern}%", limit)).fetchall()
+
+        return [dict(row) for row in rows]

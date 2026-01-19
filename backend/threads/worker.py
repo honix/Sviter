@@ -18,7 +18,7 @@ import uuid
 import re
 
 from threads.base import Thread, ThreadType, TERMINAL_STATUSES
-from threads.mixins import ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin
+from threads.mixins import ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, ThreadAgentToolsMixin
 from ai.prompts import THREAD_PROMPT
 from ai.tools import WikiTool
 from db import (
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thread):
+class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, ThreadAgentToolsMixin, Thread):
     """
     Worker thread with full wiki access.
 
@@ -169,13 +169,15 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
         """Get system prompt for worker."""
         return THREAD_PROMPT.format(branch=self.branch or "")
 
-    def get_tools(self, wiki: 'GitWiki' = None, broadcast_fn: Callable = None, **kwargs) -> List[WikiTool]:
+    def get_tools(self, wiki: 'GitWiki' = None, broadcast_fn: Callable = None,
+                  list_threads_callback: Callable = None, **kwargs) -> List[WikiTool]:
         """
-        Get tools for worker: read + edit + thread info.
+        Get tools for worker: read + edit + thread info + thread agent tools.
 
         Args:
             wiki: GitWiki instance (should be this thread's worktree wiki)
             broadcast_fn: Function to broadcast messages
+            list_threads_callback: Callback to list threads for thread agent tools
 
         Returns:
             List of WikiTool instances
@@ -187,7 +189,12 @@ class WorkerThread(ReadToolsMixin, BranchMixin, EditToolsMixin, ReviewMixin, Thr
                 return []
 
         # Use mixin chain to get tools
-        return super().get_tools(wiki, broadcast_fn=broadcast_fn, **kwargs)
+        return super().get_tools(
+            wiki,
+            broadcast_fn=broadcast_fn,
+            list_threads_callback=list_threads_callback,
+            **kwargs
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
