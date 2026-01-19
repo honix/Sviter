@@ -840,16 +840,14 @@ const CenterPanel: React.FC = () => {
                     className="h-full"
                   />
                 ) : (
-                  <div className="h-full p-4">
-                    <ProseMirrorEditor
-                      key={`md-view-${currentPage.path}-${currentBranch}-${pageUpdateCounter}`}
-                      initialContent={currentPage.content || ''}
-                      editable={false}
-                      onLinkClick={handleWikiLinkClick}
-                      className="h-full"
-                      pagePath={currentPage.path}
-                    />
-                  </div>
+                  <ProseMirrorEditor
+                    key={`md-view-${currentPage.path}-${currentBranch}-${pageUpdateCounter}`}
+                    initialContent={currentPage.content || ''}
+                    editable={false}
+                    onLinkClick={handleWikiLinkClick}
+                    className="h-full"
+                    pagePath={currentPage.path}
+                  />
                 )}
               </BranchProvider>
             </div>
