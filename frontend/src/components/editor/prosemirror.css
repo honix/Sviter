@@ -301,3 +301,107 @@
   outline: 2px solid hsl(var(--primary));
   outline-offset: 2px;
 }
+
+/* ========================================
+   Mermaid Diagram Styles
+   ======================================== */
+
+/* Wrapper container for mermaid blocks */
+.mermaid-block {
+  margin: 1.5em 0;
+  position: relative;
+}
+
+/* View mode - rendered diagram */
+.mermaid-block.mermaid-view-mode {
+  overflow-x: auto;
+}
+
+.mermaid-block.mermaid-view-mode .mermaid-diagram {
+  background-color: hsl(var(--muted) / 0.3);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  width: fit-content;
+  margin: 0 auto;
+}
+
+.mermaid-block.mermaid-view-mode .mermaid-diagram svg {
+  display: block;
+}
+
+/* Edit mode - code block with label */
+.mermaid-block.mermaid-edit-mode pre {
+  position: relative;
+  background-color: hsl(var(--muted));
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin: 0;
+}
+
+.mermaid-block.mermaid-edit-mode pre code {
+  background-color: transparent;
+  padding: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.875em;
+  line-height: 1.7142857;
+}
+
+.mermaid-block.mermaid-edit-mode .mermaid-label {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.5rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: hsl(var(--muted-foreground) / 0.7);
+  background-color: hsl(var(--background) / 0.8);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  pointer-events: none;
+}
+
+/* Selection state */
+.mermaid-block.ProseMirror-selectednode {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+/* Error state */
+.mermaid-block .mermaid-error {
+  background-color: hsl(var(--destructive) / 0.1);
+  border: 1px solid hsl(var(--destructive) / 0.3);
+  padding: 1rem;
+}
+
+.mermaid-block .mermaid-error-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: hsl(var(--destructive));
+  font-weight: 500;
+}
+
+.mermaid-block .mermaid-error-icon {
+  font-size: 1.25rem;
+}
+
+.mermaid-block .mermaid-error-text {
+  font-size: 0.875rem;
+}
+
+.mermaid-block .mermaid-error-details {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background-color: hsl(var(--muted) / 0.5);
+  border-radius: 0.25rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 8rem;
+  overflow-y: auto;
+}

@@ -48,6 +48,28 @@ function getImageUrl(src: string): string {
   return `${getApiUrl()}/api/assets/${encodeURIComponent(resolvedPath).replace(/%2F/g, '/')}`;
 }
 
+// Code block node specification with language params (for mermaid, etc.)
+const codeBlockNodeSpec: NodeSpec = {
+  content: 'text*',
+  marks: '',
+  group: 'block',
+  code: true,
+  defining: true,
+  attrs: {
+    params: { default: '' }  // Language identifier (e.g., "mermaid", "javascript")
+  },
+  parseDOM: [{
+    tag: 'pre',
+    preserveWhitespace: 'full',
+    getAttrs: (node) => ({
+      params: (node as HTMLElement).getAttribute('data-language') || ''
+    })
+  }],
+  toDOM(node) {
+    return ['pre', { 'data-language': node.attrs.params }, ['code', 0]];
+  }
+};
+
 // Image node specification
 const imageNodeSpec: NodeSpec = {
   inline: true,
@@ -97,8 +119,12 @@ const tableNodeSpecs = tableNodes({
   },
 });
 
+// Build custom nodes using basicSchema.spec.nodes but with our custom code_block
+// Start with basic nodes and replace code_block with our custom one
+const customNodes = basicSchema.spec.nodes.update('code_block', codeBlockNodeSpec);
+
 // Combine basic nodes + list nodes + table nodes + image node
-const nodesWithLists = addListNodes(basicSchema.spec.nodes, 'paragraph block*', 'block');
+const nodesWithLists = addListNodes(customNodes, 'paragraph block*', 'block');
 const nodesWithImages = nodesWithLists.addBefore('text', 'image', imageNodeSpec);
 const schemaSpec = {
   nodes: nodesWithImages.append(tableNodeSpecs),
