@@ -17,6 +17,7 @@ import { ImagePlus, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { schema, setCurrentPagePath } from '../../editor/schema';
+import { createMermaidNodeView } from '../../editor/nodeviews/MermaidNodeView';
 import { useAppDnd } from '../../contexts/DndContext';
 import type { DragItemData } from '../../contexts/DndContext';
 import { buildKeymap } from '../../editor/keymap';
@@ -435,10 +436,13 @@ export const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({
         ],
       });
 
-      // Create editor view
+      // Create editor view with mermaid NodeView
       view = new EditorView(editorRef.current, {
         state,
         editable: () => editableRef.current,
+        nodeViews: {
+          code_block: createMermaidNodeView(() => editableRef.current),
+        },
       });
 
       viewRef.current = view;

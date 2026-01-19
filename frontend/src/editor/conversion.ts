@@ -86,6 +86,15 @@ export const markdownSerializer = new MarkdownSerializer(
       state.renderInline(node);
       state.closeBlock(node);
     },
+    // Code block with language params (for mermaid, etc.)
+    code_block(state, node) {
+      const params = node.attrs.params || '';
+      state.write('```' + params + '\n');
+      state.text(node.textContent, false);
+      state.ensureNewLine();
+      state.write('```');
+      state.closeBlock(node);
+    },
     // Image serialization to markdown format
     // Use angle brackets for paths with spaces: ![alt](<path with spaces>)
     image(state, node) {

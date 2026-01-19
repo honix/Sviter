@@ -9,6 +9,7 @@ import { tableEditing } from 'prosemirror-tables';
 import { schema, setCurrentPagePath } from '../../editor/schema';
 import { markdownToProseMirror, prosemirrorToMarkdown } from '../../editor/conversion';
 import { buildKeymap } from '../../editor/keymap';
+import { createMermaidNodeView } from '../../editor/nodeviews/MermaidNodeView';
 import { useWikiLinks } from '../../hooks/useWikiLinks';
 import './prosemirror.css';
 
@@ -31,6 +32,8 @@ export const ProseMirrorEditor = forwardRef<ProseMirrorEditorHandle, ProseMirror
     const editorRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
     const initializedRef = useRef(false);
+    const editableRef = useRef(editable);
+    editableRef.current = editable;
 
     // Expose the EditorView to parent components
     useImperativeHandle(ref, () => ({
@@ -81,10 +84,13 @@ export const ProseMirrorEditor = forwardRef<ProseMirrorEditorHandle, ProseMirror
         ],
       });
 
-      // Create editor view
+      // Create editor view with mermaid NodeView
       const view = new EditorView(editorRef.current, {
         state,
-        editable: () => editable,
+        editable: () => editableRef.current,
+        nodeViews: {
+          code_block: createMermaidNodeView(() => editableRef.current),
+        },
         dispatchTransaction(transaction: Transaction) {
           const newState = view.state.apply(transaction);
           view.updateState(newState);
@@ -117,7 +123,9 @@ export const ProseMirrorEditor = forwardRef<ProseMirrorEditorHandle, ProseMirror
     useEffect(() => {
       if (viewRef.current) {
         // Force update to apply new editable state
-        viewRef.current.setProps({ editable: () => editable });
+        viewRef.current.setProps({ editable: () => editableRef.current });
+        // Trigger a view update so NodeViews re-render with new editable state
+        viewRef.current.updateState(viewRef.current.state);
       }
     }, [editable]);
 

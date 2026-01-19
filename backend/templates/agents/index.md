@@ -13,6 +13,7 @@ You can edit it but keep this page structure unchanged.
 - **agents/** - Agent configuration and wiki metadata (this folder)
   - `index.md` - Navigation hub (you are here)
   - `data-views.md` - Reference for TSX views and CSV data
+  - `mermaid-diagrams.md` - Mermaid diagram examples and syntax
   - `examples/` - Working code examples
   - `components/` - Reusable TSX components
 
