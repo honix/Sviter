@@ -911,8 +911,8 @@ class GitWiki:
                         print(f"Warning: Failed to parse {entry}: {e}")
                         continue
 
-            # Sort alphabetically by title (filename)
-            items.sort(key=lambda x: x["title"].lower())
+            # Sort folders first, then pages, both alphabetically by title
+            items.sort(key=lambda x: (x["type"] != "folder", x["title"].lower()))
             return items
 
         return build_tree(self.repo_path)
@@ -1528,7 +1528,9 @@ class GitWiki:
             # Convert dict to list recursively
             def dict_to_list(d: Dict) -> List[Dict]:
                 items = []
-                for key, item in sorted(d.items()):
+                # Sort folders first, then pages, both alphabetically by title
+                sorted_items = sorted(d.items(), key=lambda x: (x[1].get("type") != "folder", x[1].get("title", "").lower()))
+                for key, item in sorted_items:
                     if item.get("type") == "folder":
                         children = dict_to_list(item.pop("_children", {}))
                         item["children"] = children
