@@ -1255,7 +1255,7 @@ After moving/renaming, consider updating agents/index.md navigation entries.""",
         """
         return [
             WikiTool(
-                name="list_threads",
+                name="list_threads_filtered",
                 description="""List threads with optional filters. Use this to find relevant threads and see what work has been done.
 
 Use cases:

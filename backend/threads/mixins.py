@@ -7,7 +7,7 @@ Mixins add specific capabilities to Thread classes:
 - BranchMixin: Git branch/worktree management
 - EditToolsMixin: Page editing tools
 - ReviewMixin: Thread info tools (get/set status and name) + accept workflow
-- ThreadAgentToolsMixin: Thread analysis tools (list_threads, read_thread, search_threads, thread_diff)
+- ThreadAgentToolsMixin: Thread analysis tools (list_threads_filtered, read_thread, search_threads, thread_diff)
 """
 
 from typing import List, Dict, Any, Optional, Callable, TYPE_CHECKING
@@ -274,7 +274,7 @@ class ThreadAgentToolsMixin:
     """
     Adds thread analysis and search tools.
 
-    Tools: list_threads (filtered), read_thread, search_threads, thread_diff
+    Tools: list_threads_filtered, read_thread, search_threads, thread_diff
     Used by both assistant and worker threads to analyze thread history and find information.
     """
 
