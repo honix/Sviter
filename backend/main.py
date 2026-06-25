@@ -726,11 +726,20 @@ async def root():
     }
 
 if __name__ == "__main__":
+    import sys
+
+    # On Windows, uvicorn's --reload forces a SelectorEventLoop (even in the
+    # worker process), which can't spawn subprocesses. That breaks the Claude
+    # Code CLI subprocess the chat adapter launches. Force ProactorEventLoop
+    # so reload and subprocess-based tools both work.
+    loop = "asyncio:ProactorEventLoop" if sys.platform == "win32" else "auto"
+
     # Run the server
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,
+        loop=loop,
         log_level="info"
     )
